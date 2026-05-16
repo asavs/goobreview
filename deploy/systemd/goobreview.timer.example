@@ -1,0 +1,12 @@
+[Unit]
+Description=Run GoobReview PR reviewer every minute
+Documentation=https://github.com/asavschaeffer/goobreview
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

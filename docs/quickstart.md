@@ -110,7 +110,15 @@ REVIEWER_DRY_RUN=1 REVIEWER_ONLY_PR=123 REVIEWER_USER=nobody REVIEWER_MAX_PRS=1 
 
 Remove `REVIEWER_DRY_RUN=1` only when you intentionally want to post a real review.
 
-## 8. Enable Cron
+## 8. Enable A Scheduler
+
+Use systemd when you control the VM and want better logs/status:
+
+- [systemd-timer.md](systemd-timer.md)
+
+Use cron when you want the simplest possible scheduler.
+
+### Cron
 
 Edit the reviewer's crontab:
 

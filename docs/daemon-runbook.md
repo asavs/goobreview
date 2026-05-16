@@ -47,6 +47,17 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 `run-once.sh` loads `config/reviewer.env`, syncs the template checkout, then runs one reviewer tick.
 
+## Systemd Timer
+
+For a more durable VM setup, use the example unit files under `deploy/systemd/`:
+
+```text
+deploy/systemd/goobreview.service.example
+deploy/systemd/goobreview.timer.example
+```
+
+See [systemd-timer.md](systemd-timer.md) for install, logging, and multi-reviewer setup.
+
 ## What The Reviewer Does
 
 1. Acquires a non-blocking `flock`.

@@ -63,7 +63,11 @@ docs/
   vm-setup.md
   project-configuration.md
   daemon-runbook.md
+  systemd-timer.md
   publish-template-repo.md
+deploy/systemd/
+  goobreview.service.example
+  goobreview.timer.example
 ```
 
 ## Safety Model
