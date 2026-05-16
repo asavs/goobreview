@@ -1,0 +1,6 @@
+# Extra PR-head files fetched for reference validation when present.
+# Use exact repository paths. Wildcards are not expanded.
+README.md
+CONTRIBUTING.md
+AGENTS.md
+.github/workflows/ci.yml

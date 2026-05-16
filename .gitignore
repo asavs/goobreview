@@ -1,0 +1,6 @@
+config/reviewer.env
+config/required-checks.json
+config/project-docs.txt
+config/head-context-paths.txt
+*.log
+.DS_Store
