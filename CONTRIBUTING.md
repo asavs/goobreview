@@ -20,51 +20,32 @@ git diff --check
 
 ## Forks And Reviewer Personalities
 
-Forks are encouraged. The cleanest way to create a different reviewer personality or skillset is to change:
+Forks are encouraged. The reviewer is designed to be specialized through
+**config files**, not by editing scripts. To change personality, edit (in
+order of impact):
 
-- `scripts/reviewer/review-prompt.md` for tone, severity policy, output format, and specialty.
-- `config/project-docs.example.txt` for the project standards each review should enforce.
-- `config/head-context-paths.example.txt` for extra files the reviewer should inspect.
-- `config/required-checks.example.json` for CI gates.
+1. `config/personality.example.md` — role, focus areas, severity policy. The file already includes fork themes you can adapt: security-focused, frontend accessibility, infrastructure/deployment, test coverage, language-specific, documentation accuracy.
+2. `config/project-docs.example.txt` — repo paths whose contents the reviewer should treat as your house standards.
+3. `config/head-context-paths.example.txt` — extra files the reviewer should fetch to ground itself against PR-head reality.
+4. `config/required-checks.example.json` — CI gates that must pass before the reviewer calls Gemini.
 
-Good fork themes:
+Edit the `.example.*` siblings in your fork. End users will copy them to
+their non-example names with `scripts/configure.sh`.
 
-- Security-focused reviewer.
-- Frontend accessibility reviewer.
-- Infrastructure/deployment reviewer.
-- Test coverage reviewer.
-- Language-specific reviewer for Rust, Python, TypeScript, Go, or Java.
-- Documentation accuracy reviewer.
+Keep forks honest about scope. If a reviewer is specialized, make
+`personality.md` say what it is good at and when it should use `COMMENT`
+instead of pretending to approve or block.
 
-Keep forks honest about scope. If a reviewer is specialized, make the prompt say what it is good at and when it should use `COMMENT` instead of pretending to approve or block.
+The engine prompt at `scripts/reviewer/review-prompt.md` owns the
+verdict-line format and `REVIEW_META` JSON block that `reviewer.sh`
+parses. Don't edit it unless you are intentionally changing the engine's
+output contract.
 
 ### Personalizing A Fork
 
 Click **Use this template** on GitHub rather than **Fork**: it creates a fresh repo with full ownership, and `.github/workflows/template-cleanup.yml` runs once on the first push to rewrite every `asavschaeffer/goobreview` reference (Cloud Shell button URL, bootstrap script, clone URL) to your new `owner/repo`. After that first commit, the workflow becomes a self-suppressing no-op.
 
 If you fork instead, the cleanup workflow won't fire until a push to `main`. Either make an empty commit or run a one-time `sed -i "s|asavschaeffer/goobreview|YOUR/REPO|g"` across `*.md`, `*.sh`, and `*.yml`.
-
-## Prompt Contract
-
-`reviewer.sh` expects Gemini to emit:
-
-```text
-VERDICT: APPROVE
-```
-
-or:
-
-```text
-VERDICT: REQUEST_CHANGES
-```
-
-or:
-
-```text
-VERDICT: COMMENT
-```
-
-The optional `REVIEW_META` block must stay valid JSON. Inline comments only work when metadata findings include a repository `path` and a right-side changed `line`.
 
 ## Safety Rules
 

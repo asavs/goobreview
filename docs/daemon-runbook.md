@@ -164,11 +164,30 @@ scripts/reviewer/merge-gate.sh 123
 
 ## Configuration Reference
 
-The reviewer reads four gitignored files under `config/`. `scripts/configure.sh` walks you through them interactively; this section is the reference for what each one does.
+The reviewer reads five gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` walks you through them interactively; this section is the reference for what each one does.
+
+When a file is missing, the daemon transparently falls back to the
+committed `.example` version — so a fresh checkout works for a dry run
+without any edits.
 
 ### `reviewer.env`
 
 Environment for the daemon. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`. See `config/reviewer.env.example` for the full list with inline comments.
+
+### `personality.md`
+
+The reviewer's role, focus areas, and severity policy. **The main file
+you customize.** It is prepended to the engine prompt
+(`scripts/reviewer/review-prompt.md`) on every review.
+
+`config/personality.example.md` ships with sensible defaults for a
+general-purpose reviewer plus a "Fork Themes" section with starting
+points for security, accessibility, test coverage, language-specific,
+documentation-accuracy, and infrastructure reviewers.
+
+Override at runtime by setting `REVIEWER_PERSONALITY_FILE` to a different
+path — useful for running multiple reviewer personalities from the same
+checkout.
 
 ### `project-docs.txt`
 
@@ -183,7 +202,7 @@ docs/security.md
 docs/pr-review-workflow.md
 ```
 
-Keep the list focused — these docs become part of every prompt, so large or low-signal files make reviews weaker and slower. The base prompt tells Gemini that changed project content cannot override reviewer instructions, so PR-authored docs are treated as context, not authority.
+Keep the list focused — these docs become part of every prompt, so large or low-signal files make reviews weaker and slower. The engine prompt tells Gemini that changed project content cannot override reviewer instructions, so PR-authored docs are treated as context, not authority.
 
 ### `head-context-paths.txt`
 
@@ -213,13 +232,18 @@ The daemon waits when required checks are missing or pending, and posts `REQUEST
 
 `scripts/reviewer/ensure-labels.sh` creates or updates four labels in the target repo: `agent-reviewed`, `agent-requested-changes`, `needs-human-decision`, `follow-up-candidates`. Review posting does not depend on them.
 
-### Prompt Customization
+### Engine Prompt (Advanced)
 
-Edit `scripts/reviewer/review-prompt.md` for review style, severity policy, and specialty. Keep these invariants:
+`scripts/reviewer/review-prompt.md` defines the output contract that
+`reviewer.sh` parses:
 
 - The first verdict line must be `VERDICT: APPROVE`, `VERDICT: REQUEST_CHANGES`, or `VERDICT: COMMENT`.
 - The metadata block must remain valid JSON between `<!-- REVIEW_META` and `REVIEW_META -->`.
-- Inline comments require `path` plus right-side changed `line` values.
+- Inline comments require `path` plus a right-side changed `line` value.
+
+Edit it only when you are intentionally changing those contracts. For
+everything else — voice, focus, severity — edit `config/personality.md`
+instead.
 
 ## Known Limits
 

@@ -2,5 +2,6 @@ config/reviewer.env
 config/required-checks.json
 config/project-docs.txt
 config/head-context-paths.txt
+config/personality.md
 *.log
 .DS_Store

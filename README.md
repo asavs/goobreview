@@ -25,10 +25,10 @@ Either path leaves you with a provisioned VM and dependencies installed. To fini
 The intended setup is:
 
 1. Clone this template onto a small Linux VM.
-2. Configure the target GitHub repository and the project docs the reviewer should read.
+2. Configure the target GitHub repository, the reviewer's personality, and the project docs it should read (see [Customizing The Reviewer](#customizing-the-reviewer) below).
 3. Register a GitHub App and install it on the target repo. The App is the reviewer identity — see [docs/github-app-setup.md](docs/github-app-setup.md).
 4. Authenticate Gemini CLI with the Google account you want to use, including Google AI Pro or Ultra accounts where available.
-5. Run the reviewer from cron.
+5. Run the reviewer from cron or a systemd timer.
 
 The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews under a clearly-bot login (`<your-app>[bot]`) without burning a second GitHub user account or org seat. It can also add inline comments, update a managed PR checklist, and re-review every new PR head commit.
 
@@ -63,36 +63,60 @@ The agent should follow:
 ## Repository Layout
 
 ```text
-config/
-  reviewer.env.example      Example environment file for the target repo.
-  required-checks.example.json      Example required GitHub check-run names.
-  project-docs.example.txt          Example review docs fetched from the PR head.
-  head-context-paths.example.txt    Example extra files fetched for validation.
+config/                              Per-deployment files. *.example.* ships;
+                                     the non-example copy is gitignored.
+  personality.example.md             Reviewer role, focus, severity policy.
+                                     The main file you customize.
+  project-docs.example.txt           Repo paths fetched from the PR head and
+                                     pasted into every review prompt.
+  head-context-paths.example.txt     Extra files fetched for reference validation
+                                     (package.json, ci.yml, etc.).
+  required-checks.example.json       GitHub check-run names that gate review posting.
+  reviewer.env.example               Runtime env: target repo, App credentials,
+                                     state dir, Gemini model.
+
 scripts/
-  bootstrap-gcp.sh          One-shot Cloud Shell provisioner: creates the VM and runs setup-vm.sh on it.
-  setup-vm.sh               Installs gh, Node, Gemini CLI, and clones the template. Runs on the VM.
-scripts/
-  configure.sh              On-VM interactive setup for config/ and App credentials.
-scripts/reviewer/
-  reviewer.sh               Poll, prompt Gemini, and post reviews.
-  get-installation-token.sh Mint/cache a GitHub App installation token (also prints App slug).
-  lib/app-token.mjs         Node helper: signs JWT, fetches /app, mints token.
-  run-once.sh               Load config, sync checkout, run one review tick.
-  sync-worktree.sh          Keep this checkout detached at the configured branch.
-  check-ci.sh               Required check-run gate.
-  ensure-labels.sh          Optional label setup.
-  merge-gate.sh             Mechanical pre-merge checks.
-  review-prompt.md          Base reviewer prompt.
+  bootstrap-gcp.sh                   Cloud Shell provisioner: creates the VM,
+                                     runs setup-vm.sh on it.
+  setup-vm.sh                        Installs gh, Node, Gemini CLI; clones the
+                                     template. Runs on the VM.
+  configure.sh                       On-VM interactive setup for config/ and
+                                     App credentials.
+  reviewer/
+    reviewer.sh                      Poll, prompt Gemini, post reviews.
+    review-prompt.md                 Engine prompt (output contract, validation
+                                     rules). Edit personality.md instead.
+    run-once.sh                      Load env, sync checkout, run one tick.
+    sync-worktree.sh                 Keep the daemon checkout detached at
+                                     the configured branch.
+    check-ci.sh                      Required check-run gate.
+    merge-gate.sh                    Mechanical pre-merge checks.
+    ensure-labels.sh                 Optional helper-label setup.
+    get-installation-token.sh        Mint/cache a GitHub App installation token.
+    lib/app-token.mjs                Node helper: signs JWT, fetches /app, mints token.
+
 docs/
-  quickstart.md             5-minute end-to-end path.
-  github-app-setup.md       Register and install the GitHub App.
-  vm-setup.md               VM provisioning + tool install.
-  daemon-runbook.md         Operations reference: cron, systemd, config, prompt, limits.
-  cloud-shell-tutorial.md   In-Cloud-Shell walkthrough pane.
+  quickstart.md                      5-minute end-to-end path.
+  github-app-setup.md                Register and install the GitHub App.
+  vm-setup.md                        VM provisioning + tool install.
+  daemon-runbook.md                  Operations reference: cron, systemd,
+                                     config, prompt, limits.
+  cloud-shell-tutorial.md            In-Cloud-Shell walkthrough pane.
+
 deploy/systemd/
   goobreview.service.example
   goobreview.timer.example
 ```
+
+## Customizing The Reviewer
+
+Three ways to shape what your reviewer does, in order of impact:
+
+1. **`config/personality.md`** — role, focus areas, severity policy. Forking for security, accessibility, language-specific reviews, etc. happens here. The file includes example "fork themes" you can adapt.
+2. **`config/project-docs.txt`** — repository paths to fetch from the PR head and inline into every review prompt. Put your house style, architecture notes, and review standards here.
+3. **`config/head-context-paths.txt`** — extra files to fetch for reference validation (e.g. `package.json`, `.github/workflows/ci.yml`). The reviewer uses these to avoid hallucinating missing files or scripts.
+
+`scripts/configure.sh` walks you through copying the `.example` files and editing them. See [docs/daemon-runbook.md](docs/daemon-runbook.md#configuration-reference) for the full reference.
 
 ## Safety Model
 

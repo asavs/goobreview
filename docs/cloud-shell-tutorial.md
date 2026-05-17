@@ -64,7 +64,9 @@ Still on the VM, run the interactive helper:
 scripts/configure.sh
 ```
 
-It copies each of the four gitignored config files (`reviewer.env`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from their `.example` siblings, prompts for the target repo, and offers to open each file in `$EDITOR`.
+It copies each of the gitignored config files (`reviewer.env`, `personality.md`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from their `.example` siblings, prompts for the target repo, and offers to open each file in `$EDITOR`.
+
+`personality.md` is the most useful one to edit before your first dry run — it defines what kind of reviewer this is (general-purpose, security-focused, accessibility-focused, etc.). The example file ships with sensible defaults plus a "Fork Themes" section you can adapt.
 
 ## 5. Dry run, then enable the scheduler
 

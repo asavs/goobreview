@@ -149,8 +149,10 @@ if confirm "Open reviewer.env in $EDITOR_CMD to review other settings?"; then
   "$EDITOR_CMD" "$ENV_FILE"
 fi
 
-# --- Step 3: other three config files --------------------------------------
-for name in project-docs.txt head-context-paths.txt required-checks.json; do
+# --- Step 3: other config files --------------------------------------------
+# personality.md is listed first because it is the highest-value customization
+# point: it defines the reviewer's role, focus areas, and severity policy.
+for name in personality.md project-docs.txt head-context-paths.txt required-checks.json; do
   base="${name%.*}"
   ext="${name##*.}"
   example="$CONFIG_DIR/${base}.example.${ext}"

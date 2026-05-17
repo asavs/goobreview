@@ -43,9 +43,16 @@ Use the actual public template repo URL after publishing.
 scripts/configure.sh
 ```
 
-It copies all four config files from their `.example` siblings, prompts you for `REVIEWER_REPO`, the App ID, and the private key path, then auto-discovers the installation ID and writes everything to `config/reviewer.env`.
+It copies all five config files from their `.example` siblings, prompts you for `REVIEWER_REPO`, the App ID, and the private key path, then auto-discovers the installation ID and writes everything to `config/reviewer.env`.
 
-If you prefer to do it by hand, copy each `config/*.example.*` to its non-example name, edit `config/reviewer.env` to set `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, and `REVIEWER_APP_PRIVATE_KEY_PATH`, and edit the three other files to taste. The local config files are gitignored so `sync-worktree.sh` can keep the template checkout clean.
+If you prefer to do it by hand, copy each `config/*.example.*` to its non-example name, edit `config/reviewer.env` to set `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, and `REVIEWER_APP_PRIVATE_KEY_PATH`, and edit the other four files to taste. The local config files are gitignored so `sync-worktree.sh` can keep the template checkout clean.
+
+The single highest-value file to edit is **`config/personality.md`** — it
+defines your reviewer's role, focus areas, and severity policy. The
+example file ships with sensible general-purpose defaults plus a "Fork
+Themes" section (security-focused, accessibility, language-specific, etc.)
+that you can adapt by replacing the **Role**, **What To Look For**, and
+**Severity Policy** sections.
 
 If you do not know the required check-run names yet, leave `config/required-checks.json` as `[]` for the first dry run, then fill it with exact GitHub check-run display names before normal operation.
 
