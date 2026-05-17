@@ -4,6 +4,24 @@ An end-to-end pull request reviewer template powered by Gemini CLI and GitHub.
 
 GoobReview is designed for users who want to point a Google AI Pro-backed Gemini CLI setup at their repository and get real GitHub PR reviews from a reviewer identity. It turns a small VM into a durable review daemon that reads your project docs, waits for CI, reviews non-draft PRs, and posts `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews.
 
+## One-Click Setup On Google Cloud
+
+[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/asavschaeffer/goobreview&cloudshell_tutorial=docs/cloud-shell-tutorial.md)
+
+Click the button to open this repo in [Google Cloud Shell](https://cloud.google.com/shell). Cloud Shell is a browser terminal with `gcloud` already authenticated to your Google account — no local installs needed. The tutorial pane will walk you through running `scripts/bootstrap-gcp.sh`, which prompts for project / zone / VM name and then provisions everything else automatically.
+
+Prefer to paste a command? In any Cloud Shell session:
+
+```bash
+git clone https://github.com/asavschaeffer/goobreview.git && bash goobreview/scripts/bootstrap-gcp.sh
+```
+
+Either path leaves you with a provisioned VM and dependencies installed; two browser OAuth steps (`gh auth login` and `gemini`) still happen on the VM at the end.
+
+> Want your own copy to customize? Click **Use this template** at the top of this repo on GitHub. A first-push workflow (`.github/workflows/template-cleanup.yml`) auto-personalizes the Cloud Shell button, bootstrap script, and clone URL to point at your new repo.
+
+## Manual Setup
+
 The intended setup is:
 
 1. Clone this template onto a small Linux VM.
@@ -50,6 +68,9 @@ config/
   required-checks.example.json      Example required GitHub check-run names.
   project-docs.example.txt          Example review docs fetched from the PR head.
   head-context-paths.example.txt    Example extra files fetched for validation.
+scripts/
+  bootstrap-gcp.sh          One-shot Cloud Shell provisioner: creates the VM and runs setup-vm.sh on it.
+  setup-vm.sh               Installs gh, Node, Gemini CLI, and clones the template. Runs on the VM.
 scripts/reviewer/
   reviewer.sh               Poll, prompt Gemini, and post reviews.
   run-once.sh               Load config, sync checkout, run one review tick.
@@ -59,6 +80,7 @@ scripts/reviewer/
   merge-gate.sh             Mechanical pre-merge checks.
   review-prompt.md          Base reviewer prompt.
 docs/
+  cloud-shell-tutorial.md
   quickstart.md
   vm-setup.md
   project-configuration.md

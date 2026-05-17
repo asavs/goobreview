@@ -28,6 +28,14 @@ gh repo create YOUR_ACCOUNT/goobreview \
 
 Then enable "Template repository" in GitHub repository settings.
 
+## How Forks Personalize Themselves
+
+This repo ships with `.github/workflows/template-cleanup.yml`, which runs once on the first push to `main` of any repo created via "Use this template". It rewrites every `asavschaeffer/goobreview` reference in `*.md`, `*.sh`, and `*.yml` to the new `owner/repo`, then commits. After that first commit, the workflow becomes a self-suppressing no-op (no matches → no diff → no commit).
+
+If you are *forking* (rather than using the template), the workflow won't fire automatically until a push to `main`. You can either trigger it with an empty commit, or run `scripts/personalize.sh OWNER/REPO` (if present) locally.
+
+The upstream repo itself is guarded by `if: github.repository != 'asavschaeffer/goobreview'`, so the job is skipped on upstream pushes.
+
 ## Keep Private Details Out
 
 Before publishing, check:

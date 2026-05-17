@@ -1,0 +1,57 @@
+name: Template cleanup
+
+# Runs once on the first push to `main` of any repo created from this template
+# via "Use this template" on GitHub. Rewrites hardcoded references to the
+# upstream `asavschaeffer/goobreview` repo so the new repo's README button,
+# bootstrap script, and setup-vm script all point at itself.
+#
+# Becomes a no-op after the first run (no remaining matches → no commit).
+# The job is also skipped on the upstream template repo itself.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.repository != 'asavschaeffer/goobreview'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Replace upstream references with this repo
+        env:
+          NEW_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(grep -rl 'asavschaeffer/goobreview' \
+            --include='*.md' \
+            --include='*.sh' \
+            --include='*.yml' \
+            . || true)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "Nothing to personalize."
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            sed -i "s|asavschaeffer/goobreview|${NEW_REPO}|g" "$f"
+          done
+          echo "Personalized ${#files[@]} file(s)."
+
+      - name: Commit personalization
+        env:
+          NEW_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git add -A
+          git commit -m "Personalize template for ${NEW_REPO}"
+          git push
