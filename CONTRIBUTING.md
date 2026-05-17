@@ -38,6 +38,12 @@ Good fork themes:
 
 Keep forks honest about scope. If a reviewer is specialized, make the prompt say what it is good at and when it should use `COMMENT` instead of pretending to approve or block.
 
+### Personalizing A Fork
+
+Click **Use this template** on GitHub rather than **Fork**: it creates a fresh repo with full ownership, and `.github/workflows/template-cleanup.yml` runs once on the first push to rewrite every `asavschaeffer/goobreview` reference (Cloud Shell button URL, bootstrap script, clone URL) to your new `owner/repo`. After that first commit, the workflow becomes a self-suppressing no-op.
+
+If you fork instead, the cleanup workflow won't fire until a push to `main`. Either make an empty commit or run a one-time `sed -i "s|asavschaeffer/goobreview|YOUR/REPO|g"` across `*.md`, `*.sh`, and `*.yml`.
+
 ## Prompt Contract
 
 `reviewer.sh` expects Gemini to emit:
@@ -72,7 +78,7 @@ The optional `REVIEW_META` block must stay valid JSON. Inline comments only work
 
 Use `REVIEWER_DRY_RUN=1` first. Only post a real review after:
 
-- `gh auth status` shows the intended reviewer account.
+- `scripts/reviewer/get-installation-token.sh token` returns a token (proves the App credentials and installation are wired up).
 - Gemini CLI works headlessly from the daemon checkout.
 - The configured target repo is correct.
 - Required check names match GitHub check-run display names.

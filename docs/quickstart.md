@@ -2,15 +2,11 @@
 
 This path assumes one target repository and one reviewer identity.
 
-## 1. Pick The Review Identity
+## 1. Register A GitHub App
 
-Use a GitHub account that is not the PR author. GitHub does not allow users to approve or request changes on their own PRs.
+GoobReview authenticates as a GitHub App, so its reviews come from a bot identity (`<your-app>[bot]`) distinct from any human account. Follow [docs/github-app-setup.md](github-app-setup.md): create the App, generate a private key, install it on the target repo.
 
-The reviewer account needs:
-
-- Read access to repository contents.
-- Write access to pull requests.
-- Issue write access if you want checklist updates and labels.
+Required App permissions: Contents read, Issues read/write, Pull requests read/write, Checks read, Metadata read.
 
 ## 2. Provision Or Select A VM
 
@@ -41,43 +37,29 @@ Use the actual public template repo URL after publishing.
 
 ## 4. Configure The Target Repo
 
+`scp` the App's private key to the VM (see step 4 of [github-app-setup.md](github-app-setup.md)), then run:
+
 ```bash
-cp config/reviewer.env.example config/reviewer.env
-cp config/project-docs.example.txt config/project-docs.txt
-cp config/head-context-paths.example.txt config/head-context-paths.txt
-cp config/required-checks.example.json config/required-checks.json
-$EDITOR config/reviewer.env
-$EDITOR config/project-docs.txt
-$EDITOR config/head-context-paths.txt
-$EDITOR config/required-checks.json
+scripts/configure.sh
 ```
 
-At minimum, set:
+It copies all four config files from their `.example` siblings, prompts you for `REVIEWER_REPO`, the App ID, and the private key path, then auto-discovers the installation ID and writes everything to `config/reviewer.env`.
+
+If you prefer to do it by hand, copy each `config/*.example.*` to its non-example name, edit `config/reviewer.env` to set `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, and `REVIEWER_APP_PRIVATE_KEY_PATH`, and edit the three other files to taste. The local config files are gitignored so `sync-worktree.sh` can keep the template checkout clean.
+
+If you do not know the required check-run names yet, leave `config/required-checks.json` as `[]` for the first dry run, then fill it with exact GitHub check-run display names before normal operation.
+
+## 5. Authenticate Gemini
+
+Install Gemini CLI as described in [vm-setup.md](vm-setup.md), then:
 
 ```bash
-REVIEWER_REPO=owner/repo
-REVIEWER_RUNNER_NAME=reviewer-vm
-REVIEWER_STATE=/var/lib/goobreview/example
-REVIEWER_SYNC_REPO_DIR=/opt/goobreview/example
-REVIEWER_SYNC_BRANCH=main
-```
-
-The local config files are ignored by Git so `sync-worktree.sh` can keep the template checkout clean. If you do not know the required check-run names yet, leave `config/required-checks.json` as `[]` for the first dry run, then fill it with exact GitHub check-run display names before normal operation.
-
-## 5. Authenticate Tools
-
-Install and authenticate `gh` and Gemini CLI as described in [vm-setup.md](vm-setup.md).
-
-Verify:
-
-```bash
-gh auth status
-gh repo view owner/repo
+cd /opt/goobreview/example
 gemini
 printf 'say hi in three words' | timeout 60s gemini -m auto -p ""
 ```
 
-Run the interactive `gemini` command from `/opt/goobreview/example` and trust that folder when prompted.
+Run `gemini` interactively from `/opt/goobreview/example` so it can trust that folder. The reviewer needs no `gh auth login` step — it gets a short-lived GitHub App installation token at runtime from the private key configured in step 4.
 
 ## 6. Create Optional Labels
 
@@ -112,9 +94,7 @@ Remove `REVIEWER_DRY_RUN=1` only when you intentionally want to post a real revi
 
 ## 8. Enable A Scheduler
 
-Use systemd when you control the VM and want better logs/status:
-
-- [systemd-timer.md](systemd-timer.md)
+Use systemd when you control the VM and want better logs/status — see the **Systemd Timer** section of [daemon-runbook.md](daemon-runbook.md#systemd-timer).
 
 Use cron when you want the simplest possible scheduler.
 

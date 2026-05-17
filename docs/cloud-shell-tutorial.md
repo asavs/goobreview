@@ -38,14 +38,19 @@ After you confirm, the script will:
 
 When it finishes, it will print an SSH command and the remaining manual steps.
 
-## 3. Finish the interactive auth on the VM
+## 3. Register a GitHub App and trust Gemini
 
-Two things have to be done by a human in a browser — they can't be scripted:
+GoobReview's reviewer identity is a GitHub App, not a user account. Follow [docs/github-app-setup.md](github-app-setup.md) to register the App (about 5 minutes, free, no extra GitHub account), download its private key, and install the App on your target repo.
+
+Then on the VM:
 
 ```bash
+gcloud compute scp ./your-app.private-key.pem \
+  goobreview-1:/var/lib/goobreview/example/app-key.pem \
+  --zone=us-central1-a
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 cd /opt/goobreview/example
-gh auth login       # OAuth — pick the GitHub account that will post reviews
+chmod 600 /var/lib/goobreview/example/app-key.pem
 gemini              # Google OAuth — sign in, trust this folder, then /quit
 ```
 
@@ -53,12 +58,13 @@ Use the VM name and zone you chose in step 2.
 
 ## 4. Configure the reviewer
 
-Still on the VM:
+Still on the VM, run the interactive helper:
 
 ```bash
-cp config/reviewer.env.example config/reviewer.env
-nano config/reviewer.env       # set REVIEWER_REPO=owner/repo
+scripts/configure.sh
 ```
+
+It copies each of the four gitignored config files (`reviewer.env`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from their `.example` siblings, prompts for the target repo, and offers to open each file in `$EDITOR`.
 
 ## 5. Dry run, then enable the scheduler
 

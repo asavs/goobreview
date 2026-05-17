@@ -74,10 +74,11 @@ cat <<EOF
 [setup-vm] Done. Next, on this VM:
 
   cd $CHECKOUT_DIR
-  gh auth login                       # OAuth — pick the reviewer GitHub account
   gemini                              # sign in to Google, trust this folder, /quit
-  cp config/reviewer.env.example config/reviewer.env
-  \$EDITOR config/reviewer.env         # set REVIEWER_REPO=owner/repo
 
-Then continue with docs/quickstart.md from step 6.
+  # Then register a GitHub App (docs/github-app-setup.md), scp its
+  # private key into $STATE_DIR/app-key.pem, and run:
+  scripts/configure.sh
+
+Then continue with docs/quickstart.md from step 6 (dry run, scheduler).
 EOF

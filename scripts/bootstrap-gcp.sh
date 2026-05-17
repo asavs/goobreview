@@ -120,16 +120,22 @@ cat <<EOF
 ============================================================
 VM is provisioned and dependencies are installed.
 
-Two interactive auth steps remain (browser-based OAuth — must
-be done by a human). SSH in and run them:
+To finish:
 
-  gcloud compute ssh $vm_name --zone=$zone
+  1. Register a GitHub App and install it on your target repo:
+     https://github.com/asavschaeffer/goobreview/blob/main/docs/github-app-setup.md
+     (About 5 minutes. No extra GitHub user account needed.)
 
-  cd /opt/goobreview/example
-  gh auth login                       # GitHub OAuth — the reviewer account
-  gemini                              # Google OAuth; trust this folder, /quit
-  cp config/reviewer.env.example config/reviewer.env
-  \$EDITOR config/reviewer.env         # set REVIEWER_REPO=owner/repo
+  2. scp the App's private key to the VM:
+       gcloud compute scp ./your-app.private-key.pem \\
+         $vm_name:/var/lib/goobreview/example/app-key.pem --zone=$zone
+
+  3. SSH in, trust Gemini, and run configure.sh:
+       gcloud compute ssh $vm_name --zone=$zone
+       cd /opt/goobreview/example
+       chmod 600 /var/lib/goobreview/example/app-key.pem
+       gemini                # Google OAuth; trust this folder, /quit
+       scripts/configure.sh  # prompts for App ID + auto-discovers installation ID
 
 Then continue with docs/quickstart.md from step 6 (labels, dry run, scheduler).
 ============================================================

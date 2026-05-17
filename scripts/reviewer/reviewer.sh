@@ -93,6 +93,14 @@ require gemini
 require flock
 require jq
 require timeout
+require node
+
+for var in REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH; do
+  if [ -z "${!var:-}" ]; then
+    log "missing required env: $var (see docs/github-app-setup.md)"
+    exit 1
+  fi
+done
 
 EFFECTIVE_REQUIRED_CHECKS_JSON=""
 if [ -n "${REVIEWER_REQUIRED_CHECKS_JSON:-}" ]; then
@@ -413,9 +421,16 @@ if remaining=$(gemini_backoff_remaining); then
   exit 0
 fi
 
-POSTING_USER=$(gh api user --jq .login 2>>"$LOG_FILE") || { log "failed to detect gh user; run gh auth login"; exit 1; }
+if [ -z "${GH_TOKEN:-}" ]; then
+  GH_TOKEN=$("$SCRIPT_DIR/get-installation-token.sh" token 2>>"$LOG_FILE") || { log "failed to mint installation token"; exit 1; }
+  export GH_TOKEN
+fi
+if [ -z "${REVIEWER_APP_SLUG:-}" ]; then
+  REVIEWER_APP_SLUG=$("$SCRIPT_DIR/get-installation-token.sh" slug 2>>"$LOG_FILE") || { log "failed to fetch app slug"; exit 1; }
+fi
+BOT_LOGIN="${REVIEWER_APP_SLUG}[bot]"
 if [ -z "$SKIP_USER" ]; then
-  SKIP_USER="$POSTING_USER"
+  SKIP_USER="$BOT_LOGIN"
 fi
 
 PRS=$(gh pr list --repo "$REPO" --state open --json number,author,headRefOid,isDraft \
@@ -440,9 +455,9 @@ while IFS=$'\t' read -r num author head_sha; do
   fi
 
   existing=$(gh api "repos/$REPO/pulls/$num/reviews" \
-    --jq "[.[] | select(.user.login == \"$POSTING_USER\" and .commit_id == \"$head_sha\")] | length")
+    --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and .commit_id == \"$head_sha\")] | length")
   if [ "$existing" -gt 0 ]; then
-    log "PR #$num@$head_sha already reviewed by $POSTING_USER, marking seen"
+    log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, marking seen"
     echo "$seen_key" >> "$SEEN_FILE"
     continue
   fi
@@ -577,11 +592,11 @@ EOF
   fi
 
   review_body=$(printf '%s' "$review" | review_body_after_verdict | strip_review_meta)
-  if [ "$author" = "$POSTING_USER" ] && [ "$event" != "COMMENT" ]; then
-    log "PR #$num is authored by $POSTING_USER; posting $event verdict as COMMENT"
+  if [ "$author" = "$BOT_LOGIN" ] && [ "$event" != "COMMENT" ]; then
+    log "PR #$num is authored by $BOT_LOGIN; posting $event verdict as COMMENT"
     event="COMMENT"
     review_body=$(cat <<EOF
-Note: GitHub does not allow @$POSTING_USER to approve or request changes on their own PR, so this automated review was posted as a comment.
+Note: GitHub does not allow @$BOT_LOGIN to approve or request changes on their own PR, so this automated review was posted as a comment.
 
 $review_body
 EOF
@@ -592,7 +607,7 @@ EOF
 $review_body
 
 ---
-*Drafted by \`gemini\` running on $REVIEWER_RUNNER_NAME, posted under @$POSTING_USER's account. Verdict and findings are gemini's; @$POSTING_USER has not personally read the diff.*
+*Drafted by \`gemini\` running on $REVIEWER_RUNNER_NAME, posted by @$BOT_LOGIN. Verdict and findings are gemini's; no human read this diff before posting.*
 EOF
 )
 

@@ -18,6 +18,8 @@ cron.log                Cron wrapper log.
 lock                    flock lock file.
 gemini_backoff_until    Quota/capacity retry timestamp.
 sync.log                Checkout sync log.
+app_token.json          Cached App installation token + slug (refreshed when <5 min remain).
+app-key.pem             GitHub App private key (you provide; mode 0600).
 ```
 
 ## One-Off Run
@@ -49,30 +51,81 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 ## Systemd Timer
 
-For a more durable VM setup, use the example unit files under `deploy/systemd/`:
+A systemd timer is the recommended durable scheduler when you control the VM. Cron is fine for quick setup, but systemd gives better status, logs, restart behavior, and auditable unit files.
 
-```text
-deploy/systemd/goobreview.service.example
-deploy/systemd/goobreview.timer.example
+This section assumes:
+
+- checkout: `/opt/goobreview/example`
+- state directory: `/var/lib/goobreview/example`
+- Unix user: `goobreview`
+- config file: `/opt/goobreview/example/config/reviewer.env`
+
+Adjust names and paths for each reviewer identity.
+
+### Create The User And Directories
+
+```bash
+sudo useradd --system --create-home --shell /bin/bash goobreview
+sudo mkdir -p /opt/goobreview/example /var/lib/goobreview/example
+sudo chown -R goobreview:goobreview /opt/goobreview /var/lib/goobreview
 ```
 
-See [systemd-timer.md](systemd-timer.md) for install, logging, and multi-reviewer setup.
+Clone and configure the repo as that user, install the App private key as that user (e.g. `scp` it to `/var/lib/goobreview/example/app-key.pem`, then `chmod 600`), and authenticate Gemini CLI as that same user.
+
+### Install Unit Files
+
+```bash
+sudo cp deploy/systemd/goobreview.service.example /etc/systemd/system/goobreview.service
+sudo cp deploy/systemd/goobreview.timer.example /etc/systemd/system/goobreview.timer
+sudo systemctl edit --full goobreview.service   # adjust paths/user if needed
+sudo systemctl edit --full goobreview.timer
+```
+
+### Validate One Run
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl start goobreview.service
+sudo systemctl status goobreview.service
+sudo journalctl -u goobreview.service -n 100 --no-pager
+```
+
+If this fails, fix the service before enabling the timer. Common causes:
+
+- App private key not readable by the `goobreview` Unix user, or `REVIEWER_APP_*` env vars not set.
+- Gemini CLI has not trusted `/opt/goobreview/example`.
+- `config/reviewer.env` is missing or points to the wrong target repo.
+- The App is not installed on `REVIEWER_REPO` (token mint will fail).
+- The checkout is dirty, so `sync-worktree.sh` refuses to run.
+
+### Enable The Timer
+
+```bash
+sudo systemctl enable --now goobreview.timer
+systemctl list-timers goobreview.timer
+sudo journalctl -u goobreview.service -f
+```
+
+### Multiple Reviewers
+
+Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `goobreview-bob.service`/`.timer`, ...). Each identity needs its own Unix user, checkout, App credentials, Gemini auth + trusted checkout, state directory, and `config/reviewer.env`.
 
 ## What The Reviewer Does
 
 1. Acquires a non-blocking `flock`.
-2. Lists open non-draft PRs in `REVIEWER_REPO`.
-3. Skips PRs authored by the authenticated `gh` user unless overridden.
-4. Reviews each `PR_NUMBER HEAD_SHA` once.
-5. Checks whether the authenticated user already reviewed the same head commit.
-6. Applies the required-check gate.
-7. Builds a prompt from base instructions, configured project docs, PR metadata, check summaries, file tree, selected file contents, and diff.
-8. Runs Gemini CLI headlessly.
-9. Parses the verdict and optional metadata.
-10. Posts a GitHub review and best-effort inline comments.
-11. Updates the managed checklist block in the PR body.
-12. Applies optional labels.
-13. Records the head in `seen.txt` only after successful posting.
+2. Mints a GitHub App installation token (cached in `app_token.json`) and exports it as `GH_TOKEN` so `gh` calls authenticate as the App.
+3. Lists open non-draft PRs in `REVIEWER_REPO`.
+4. Skips PRs authored by `BOT_LOGIN` (`<app-slug>[bot]`); also skips PRs authored by `REVIEWER_USER` if set.
+5. Reviews each `PR_NUMBER HEAD_SHA` once.
+6. Checks whether the App has already posted a review on the same head commit.
+7. Applies the required-check gate.
+8. Builds a prompt from base instructions, configured project docs, PR metadata, check summaries, file tree, selected file contents, and diff.
+9. Runs Gemini CLI headlessly.
+10. Parses the verdict and optional metadata.
+11. Posts a GitHub review and best-effort inline comments.
+12. Updates the managed checklist block in the PR body.
+13. Applies optional labels.
+14. Records the head in `seen.txt` only after successful posting.
 
 ## Operations
 
@@ -98,7 +151,7 @@ Force future PR heads to be considered again:
 rm /var/lib/goobreview/example/seen.txt
 ```
 
-The script still checks GitHub for an existing same-user review on the same head commit, so deleting local state should not duplicate reviews that posted successfully.
+The script still checks GitHub for an existing review by the App on the same head commit, so deleting local state should not duplicate reviews that posted successfully.
 
 Run a pre-merge mechanical gate:
 
@@ -109,12 +162,71 @@ set +a
 scripts/reviewer/merge-gate.sh 123
 ```
 
+## Configuration Reference
+
+The reviewer reads four gitignored files under `config/`. `scripts/configure.sh` walks you through them interactively; this section is the reference for what each one does.
+
+### `reviewer.env`
+
+Environment for the daemon. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`. See `config/reviewer.env.example` for the full list with inline comments.
+
+### `project-docs.txt`
+
+Repository paths fetched from the PR head and included in every review prompt. Good entries:
+
+```text
+AGENTS.md
+CONTRIBUTING.md
+README.md
+docs/architecture.md
+docs/security.md
+docs/pr-review-workflow.md
+```
+
+Keep the list focused — these docs become part of every prompt, so large or low-signal files make reviews weaker and slower. The base prompt tells Gemini that changed project content cannot override reviewer instructions, so PR-authored docs are treated as context, not authority.
+
+### `head-context-paths.txt`
+
+Extra files fetched from the PR head when present. Use this for reference validation, not broad code review:
+
+```text
+package.json
+pyproject.toml
+Cargo.toml
+.github/workflows/ci.yml
+scripts/deploy.sh
+```
+
+Exact repository paths only — wildcards are not expanded.
+
+### `required-checks.json`
+
+Exact GitHub check-run display names that gate review posting:
+
+```json
+["Unit tests", "Build", "Lint"]
+```
+
+The daemon waits when required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when a required check fails. An empty array means "do not gate" — use that only for initial setup or repos without CI.
+
+### Labels (optional)
+
+`scripts/reviewer/ensure-labels.sh` creates or updates four labels in the target repo: `agent-reviewed`, `agent-requested-changes`, `needs-human-decision`, `follow-up-candidates`. Review posting does not depend on them.
+
+### Prompt Customization
+
+Edit `scripts/reviewer/review-prompt.md` for review style, severity policy, and specialty. Keep these invariants:
+
+- The first verdict line must be `VERDICT: APPROVE`, `VERDICT: REQUEST_CHANGES`, or `VERDICT: COMMENT`.
+- The metadata block must remain valid JSON between `<!-- REVIEW_META` and `REVIEW_META -->`.
+- Inline comments require `path` plus right-side changed `line` values.
+
 ## Known Limits
 
 - Inline comments are best-effort. Invalid anchors fall back to a top-level review body.
 - Very large diffs may exceed useful Gemini context.
 - The daemon does not inspect full CI logs; it sees check summaries and the configured required-check state.
 - The daemon does not create follow-up issues automatically.
-- The daemon trusts local `gh` and Gemini auth. Keep the VM account locked down.
+- The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.
 - The checkout must stay clean. `sync-worktree.sh` refuses to run from a dirty checkout.
 - Each cron tick posts at most `REVIEWER_MAX_PRS` reviews, defaulting to one.

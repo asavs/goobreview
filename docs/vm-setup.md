@@ -48,11 +48,9 @@ For Ubuntu, follow the current official apt instructions from the GitHub CLI doc
 
 ```bash
 gh --version
-gh auth login
-gh auth status
 ```
 
-Authenticate as the account that should post reviews.
+GoobReview does not call `gh auth login`. The reviewer authenticates as a GitHub App using a short-lived installation token minted at runtime from a private key; `gh` picks up the token via `GH_TOKEN`. See [github-app-setup.md](github-app-setup.md) for App registration.
 
 ## Install Gemini CLI
 
@@ -101,4 +99,4 @@ sudo mkdir -p /opt/goobreview/example /var/lib/goobreview/example
 sudo chown -R goobreview:goobreview /opt/goobreview /var/lib/goobreview
 ```
 
-Then perform clone, `gh auth login`, and `gemini` trust as that user.
+Then perform clone, GitHub App key install, and `gemini` trust as that user.
