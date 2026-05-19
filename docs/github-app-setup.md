@@ -8,16 +8,28 @@ Navigate to **Settings → Developer settings → GitHub Apps → New GitHub App
 
 Fill in:
 
-- **GitHub App name** — something descriptive like `goob-reviewer-<yourname>`. This becomes the bot's GitHub login (`<name>[bot]`) and shows on every review.
-- **Homepage URL** — your repo URL is fine.
+- **GitHub App name** — something descriptive like `goob-reviewer-<yourname>`. This becomes the bot's GitHub login (`<name>[bot]`) and shows on every review. Names are globally unique on GitHub, so add a personal suffix if your first choice is taken.
+- **Homepage URL** — your repo URL (`https://github.com/<you>/goobreview`). GitHub requires a value; GoobReview never uses it.
+- **Callback URL** — leave blank.
+- **Expire user authorization tokens** — leave at default (doesn't matter; GoobReview never issues user OAuth tokens).
+- **Request user authorization (OAuth) during installation** — leave unchecked.
+- **Enable device flow** — leave unchecked.
+- **Setup URL** — leave blank.
 - **Webhook → Active** — *uncheck*. GoobReview polls; it doesn't receive webhooks.
-- **Repository permissions:**
-  - Contents: **Read-only** (read project docs from PR head)
-  - Issues: **Read & Write** (PR labels and the managed checklist block)
-  - Metadata: **Read-only** (auto-selected)
-  - Pull requests: **Read & Write** (submit reviews, post inline comments)
-  - Checks: **Read-only** (the CI gate before reviewing)
-- **Where can this GitHub App be installed?** — "Only on this account" is the right default for personal use.
+- **Repository permissions** — GitHub shows a long list. Set only these five; leave everything else at **No access**:
+
+  | Permission | Setting | Why |
+  |---|---|---|
+  | Checks | Read-only | CI gate — reads check-runs before calling Gemini |
+  | Contents | Read-only | Reads file tree and project docs from the PR head SHA |
+  | Issues | Read & Write | Posts labels (`agent-reviewed`, etc.) via the Issues API |
+  | Metadata | Read-only | Auto-selected; required for any repo API access |
+  | Pull requests | Read & Write | Lists PRs, submits reviews, edits PR body for the checklist block |
+
+  Everything else on that list (Actions, Administration, Attestations, Code scanning, Commit statuses, Dependabot, Deployments, Discussions, Environments, Packages, Pages, Projects, Secrets, Webhooks, Workflows, etc.) — **No access**.
+
+- **Account permissions** and **Organization permissions** — leave everything at **No access**. GoobReview only talks to repository-level APIs (PRs, checks, contents, issues). It never touches user accounts or org settings.
+- **Where can this GitHub App be installed?** — "Any account" allows anyone to install the App on their own repos. "Only on this account" is fine if you're keeping this personal.
 
 Click **Create GitHub App**. You'll be redirected to its settings page.
 
