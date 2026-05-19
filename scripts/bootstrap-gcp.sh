@@ -84,6 +84,15 @@ esac
 
 gcloud config set project "$project" >/dev/null
 
+# Fresh GCP projects don't have the Compute Engine API enabled. Without this,
+# the next gcloud compute call will prompt interactively to enable it and
+# hang silently when run non-interactively. Idempotent — already-enabled is a no-op.
+if ! gcloud services list --enabled --filter='config.name=compute.googleapis.com' \
+     --format='value(config.name)' 2>/dev/null | grep -q compute.googleapis.com; then
+  echo "Enabling Compute Engine API (takes ~30s)..."
+  gcloud services enable compute.googleapis.com
+fi
+
 if gcloud compute instances describe "$vm_name" --zone="$zone" >/dev/null 2>&1; then
   echo "VM '$vm_name' already exists in $zone. Skipping create."
 else
