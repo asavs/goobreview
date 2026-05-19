@@ -16,13 +16,15 @@ gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
 gcloud compute instances create goobreview-1 \
   --zone=us-central1-a \
-  --machine-type=e2-small \
+  --machine-type=e2-micro \
   --boot-disk-size=20GB \
   --image-family=ubuntu-2404-lts-amd64 \
   --image-project=ubuntu-os-cloud \
   --tags=ssh
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 ```
+
+`e2-micro` (2 vCPU, 1 GB RAM) in `us-central1`, `us-west1`, or `us-east1` (excluding northern Virginia) is covered by GCP's always-free tier — one instance and 30 GB standard disk per month. Gemini CLI can spike past 1 GB during a review, so `scripts/setup-vm.sh` configures a 2 GB swap file by default; set `GOOBREVIEW_SWAP_SIZE=0` to skip if you're on a larger machine.
 
 Keep firewall exposure minimal. The reviewer needs outbound HTTPS and inbound SSH only.
 

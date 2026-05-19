@@ -32,9 +32,9 @@ You'll be asked for three things (defaults shown in brackets):
 
 After you confirm, the script will:
 
-1. Create an `e2-small` Ubuntu 24.04 VM with a 20 GB disk
+1. Create an `e2-micro` Ubuntu 24.04 VM with a 20 GB disk. `e2-micro` in `us-central1`, `us-west1`, or `us-east1` (excluding northern Virginia) is covered by GCP's always-free tier — one instance and 30 GB standard disk per month at no charge.
 2. Wait for SSH to become reachable
-3. Run `setup-vm.sh` on the VM, which installs `git`, `jq`, Node 20, GitHub CLI, and Gemini CLI, then clones the template into `/opt/goobreview/example`
+3. Run `setup-vm.sh` on the VM, which installs `git`, `jq`, Node 20, GitHub CLI, and Gemini CLI, configures a 2 GB swap file (Gemini CLI can spike past `e2-micro`'s 1 GB of RAM), then clones the template into `/opt/goobreview/example`
 
 When it finishes, it will print an SSH command and the remaining manual steps.
 

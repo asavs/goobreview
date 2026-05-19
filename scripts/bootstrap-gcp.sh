@@ -6,7 +6,7 @@ set -euo pipefail
 
 DEFAULT_ZONE="us-central1-a"
 DEFAULT_VM_NAME="goobreview-1"
-DEFAULT_MACHINE_TYPE="e2-small"
+DEFAULT_MACHINE_TYPE="e2-micro"
 DEFAULT_IMAGE_FAMILY="ubuntu-2404-lts-amd64"
 DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_DISK_SIZE="20GB"
