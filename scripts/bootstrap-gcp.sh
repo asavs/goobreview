@@ -131,20 +131,19 @@ VM is provisioned and dependencies are installed.
 
 To finish:
 
-  1. Register a GitHub App and install it on your target repo:
-     https://github.com/asavschaeffer/goobreview/blob/main/docs/github-app-setup.md
-     (About 5 minutes. No extra GitHub user account needed.)
+  1. Register the GitHub App and ship its key to the VM (still in Cloud Shell):
+       bash scripts/register-app.sh $vm_name $zone
 
-  2. scp the App's private key to the VM:
-       gcloud compute scp ./your-app.private-key.pem \\
-         $vm_name:/var/lib/goobreview/example/app-key.pem --zone=$zone
+     Click the Web Preview button (port 8080) → "Create GoobReview App" →
+     confirm on GitHub → "Install on a repo". About 30 seconds total.
 
-  3. SSH in, trust Gemini, and run configure.sh:
+     (Or follow docs/github-app-setup.md to register manually.)
+
+  2. SSH in, trust Gemini, and run configure.sh:
        gcloud compute ssh $vm_name --zone=$zone
        cd /opt/goobreview/example
-       chmod 600 /var/lib/goobreview/example/app-key.pem
        gemini                # Google OAuth; trust this folder, /quit
-       scripts/configure.sh  # prompts for App ID + auto-discovers installation ID
+       scripts/configure.sh  # App ID is pre-filled; auto-discovers installation ID
 
 Then continue with docs/quickstart.md from step 6 (labels, dry run, scheduler).
 ============================================================

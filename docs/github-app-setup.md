@@ -2,7 +2,30 @@
 
 GoobReview authenticates as a GitHub App so its reviews come from a bot identity (`<your-app-name>[bot]`). That identity is distinct from any human account, so it can submit `APPROVE`, `REQUEST_CHANGES`, and `COMMENT` reviews on PRs by any author. Apps don't consume paid-org seats, get scoped per-repo permissions, and are the same idiom Dependabot, Renovate, and CodeRabbit use.
 
-## 1. Create The App
+## Recommended: automatic registration with `register-app.sh`
+
+If you provisioned the VM with `scripts/bootstrap-gcp.sh`, the easiest way to register the App is GitHub's **Manifest Flow**, which we wrap in `scripts/register-app.sh`:
+
+```bash
+bash scripts/register-app.sh           # personal account
+GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh  # organization
+```
+
+The script starts a tiny local server, you click two buttons (one in Cloud Shell's Web Preview, one on GitHub), and it:
+
+- Creates the App with the right permissions (no webhooks, no user OAuth).
+- Receives the private key from GitHub over the API (never downloaded to your machine).
+- `scp`s the key to the VM at `$REVIEWER_STATE/app-key.pem` with mode 0600.
+- Pre-populates `REVIEWER_APP_ID` in `config/reviewer.env` on the VM.
+- Prints the install URL so you can install the App on your target repo.
+
+When it finishes, ssh to the VM and run `scripts/configure.sh` — the App ID prompt will default to the right value, and installation-ID auto-discovery will pick up the install.
+
+The rest of this document describes the **manual** registration path, in case you can't use the automatic flow (no Cloud Shell, can't run a local web server, restrictive corporate GitHub, etc.).
+
+## Manual registration
+
+### 1. Create The App
 
 Navigate to **Settings → Developer settings → GitHub Apps → New GitHub App** under your account, or the equivalent path under your organization's settings.
 
@@ -33,17 +56,17 @@ Fill in:
 
 Click **Create GitHub App**. You'll be redirected to its settings page.
 
-## 2. Generate A Private Key
+### 2. Generate A Private Key
 
 On the App settings page, scroll to **Private keys** and click **Generate a private key**. A `.pem` file downloads. Keep it safe — anyone with this file can act as your bot.
 
-## 3. Install The App On Your Target Repo
+### 3. Install The App On Your Target Repo
 
 In the App's left sidebar, click **Install App**, then **Install** next to your account or org. Pick **Only select repositories** and choose the repo GoobReview will review.
 
 You can verify the install at `https://github.com/settings/installations` (or your org's equivalent).
 
-## 4. Note The App ID And Copy The Key To The VM
+### 4. Note The App ID And Copy The Key To The VM
 
 The App ID is at the top of the App's settings page — a numeric value like `1234567`. You'll be asked for it in the next step.
 
@@ -59,7 +82,7 @@ gcloud compute ssh goobreview-1 --zone=us-central1-a \
 
 Adjust paths/VM name/zone as needed. The default location GoobReview looks at is `$REVIEWER_STATE/app-key.pem`.
 
-## 5. Run configure.sh
+### 5. Run configure.sh
 
 SSH to the VM and run:
 

@@ -38,33 +38,45 @@ After you confirm, the script will:
 
 When it finishes, it will print an SSH command and the remaining manual steps.
 
-## 3. Register a GitHub App and trust Gemini
+## 3. Register the GitHub App
 
-GoobReview's reviewer identity is a GitHub App, not a user account. Follow [docs/github-app-setup.md](github-app-setup.md) to register the App (about 5 minutes, free, no extra GitHub account), download its private key, and install the App on your target repo.
+GoobReview's reviewer identity is a GitHub App, not a user account, so its reviews come from a bot (`<app-name>[bot]`) that can `APPROVE` and `REQUEST_CHANGES` on PRs from any author.
 
-Then on the VM:
+From Cloud Shell (still in the goobreview checkout):
 
 ```bash
-gcloud compute scp ./your-app.private-key.pem \
-  goobreview-1:/var/lib/goobreview/example/app-key.pem \
-  --zone=us-central1-a
-gcloud compute ssh goobreview-1 --zone=us-central1-a
-cd /opt/goobreview/example
-chmod 600 /var/lib/goobreview/example/app-key.pem
-gemini              # Google OAuth — sign in, trust this folder, then /quit
+bash scripts/register-app.sh
 ```
 
-Use the VM name and zone you chose in step 2.
+This starts a tiny local server, then prompts you to:
+
+1. Click the **Web Preview** button (top right of Cloud Shell) → **Preview on port 8080**.
+2. In the new browser tab, click **Create GoobReview App on GitHub →**.
+3. Confirm on GitHub (you can rename the App on that page if you want).
+4. Click **Install ... on a repo →** on the success page and pick your target repo.
+
+When the script finishes, the private key is already on the VM at `/var/lib/goobreview/example/app-key.pem` and the App ID is pre-filled in `reviewer.env`. The key never touches your local machine.
+
+Registering the App under an organization instead of your personal account? Pass the org name:
+
+```bash
+GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh
+```
+
+(If you'd rather register manually — clicking through the full permission list on GitHub — see [docs/github-app-setup.md](github-app-setup.md).)
 
 ## 4. Configure the reviewer
 
-Still on the VM, run the interactive helper:
+SSH to the VM, trust Gemini, and run the configure helper:
 
 ```bash
+gcloud compute ssh goobreview-1 --zone=us-central1-a
+cd /opt/goobreview/example
+gemini                # Google OAuth — sign in, trust this folder, then /quit
 scripts/configure.sh
 ```
 
-It copies each of the gitignored config files (`reviewer.env`, `personality.md`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from their `.example` siblings, prompts for the target repo, and offers to open each file in `$EDITOR`.
+`configure.sh` copies each gitignored config file (`reviewer.env`, `personality.md`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from its `.example` sibling, prompts for the target repo, auto-discovers the installation ID, and offers to open each file in `$EDITOR`.
 
 `personality.md` is the most useful one to edit before your first dry run — it defines what kind of reviewer this is (general-purpose, security-focused, accessibility-focused, etc.). The example file ships with sensible defaults plus a "Fork Themes" section you can adapt.
 
