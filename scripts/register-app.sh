@@ -31,6 +31,21 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
+# Fail fast if the VM doesn't exist — better to know now than after the user
+# clicks through the manifest flow and creates a real GitHub App.
+if ! gcloud compute instances describe "$VM_NAME" --zone="$ZONE" >/dev/null 2>&1; then
+  cat >&2 <<EOF
+VM '$VM_NAME' not found in zone '$ZONE'.
+
+Provision it first:
+  bash scripts/bootstrap-gcp.sh
+
+Or pass the correct VM name and zone:
+  bash scripts/register-app.sh <VM_NAME> <ZONE>
+EOF
+  exit 1
+fi
+
 OUTPUT_DIR="$(mktemp -d -t goobreview-register.XXXXXX)"
 chmod 700 "$OUTPUT_DIR"
 trap 'rm -rf "$OUTPUT_DIR"' EXIT

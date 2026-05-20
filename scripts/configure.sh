@@ -72,6 +72,19 @@ env_set() {
   fi
 }
 
+# --- Preflight: Gemini auth -----------------------------------------------
+# The reviewer shells out to `gemini` headlessly, which requires that the
+# current user has authenticated and trusted the checkout folder at least once.
+# Both auth and trust state live under ~/.gemini, so missing dir = unauthed.
+if [ ! -d "$HOME/.gemini" ]; then
+  log "Warning: ~/.gemini not found — Gemini CLI does not look authenticated for $(whoami)."
+  log "Without auth, dry runs and the reviewer daemon will fail. To authenticate:"
+  log "  gemini                # sign in to Google in the browser, trust this folder, then /quit"
+  if ! confirm "Continue configuring anyway?"; then
+    exit 1
+  fi
+fi
+
 # --- Step 1: reviewer.env --------------------------------------------------
 copy_if_missing "$ENV_FILE" "$CONFIG_DIR/reviewer.env.example" || exit 1
 
@@ -161,17 +174,25 @@ for name in personality.md project-docs.txt head-context-paths.txt required-chec
   fi
 done
 
-log "Done. Suggested next steps:"
+# --- Step 4: optional label creation ---------------------------------------
+if confirm "Create the four helper labels (agent-reviewed, agent-requested-changes, needs-human-decision, follow-up-candidates) on $current_repo now?"; then
+  if token=$("$APP_TOKEN_SH" 2>/dev/null); then
+    GH_TOKEN="$token" "$SCRIPT_DIR/reviewer/ensure-labels.sh" || \
+      log "ensure-labels.sh failed; you can re-run it later: GH_TOKEN=\$($APP_TOKEN_SH) scripts/reviewer/ensure-labels.sh"
+  else
+    log "Could not mint a token to create labels. Make sure the App is installed on $current_repo, then run:"
+    log "  GH_TOKEN=\$($APP_TOKEN_SH) scripts/reviewer/ensure-labels.sh"
+  fi
+fi
+
+log "Done. Next steps:"
 cat <<EOF
 
-  set -a; . config/reviewer.env; set +a
+  # Dry run (no review posted)
+  scripts/dry-run.sh           # picks the oldest unseen PR
+  scripts/dry-run.sh 123       # or pick a specific PR number
 
-  # Optional: create the helper labels in the target repo
-  scripts/reviewer/ensure-labels.sh
-
-  # Dry run against one PR (does not post)
-  REVIEWER_DRY_RUN=1 REVIEWER_MAX_PRS=1 scripts/reviewer/reviewer.sh
-  tail -n 80 "\$REVIEWER_STATE/log.txt"
-
-  # When the dry run looks good, enable the scheduler — see docs/quickstart.md step 8.
+  # When the dry run looks good, enable the scheduler:
+  scripts/enable-cron.sh       # cron, fires every minute
+  # or follow docs/daemon-runbook.md#systemd-timer for a systemd timer.
 EOF

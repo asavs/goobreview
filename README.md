@@ -8,27 +8,28 @@ GoobReview is designed for users who want to point a Google AI Pro-backed Gemini
 
 [![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/asavschaeffer/goobreview&cloudshell_tutorial=docs/cloud-shell-tutorial.md)
 
-Click the button to open this repo in [Google Cloud Shell](https://cloud.google.com/shell). Cloud Shell is a browser terminal with `gcloud` already authenticated to your Google account — no local installs needed. The tutorial pane will walk you through running `scripts/bootstrap-gcp.sh`, which prompts for project / zone / VM name and then provisions everything else automatically.
-
-Prefer to paste a command? In any Cloud Shell session:
+Click the button to open this repo in [Google Cloud Shell](https://cloud.google.com/shell). Cloud Shell is a browser terminal with `gcloud` already authenticated to your Google account — no local installs needed. The tutorial pane will walk you through three commands:
 
 ```bash
-git clone https://github.com/asavschaeffer/goobreview.git && bash goobreview/scripts/bootstrap-gcp.sh
+bash scripts/bootstrap-gcp.sh    # provisions an e2-micro VM (free tier) + installs deps
+bash scripts/register-app.sh     # registers a GitHub App, ships the key to the VM
+                                 # then ssh in and run scripts/configure.sh
 ```
 
-Either path leaves you with a provisioned VM and dependencies installed. To finish, you'll [register a GitHub App](docs/github-app-setup.md) (5 minutes, free, no extra GitHub account needed), `scp` the App's private key to the VM, and run `scripts/configure.sh`.
+`bootstrap-gcp.sh` prompts for project / zone / VM name. `register-app.sh` uses GitHub's [Manifest Flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) — you click Cloud Shell's Web Preview, then two buttons (one to create the App, one to install it on your target repo). The App's private key arrives over the GitHub API and is uploaded to the VM automatically; it never touches your local machine.
 
 > Want your own copy to customize? Click **Use this template** at the top of this repo on GitHub. A first-push workflow (`.github/workflows/template-cleanup.yml`) auto-personalizes the Cloud Shell button, bootstrap script, and clone URL to point at your new repo.
 
 ## Manual Setup
 
-The intended setup is:
+If you can't or don't want to use the one-click path — say, you already have a VM, or you're on a corporate GitHub that disallows manifest-flow App creation — the manual path is:
 
-1. Clone this template onto a small Linux VM.
-2. Configure the target GitHub repository, the reviewer's personality, and the project docs it should read (see [Customizing The Reviewer](#customizing-the-reviewer) below).
-3. Register a GitHub App and install it on the target repo. The App is the reviewer identity — see [docs/github-app-setup.md](docs/github-app-setup.md).
-4. Authenticate Gemini CLI with the Google account you want to use, including Google AI Pro or Ultra accounts where available.
-5. Run the reviewer from cron or a systemd timer.
+1. Provision a small Linux VM (1 vCPU, 1-2 GB RAM, 20 GB disk) and install `gh`, `jq`, Node 20, and Gemini CLI on it. See [docs/vm-setup.md](docs/vm-setup.md).
+2. Clone this template into `/opt/goobreview/example`.
+3. Register a GitHub App **manually** (clicking through the full permission list on GitHub) and install it on the target repo. See [docs/github-app-setup.md § Manual registration](docs/github-app-setup.md#manual-registration).
+4. Copy the App's private key onto the VM at `/var/lib/goobreview/example/app-key.pem` (mode 0600).
+5. Authenticate Gemini CLI with the Google account you want to use (Google AI Pro/Ultra accounts work).
+6. Run `scripts/configure.sh`, then enable cron or the systemd timer.
 
 The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews under a clearly-bot login (`<your-app>[bot]`) without burning a second GitHub user account or org seat. It can also add inline comments, update a managed PR checklist, and re-review every new PR head commit.
 
@@ -47,16 +48,17 @@ The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `C
 Give your coding agent this repository and ask:
 
 ```text
-Use this template to set up an automated peer-account PR reviewer for OWNER/REPO.
-Walk me through creating or selecting a small Ubuntu VM, installing gh and Gemini CLI,
-authenticating both tools, choosing project docs/checks, running a dry-run review,
-and enabling cron only after the dry run is clean.
+Use this template to set up an automated PR reviewer for OWNER/REPO. Walk me
+through bootstrap-gcp.sh (VM provisioning), register-app.sh (GitHub App via
+manifest flow), configure.sh (target repo + auto-discover installation ID),
+a dry-run review, and enabling the scheduler only after the dry run is clean.
 ```
 
 The agent should follow:
 
 - [docs/quickstart.md](docs/quickstart.md)
-- [docs/github-app-setup.md](docs/github-app-setup.md)
+- [docs/cloud-shell-tutorial.md](docs/cloud-shell-tutorial.md)
+- [docs/github-app-setup.md](docs/github-app-setup.md) (manual registration only)
 - [docs/vm-setup.md](docs/vm-setup.md)
 - [docs/daemon-runbook.md](docs/daemon-runbook.md)
 
@@ -65,6 +67,8 @@ The agent should follow:
 ```text
 config/                              Per-deployment files. *.example.* ships;
                                      the non-example copy is gitignored.
+  app-manifest.json                  GitHub App template used by register-app.sh
+                                     (permissions, name pattern). Committed.
   personality.example.md             Reviewer role, focus, severity policy.
                                      The main file you customize.
   project-docs.example.txt           Repo paths fetched from the PR head and
@@ -78,10 +82,15 @@ config/                              Per-deployment files. *.example.* ships;
 scripts/
   bootstrap-gcp.sh                   Cloud Shell provisioner: creates the VM,
                                      runs setup-vm.sh on it.
-  setup-vm.sh                        Installs gh, Node, Gemini CLI; clones the
-                                     template. Runs on the VM.
+  setup-vm.sh                        Installs gh, Node, Gemini CLI, configures
+                                     swap; clones the template. Runs on the VM.
+  register-app.sh                    Manifest-flow GitHub App registration:
+                                     runs lib/manifest-server.mjs, scps the key
+                                     to the VM, writes REVIEWER_APP_ID.
   configure.sh                       On-VM interactive setup for config/ and
                                      App credentials.
+  lib/manifest-server.mjs            Tiny Node HTTP server that drives GitHub's
+                                     App Manifest Flow. Used only at setup.
   reviewer/
     reviewer.sh                      Poll, prompt Gemini, post reviews.
     review-prompt.md                 Engine prompt (output contract, validation
