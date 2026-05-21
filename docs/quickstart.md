@@ -4,7 +4,7 @@ End-to-end setup from a fresh fork to a posting reviewer in about 10 minutes. As
 
 ## 1. Open This Repo In Cloud Shell
 
-Click the **Open in Cloud Shell** button on the [project README](../README.md) (or run `git clone https://github.com/asavschaeffer/goobreview.git` in any Cloud Shell session). Cloud Shell is a free browser terminal with `gcloud` pre-authenticated to your Google account.
+Click the **Open in Cloud Shell** button on the [project README](../README.md) (or run `git clone https://github.com/asavschaeffer/goobreview.git` in any Cloud Shell session). Cloud Shell is a browser terminal with `gcloud` pre-authenticated to your Google account.
 
 If you can't use Cloud Shell, see the [Manual VM Setup](#manual-vm-setup) appendix at the end of this document.
 
@@ -16,10 +16,10 @@ From the Cloud Shell checkout:
 bash scripts/bootstrap-gcp.sh
 ```
 
-It prompts for GCP project, zone, and VM name (sensible defaults provided), then:
+It prompts for GCP project, zone, and VM name, then:
 
-- Creates an `e2-micro` Ubuntu 24.04 VM with a 20 GB disk (free-tier eligible in `us-central1`, `us-west1`, `us-east1`).
-- Installs `git`, `jq`, Node 20, GitHub CLI, Gemini CLI, and configures a 2 GB swap file (Gemini CLI can spike past `e2-micro`'s 1 GB of RAM).
+- Creates the small Ubuntu VM described in [docs/vm-setup.md](vm-setup.md).
+- Installs the required packages, GitHub CLI, Gemini CLI, and swap.
 - Clones this template into `/opt/goobreview/example` on the VM.
 
 Takes about 3 minutes. When it finishes, it prints the remaining commands.
@@ -32,14 +32,14 @@ Still in Cloud Shell:
 bash scripts/register-app.sh
 ```
 
-It starts a tiny local server, then prompts you to:
+It starts a tiny local server, then prompts you to create and install the GitHub App:
 
-1. Click Cloud Shell's **Web Preview** button → **Preview on port 8080**.
-2. In the browser tab that opens, click **Create GoobReview App on GitHub →**.
-3. Confirm on GitHub (rename the App if you want — names are globally unique).
-4. On the success page, click **Install ... on a repo →** and pick your target repo.
+1. Click Cloud Shell's **Web Preview** button -> **Preview on port 8080**.
+2. In the browser tab that opens, click **Create GoobReview App on GitHub ->**.
+3. Confirm on GitHub.
+4. On the success page, click **Install ... on a repo ->** and pick your target repo.
 
-When the script finishes, the App's private key is at `/var/lib/goobreview/example/app-key.pem` on the VM and `REVIEWER_APP_ID` is pre-populated in `reviewer.env`. The private key never touches your local machine — it arrives over the GitHub API and goes straight to the VM.
+When the script finishes, the App's private key is at `/var/lib/goobreview/example/app-key.pem` on the VM and `REVIEWER_APP_ID` is pre-populated in `reviewer.env`. The private key never touches your local machine; it arrives over the GitHub API and goes straight to the VM. See [docs/github-app-setup.md](github-app-setup.md) for the App identity, permissions, and manual registration path.
 
 Registering under an organization instead of your personal account:
 
@@ -47,7 +47,7 @@ Registering under an organization instead of your personal account:
 GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh
 ```
 
-(If your GitHub setup blocks manifest-flow App creation — some corporate accounts do — see [docs/github-app-setup.md § Manual registration](github-app-setup.md#manual-registration).)
+(If your GitHub setup blocks manifest-flow App creation, see [docs/github-app-setup.md#manual-registration](github-app-setup.md#manual-registration).)
 
 ## 4. Finish Setup On The VM
 
@@ -56,20 +56,20 @@ SSH to the VM, authenticate Gemini, and run the configure helper:
 ```bash
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 cd /opt/goobreview/example
-gemini                # Google OAuth — sign in, trust this folder, then /quit
+gemini                # Google OAuth - sign in, trust this folder, then /quit
 scripts/configure.sh  # prompts for target repo; auto-discovers installation ID
 ```
 
 `configure.sh`:
 
 - Copies each gitignored config file (`reviewer.env`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from its `.example` sibling.
-- Prompts for `REVIEWER_REPO` (the App ID is already filled in from step 3).
+- Prompts for `REVIEWER_REPO` (the App ID is already filled in after `scripts/register-app.sh`; manual App registration prompts for it).
 - Auto-discovers the installation ID by minting an App token and looking up the install on the target repo.
 - Lists the personalities in `config/personalities/` and writes your pick to `REVIEWER_PERSONALITY_FILE` in `reviewer.env`.
 - Offers to open each config file in `$EDITOR`.
 - Offers to create the four helper labels on the target repo.
 
-The most consequential choice is **which personality** — it defines the reviewer's role, voice, and focus areas. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.
+The most consequential choice is **which personality**: it defines the reviewer's role, voice, and focus areas. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.
 
 ## 5. Dry Run
 
@@ -99,7 +99,7 @@ scripts/enable-cron.sh
 
 Installs a one-line crontab entry that runs `run-once.sh` every minute. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
 
-Prefer systemd? See [docs/daemon-runbook.md § Systemd Timer](daemon-runbook.md#systemd-timer).
+Prefer systemd? See [docs/daemon-runbook.md#systemd-timer](daemon-runbook.md#systemd-timer).
 
 Watch logs:
 
@@ -114,33 +114,8 @@ To pause: edit the crontab (`crontab -e`) and comment out the line, or `sudo sys
 
 ## Manual VM Setup
 
-For non-Cloud-Shell paths (own hardware, AWS, manual GCP, etc.).
+For non-Cloud-Shell paths (own hardware, AWS, manual GCP, corporate GitHub, etc.), keep the same order but use the canonical references for the pieces Cloud Shell normally automates:
 
-### 1. Provision The VM
-
-Use a small Ubuntu LTS VM. Minimum practical shape:
-
-- 1 vCPU.
-- 1-2 GB RAM (add 2 GB swap if you're at the low end).
-- 20 GB disk.
-- SSH access restricted to maintainers.
-
-See [docs/vm-setup.md](vm-setup.md) for install commands.
-
-### 2. Clone The Template
-
-```bash
-sudo mkdir -p /opt/goobreview
-sudo chown "$USER:$USER" /opt/goobreview
-git clone https://github.com/asavschaeffer/goobreview.git /opt/goobreview/example
-cd /opt/goobreview/example
-git checkout --detach origin/main
-```
-
-### 3. Register A GitHub App
-
-Follow [docs/github-app-setup.md § Manual registration](github-app-setup.md#manual-registration). Manually downloading the `.pem` and placing it at `/var/lib/goobreview/example/app-key.pem` (mode 0600) is the path. (If your environment allows it, `scripts/register-app.sh` still works from any machine that has `gcloud` configured to reach the VM, but the manifest flow assumes a publicly-reachable redirect URL.)
-
-### 4. Configure And Continue
-
-The on-VM portion of the flow (`gemini`, `scripts/configure.sh`, `scripts/dry-run.sh`, `scripts/enable-cron.sh`) is identical to the Cloud Shell path — pick it up at [Step 4 above](#4-finish-setup-on-the-vm).
+1. Provision a small Ubuntu LTS VM, install the tools, and clone the template using [docs/vm-setup.md](vm-setup.md).
+2. Register and install the App using [docs/github-app-setup.md](github-app-setup.md). If registering manually, place the `.pem` at `/var/lib/goobreview/example/app-key.pem` with mode `0600`.
+3. Continue at [Step 4 above](#4-finish-setup-on-the-vm) for Gemini auth, `scripts/configure.sh`, dry run, and scheduler enablement.

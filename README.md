@@ -8,28 +8,24 @@ GoobReview is designed for users who want to point a Google AI Pro-backed Gemini
 
 [![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/asavschaeffer/goobreview&cloudshell_tutorial=docs/cloud-shell-tutorial.md)
 
-Click the button to open this repo in [Google Cloud Shell](https://cloud.google.com/shell). Cloud Shell is a browser terminal with `gcloud` already authenticated to your Google account — no local installs needed. The tutorial pane will walk you through three commands:
+Click the button to open this repo in [Google Cloud Shell](https://cloud.google.com/shell). Cloud Shell is a browser terminal with `gcloud` already authenticated to your Google account - no local installs needed. The tutorial pane follows [docs/cloud-shell-tutorial.md](docs/cloud-shell-tutorial.md), which is the shortest path through provisioning, App registration, VM configuration, a dry run, and scheduler enablement.
 
 ```bash
-bash scripts/bootstrap-gcp.sh    # provisions an e2-micro VM (free tier) + installs deps
-bash scripts/register-app.sh     # registers a GitHub App, ships the key to the VM
-                                 # then ssh in and run scripts/configure.sh
+bash scripts/bootstrap-gcp.sh
+bash scripts/register-app.sh
 ```
 
-`bootstrap-gcp.sh` prompts for project / zone / VM name. `register-app.sh` uses GitHub's [Manifest Flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) — you click Cloud Shell's Web Preview, then two buttons (one to create the App, one to install it on your target repo). The App's private key arrives over the GitHub API and is uploaded to the VM automatically; it never touches your local machine.
+`bootstrap-gcp.sh` creates the VM and installs dependencies. `register-app.sh` uses GitHub's [Manifest Flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) to create the App, install it on your target repo, and place the private key on the VM without downloading it to your local machine.
 
 > Want your own copy to customize? Click **Use this template** at the top of this repo on GitHub. A first-push workflow (`.github/workflows/template-cleanup.yml`) auto-personalizes the Cloud Shell button, bootstrap script, and clone URL to point at your new repo.
 
 ## Manual Setup
 
-If you can't or don't want to use the one-click path — say, you already have a VM, or you're on a corporate GitHub that disallows manifest-flow App creation — the manual path is:
+If you can't or don't want to use the one-click path - say, you already have a VM, or you're on a corporate GitHub that disallows manifest-flow App creation - follow the same high-level order with the manual references:
 
-1. Provision a small Linux VM (1 vCPU, 1-2 GB RAM, 20 GB disk) and install `gh`, `jq`, Node 20, and Gemini CLI on it. See [docs/vm-setup.md](docs/vm-setup.md).
-2. Clone this template into `/opt/goobreview/example`.
-3. Register a GitHub App **manually** (clicking through the full permission list on GitHub) and install it on the target repo. See [docs/github-app-setup.md § Manual registration](docs/github-app-setup.md#manual-registration).
-4. Copy the App's private key onto the VM at `/var/lib/goobreview/example/app-key.pem` (mode 0600).
-5. Authenticate Gemini CLI with the Google account you want to use (Google AI Pro/Ultra accounts work).
-6. Run `scripts/configure.sh`, then enable cron or the systemd timer.
+1. Provision a small Linux VM and install the required tools. See [docs/vm-setup.md](docs/vm-setup.md).
+2. Register and install the GitHub App. See [docs/github-app-setup.md](docs/github-app-setup.md).
+3. Finish the on-VM flow in [docs/quickstart.md](docs/quickstart.md#4-finish-setup-on-the-vm): authenticate Gemini, run `scripts/configure.sh`, dry-run, then enable cron or systemd.
 
 The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews under a clearly-bot login (`<your-app>[bot]`) without burning a second GitHub user account or org seat. It can also add inline comments, update a managed PR checklist, and re-review every new PR head commit.
 
@@ -124,9 +120,9 @@ deploy/systemd/
 
 Three ways to shape what your reviewer does, in order of impact:
 
-1. **`config/personalities/<name>.md`** — role, voice, focus areas. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`. (The severity scale and verdict mapping live in the engine prompt, not here.)
-2. **`config/project-docs.txt`** — repository paths to fetch from the PR head and inline into every review prompt. Put your house style, architecture notes, and review standards here.
-3. **`config/head-context-paths.txt`** — extra files to fetch for reference validation (e.g. `package.json`, `.github/workflows/ci.yml`). The reviewer uses these to avoid hallucinating missing files or scripts.
+1. **`config/personalities/<name>.md`** - role, voice, focus areas. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`. (The severity scale and verdict mapping live in the engine prompt, not here.)
+2. **`config/project-docs.txt`** - repository paths to fetch from the PR head and inline into every review prompt. Put your house style, architecture notes, and review standards here.
+3. **`config/head-context-paths.txt`** - extra files to fetch for reference validation (e.g. `package.json`, `.github/workflows/ci.yml`). The reviewer uses these to avoid hallucinating missing files or scripts.
 
 `scripts/configure.sh` walks you through copying the `.example` files and editing them. See [docs/daemon-runbook.md](docs/daemon-runbook.md#configuration-reference) for the full reference.
 

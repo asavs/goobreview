@@ -1,5 +1,7 @@
 # Daemon Runbook
 
+Use this page as the operations and configuration reference after setup: runtime files, one-off runs, cron, systemd, config files, prompt invariants, and known limits.
+
 ## Runtime Files
 
 Preferred layout:

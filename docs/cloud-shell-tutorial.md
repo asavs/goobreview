@@ -1,6 +1,6 @@
 # GoobReview: Cloud Shell Setup
 
-This walkthrough provisions a small Compute Engine VM and installs the GoobReview reviewer daemon on it. Total time: about 5 minutes, plus two interactive OAuth steps at the end.
+This walkthrough is the Cloud Shell version of [docs/quickstart.md](quickstart.md). It provisions a small Compute Engine VM, registers the GitHub App, and then sends you to the shared on-VM setup steps.
 
 ## 1. Confirm your project
 
@@ -32,9 +32,9 @@ You'll be asked for three things (defaults shown in brackets):
 
 After you confirm, the script will:
 
-1. Create an `e2-micro` Ubuntu 24.04 VM with a 20 GB disk. `e2-micro` in `us-central1`, `us-west1`, or `us-east1` (excluding northern Virginia) is covered by GCP's always-free tier — one instance and 30 GB standard disk per month at no charge.
+1. Create the small Ubuntu VM described in [docs/vm-setup.md](vm-setup.md).
 2. Wait for SSH to become reachable
-3. Run `setup-vm.sh` on the VM, which installs `git`, `jq`, Node 20, GitHub CLI, and Gemini CLI, configures a 2 GB swap file (Gemini CLI can spike past `e2-micro`'s 1 GB of RAM), then clones the template into `/opt/goobreview/example`
+3. Run `setup-vm.sh` on the VM, which installs the required tools, configures swap, then clones the template into `/opt/goobreview/example`
 
 When it finishes, it will print an SSH command and the remaining manual steps.
 
@@ -50,10 +50,10 @@ bash scripts/register-app.sh
 
 This starts a tiny local server, then prompts you to:
 
-1. Click the **Web Preview** button (top right of Cloud Shell) → **Preview on port 8080**.
-2. In the new browser tab, click **Create GoobReview App on GitHub →**.
+1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port 8080**.
+2. In the new browser tab, click **Create GoobReview App on GitHub ->**.
 3. Confirm on GitHub (you can rename the App on that page if you want).
-4. Click **Install ... on a repo →** on the success page and pick your target repo.
+4. Click **Install ... on a repo ->** on the success page and pick your target repo.
 
 When the script finishes, the private key is already on the VM at `/var/lib/goobreview/example/app-key.pem` and the App ID is pre-filled in `reviewer.env`. The key never touches your local machine.
 
@@ -63,7 +63,7 @@ Registering the App under an organization instead of your personal account? Pass
 GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh
 ```
 
-(If you'd rather register manually — clicking through the full permission list on GitHub — see [docs/github-app-setup.md](github-app-setup.md).)
+(If you'd rather register manually, see [docs/github-app-setup.md](github-app-setup.md).)
 
 ## 4. Configure the reviewer
 
@@ -72,14 +72,14 @@ SSH to the VM, trust Gemini, and run the configure helper:
 ```bash
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 cd /opt/goobreview/example
-gemini                # Google OAuth — sign in, trust this folder, then /quit
+gemini                # Google OAuth - sign in, trust this folder, then /quit
 scripts/configure.sh
 ```
 
 `configure.sh` copies each gitignored config file (`reviewer.env`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from its `.example` sibling, prompts for the target repo, auto-discovers the installation ID, lets you pick a personality from `config/personalities/`, and offers to open each file in `$EDITOR`.
 
-Personality choice is the most consequential decision before your first dry run — it defines what kind of reviewer this is (general-purpose `control`, opinionated `linus`, etc.). `configure.sh` writes your pick into `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. To add a new personality, drop a `.md` file in `config/personalities/` and select it.
+Personality choice is the most consequential decision before your first dry run: it defines what kind of reviewer this is. `configure.sh` writes your pick into `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. See [docs/daemon-runbook.md#configuration-reference](daemon-runbook.md#configuration-reference) for the full config reference.
 
 ## 5. Dry run, then enable the scheduler
 
-Follow [docs/quickstart.md](quickstart.md) starting from step 6 (optional labels), step 7 (dry run), and step 8 (cron or systemd timer).
+Follow [docs/quickstart.md](quickstart.md) starting from [Step 5: Dry Run](quickstart.md#5-dry-run), then [Step 6: Enable The Scheduler](quickstart.md#6-enable-the-scheduler).

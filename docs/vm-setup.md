@@ -1,6 +1,13 @@
 # VM Setup
 
-Use a VM that can run `git`, `gh`, `jq`, `flock`, `timeout`, Node/npm, and Gemini CLI. Ubuntu LTS is the easiest default.
+Use this page for any non-Cloud-Shell install, or when you need to understand what `scripts/bootstrap-gcp.sh` and `scripts/setup-vm.sh` create for you. The VM needs `git`, `gh`, `jq`, `flock`, `timeout`, Node/npm, and Gemini CLI. Ubuntu LTS is the easiest default.
+
+Minimum practical shape:
+
+- 1 vCPU.
+- 1-2 GB RAM, with 2 GB swap at the low end.
+- 20 GB disk.
+- Outbound HTTPS and inbound SSH restricted to maintainers.
 
 ## Google Compute Engine Example
 
@@ -24,7 +31,7 @@ gcloud compute instances create goobreview-1 \
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 ```
 
-`e2-micro` (2 vCPU, 1 GB RAM) in `us-central1`, `us-west1`, or `us-east1` (excluding northern Virginia) is covered by GCP's always-free tier — one instance and 30 GB standard disk per month. Gemini CLI can spike past 1 GB during a review, so `scripts/setup-vm.sh` configures a 2 GB swap file by default; set `GOOBREVIEW_SWAP_SIZE=0` to skip if you're on a larger machine.
+`e2-micro` (2 vCPU, 1 GB RAM) in `us-central1`, `us-west1`, or `us-east1` (excluding northern Virginia) is covered by GCP's always-free tier - one instance and 30 GB standard disk per month. Gemini CLI can spike past 1 GB during a review, so `scripts/setup-vm.sh` configures a 2 GB swap file by default; set `GOOBREVIEW_SWAP_SIZE=0` to skip if you're on a larger machine.
 
 Keep firewall exposure minimal. The reviewer needs outbound HTTPS and inbound SSH only.
 
@@ -90,6 +97,20 @@ printf 'say hi in three words' | timeout 60s gemini -m auto -p ""
 ```
 
 If this prompts for authorization, reports an untrusted workspace, or times out, run `gemini` interactively again from the exact checkout path cron will use.
+
+## Clone The Template
+
+Use one stable checkout per reviewer identity:
+
+```bash
+sudo mkdir -p /opt/goobreview
+sudo chown "$USER:$USER" /opt/goobreview
+git clone https://github.com/asavschaeffer/goobreview.git /opt/goobreview/example
+cd /opt/goobreview/example
+git checkout --detach origin/main
+```
+
+The detached checkout is intentional for a VM-side daemon. `scripts/reviewer/sync-worktree.sh` keeps this checkout on the configured branch before each reviewer tick and refuses to run if the checkout is dirty.
 
 ## Dedicated User Option
 

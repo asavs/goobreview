@@ -1,6 +1,8 @@
 # Register A GitHub App For GoobReview
 
-GoobReview authenticates as a GitHub App so its reviews come from a bot identity (`<your-app-name>[bot]`). That identity is distinct from any human account, so it can submit `APPROVE`, `REQUEST_CHANGES`, and `COMMENT` reviews on PRs by any author. Apps don't consume paid-org seats, get scoped per-repo permissions, and are the same idiom Dependabot, Renovate, and CodeRabbit use.
+GoobReview authenticates as a GitHub App so its reviews come from a bot identity (`<your-app-name>[bot]`). This page is the source of truth for App identity, permissions, key handling, and manual registration. The end-to-end setup flow lives in [quickstart.md](quickstart.md).
+
+The App identity is distinct from any human account, so it can submit `APPROVE`, `REQUEST_CHANGES`, and `COMMENT` reviews on PRs by any author. Apps don't consume paid-org seats, get scoped per-repo permissions, and are the same idiom Dependabot, Renovate, and CodeRabbit use.
 
 ## Recommended: automatic registration with `register-app.sh`
 
@@ -19,7 +21,7 @@ The script starts a tiny local server, you click two buttons (one in Cloud Shell
 - Pre-populates `REVIEWER_APP_ID` in `config/reviewer.env` on the VM.
 - Prints the install URL so you can install the App on your target repo.
 
-When it finishes, ssh to the VM and run `scripts/configure.sh` — the App ID prompt will default to the right value, and installation-ID auto-discovery will pick up the install.
+When it finishes, ssh to the VM and run `scripts/configure.sh`. The App ID prompt will default to the right value, and installation-ID auto-discovery will pick up the install.
 
 The rest of this document describes the **manual** registration path, in case you can't use the automatic flow (no Cloud Shell, can't run a local web server, restrictive corporate GitHub, etc.).
 
@@ -27,7 +29,7 @@ The rest of this document describes the **manual** registration path, in case yo
 
 ### 1. Create The App
 
-Navigate to **Settings → Developer settings → GitHub Apps → New GitHub App** under your account, or the equivalent path under your organization's settings.
+Navigate to **Settings -> Developer settings -> GitHub Apps -> New GitHub App** under your account, or the equivalent path under your organization's settings.
 
 Fill in:
 
@@ -38,7 +40,7 @@ Fill in:
 - **Request user authorization (OAuth) during installation** — leave unchecked.
 - **Enable device flow** — leave unchecked.
 - **Setup URL** — leave blank.
-- **Webhook → Active** — *uncheck*. GoobReview polls; it doesn't receive webhooks.
+- **Webhook -> Active** - *uncheck*. GoobReview polls; it doesn't receive webhooks.
 - **Repository permissions** — GitHub shows a long list. Set only these five; leave everything else at **No access**:
 
   | Permission | Setting | Why |
