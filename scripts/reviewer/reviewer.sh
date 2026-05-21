@@ -8,6 +8,8 @@ REPO="${REVIEWER_REPO:-}"
 SKIP_USER="${REVIEWER_USER:-}"
 ONLY_PR="${REVIEWER_ONLY_PR:-}"
 DRY_RUN="${REVIEWER_DRY_RUN:-}"
+RENDER_PROMPT_ONLY="${REVIEWER_RENDER_PROMPT_ONLY:-}"
+PROMPT_OUT="${REVIEWER_PROMPT_OUT:-}"
 GEMINI_TIMEOUT="${REVIEWER_GEMINI_TIMEOUT:-600}"
 GEMINI_MODEL="${REVIEWER_GEMINI_MODEL:-auto}"
 GEMINI_QUOTA_DEFAULT_BACKOFF="${REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF:-3600}"
@@ -77,9 +79,11 @@ required_checks_display="$(load_required_checks_display)"
 PROJECT_DOC_PATHS="${REVIEWER_PROJECT_DOC_PATHS:-$(read_path_list "$PROJECT_DOCS_FILE" "$DEFAULT_PROJECT_DOC_PATHS")}"
 HEAD_CONTEXT_PATHS="${REVIEWER_HEAD_CONTEXT_PATHS:-$(read_path_list "$HEAD_CONTEXT_PATHS_FILE" "$DEFAULT_HEAD_CONTEXT_PATHS")}"
 
-if remaining=$(gemini_backoff_remaining); then
-  log "Gemini quota backoff active for ${remaining}s"
-  exit 0
+if [ -z "$RENDER_PROMPT_ONLY" ]; then
+  if remaining=$(gemini_backoff_remaining); then
+    log "Gemini quota backoff active for ${remaining}s"
+    exit 0
+  fi
 fi
 
 if [ -z "${GH_TOKEN:-}" ]; then
@@ -111,16 +115,18 @@ while IFS=$'\t' read -r num author head_sha; do
   fi
 
   seen_key="$num $head_sha"
-  if grep -qxF "$seen_key" "$SEEN_FILE"; then
+  if [ -z "$RENDER_PROMPT_ONLY" ] && grep -qxF "$seen_key" "$SEEN_FILE"; then
     continue
   fi
 
-  existing=$(gh api "repos/$REPO/pulls/$num/reviews" \
-    --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and .commit_id == \"$head_sha\")] | length")
-  if [ "$existing" -gt 0 ]; then
-    log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, marking seen"
-    echo "$seen_key" >> "$SEEN_FILE"
-    continue
+  if [ -z "$RENDER_PROMPT_ONLY" ]; then
+    existing=$(gh api "repos/$REPO/pulls/$num/reviews" \
+      --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and .commit_id == \"$head_sha\")] | length")
+    if [ "$existing" -gt 0 ]; then
+      log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, marking seen"
+      echo "$seen_key" >> "$SEEN_FILE"
+      continue
+    fi
   fi
 
   if ! ci_state=$(REQUIRED_CHECKS_JSON="$EFFECTIVE_REQUIRED_CHECKS_JSON" bash "$SCRIPT_DIR/check-ci.sh" "$REPO" "$head_sha" "$REQUIRED_CHECKS_FILE" 2>>"$LOG_FILE"); then
@@ -136,6 +142,11 @@ while IFS=$'\t' read -r num author head_sha; do
       continue
       ;;
     failing)
+      if [ -n "$RENDER_PROMPT_ONLY" ]; then
+        log "PR #$num@$head_sha: CI is failing, so no Gemini prompt would be sent"
+        review_actions=$((review_actions + 1))
+        continue
+      fi
       log "PR #$num@$head_sha: CI is failing, posting REQUEST_CHANGES without Gemini"
       ci_summary=$(gh pr checks "$num" --repo "$REPO" 2>>"$LOG_FILE" || true)
       ci_failure_body=$(cat <<EOF
@@ -182,6 +193,20 @@ EOF
 
   build_review_prompt "$num" "$head_sha" "$ci_state" "$required_checks_display" "$tree_tmp" "$prompt_tmp"
   rm -f "$tree_tmp"
+
+  if [ -n "$RENDER_PROMPT_ONLY" ]; then
+    if [ -n "$PROMPT_OUT" ] && [ "$PROMPT_OUT" != "-" ]; then
+      mkdir -p "$(dirname "$PROMPT_OUT")"
+      cp "$prompt_tmp" "$PROMPT_OUT"
+      log "Rendered prompt for PR #$num@$head_sha to $PROMPT_OUT"
+    else
+      cat "$prompt_tmp"
+      log "Rendered prompt for PR #$num@$head_sha to stdout"
+    fi
+    rm -f "$prompt_tmp"
+    review_actions=$((review_actions + 1))
+    continue
+  fi
 
   gemini_err_tmp=$(mktemp "$STATE_DIR/gemini.$num.err.XXXXXX")
   if ! review=$(run_gemini_review "$prompt_tmp" "$gemini_err_tmp"); then

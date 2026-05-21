@@ -40,6 +40,17 @@ set +a
 REVIEWER_DRY_RUN=1 REVIEWER_MAX_PRS=1 scripts/reviewer/reviewer.sh
 ```
 
+Render the exact Gemini prompt payload for one PR without calling Gemini
+or posting a review:
+
+```bash
+scripts/render-prompt.sh 123 /tmp/goobreview-prompt.md
+```
+
+Omit the output path to print the prompt to stdout. The PR must pass the
+configured required-check gate, because failing or pending CI means the
+daemon would not send a prompt to Gemini for that head commit.
+
 ## Cron
 
 Run every minute:

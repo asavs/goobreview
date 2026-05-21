@@ -70,11 +70,13 @@ validate_reviewer_config() {
   validate_bool_env REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE "$ALLOW_REQUIRED_CHECKS_OVERRIDE"
 
   require gh
-  require gemini
   require flock
   require jq
-  require timeout
   require node
+  if [ -z "${RENDER_PROMPT_ONLY:-}" ]; then
+    require gemini
+    require timeout
+  fi
 
   local var
   for var in REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH; do
