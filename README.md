@@ -35,7 +35,7 @@ The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `C
 - Skips PRs authored by the authenticated reviewer account.
 - Gates reviews on configured GitHub check-run names.
 - Fetches selected project documentation from the PR head.
-- Sends PR metadata, CI status, file tree, selected file contents, and diff to Gemini CLI.
+- Sends the prompt contract, CI gate, file tree, selected file contents, and diff to Gemini CLI.
 - Posts one consolidated GitHub review.
 - Records `PR_NUMBER HEAD_SHA` pairs only after successful review posting.
 

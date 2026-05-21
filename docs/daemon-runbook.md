@@ -121,9 +121,9 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 5. Reviews each `PR_NUMBER HEAD_SHA` once.
 6. Checks whether the App has already posted a review on the same head commit.
 7. Applies the required-check gate.
-8. Builds a prompt from base instructions, configured project docs, PR metadata, check summaries, file tree, selected file contents, and diff.
+8. Builds a prompt from personality text, the engine contract, required-CI gate, file tree, configured project docs, selected file contents, and diff.
 9. Runs Gemini CLI headlessly.
-10. Parses the verdict and optional metadata.
+10. Parses the verdict line.
 11. Posts a top-level GitHub review with `gh pr review`.
 12. Applies optional labels.
 13. Records the head in `seen.txt` only after successful posting.
@@ -263,7 +263,7 @@ voice, role, and focus — pick (or write) a file in
 
 - Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
 - Very large diffs may exceed useful Gemini context.
-- The daemon does not inspect full CI logs; it sees check summaries and the configured required-check state.
+- The daemon does not inspect full CI logs; it gates on the configured required-check state.
 - The daemon does not create follow-up issues automatically.
 - The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.
 - The checkout must stay clean. `sync-worktree.sh` refuses to run from a dirty checkout.

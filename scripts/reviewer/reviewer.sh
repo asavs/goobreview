@@ -171,8 +171,6 @@ EOF
 
   log "Reviewing PR #$num@$head_sha"
 
-  meta=$(gh pr view "$num" --repo "$REPO" --json title,body,author,baseRefName,headRefName,headRefOid,url)
-  checks=$(gh pr checks "$num" --repo "$REPO" 2>>"$LOG_FILE" || true)
   prompt_tmp=$(mktemp "$STATE_DIR/prompt.$num.XXXXXX")
   tree_tmp=$(mktemp "$STATE_DIR/tree.$num.XXXXXX")
 
@@ -182,7 +180,7 @@ EOF
     : >"$tree_tmp"
   fi
 
-  build_review_prompt "$num" "$head_sha" "$ci_state" "$required_checks_display" "$meta" "$checks" "$tree_tmp" "$prompt_tmp"
+  build_review_prompt "$num" "$head_sha" "$ci_state" "$required_checks_display" "$tree_tmp" "$prompt_tmp"
   rm -f "$tree_tmp"
 
   gemini_err_tmp=$(mktemp "$STATE_DIR/gemini.$num.err.XXXXXX")
