@@ -24,7 +24,7 @@ Forks are encouraged. The reviewer is designed to be specialized through
 **config files**, not by editing scripts. To change personality, edit (in
 order of impact):
 
-1. `config/personality.example.md` — role, focus areas, severity policy. The file already includes fork themes you can adapt: security-focused, frontend accessibility, infrastructure/deployment, test coverage, language-specific, documentation accuracy.
+1. `config/personality.example.md` — role, voice, focus areas. The file includes fork themes you can adapt: security-focused, frontend accessibility, infrastructure/deployment, test coverage, language-specific, documentation accuracy. Pre-built personalities also live in `config/personalities/` and can be picked during `configure.sh`. (The severity scale and verdict mapping live in the engine prompt, not here.)
 2. `config/project-docs.example.txt` — repo paths whose contents the reviewer should treat as your house standards.
 3. `config/head-context-paths.example.txt` — extra files the reviewer should fetch to ground itself against PR-head reality.
 4. `config/required-checks.example.json` — CI gates that must pass before the reviewer calls Gemini.

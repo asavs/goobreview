@@ -68,7 +68,7 @@ scripts/configure.sh  # prompts for target repo; auto-discovers installation ID
 - Offers to open each config file in `$EDITOR`.
 - Offers to create the four helper labels on the target repo.
 
-The most useful file to edit is **`personality.md`** — it defines the reviewer's role, focus, and severity policy. The example file includes a "Fork Themes" section with starting points for security, accessibility, language-specific reviewers, etc.
+The most useful file to edit is **`personality.md`** — it defines the reviewer's role, voice, and focus areas. The example file includes a "Fork Themes" section with starting points for security, accessibility, language-specific reviewers, etc. `configure.sh` also offers pre-built personalities from `config/personalities/` (e.g. `linus.md`) you can seed it from.
 
 ## 5. Dry Run
 

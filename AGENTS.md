@@ -9,7 +9,7 @@ When helping a user install it:
 - Keep one reviewer identity per VM checkout, GitHub App, Gemini auth, and state directory.
 - Never put GitHub App private keys, Gemini credentials, or cloud credentials in this repo. The App's `.pem` lives at `REVIEWER_APP_PRIVATE_KEY_PATH` on the VM (default `$REVIEWER_STATE/app-key.pem`, mode 0600).
 - Configure the target project through ignored local files copied from `config/*.example.*`: `config/reviewer.env`, `config/personality.md`, `config/project-docs.txt`, `config/head-context-paths.txt`, and `config/required-checks.json`. `scripts/configure.sh` walks the user through these interactively.
-- The user-facing customization surface is **`config/personality.md`** (role, focus, severity policy) and **`config/project-docs.txt`** (repo paths inlined into every prompt). Don't edit `scripts/reviewer/review-prompt.md` unless the user wants to change the engine's output contract or validation rules.
+- The user-facing customization surface is **`config/personality.md`** (role, voice, focus areas — pre-built options live in `config/personalities/`) and **`config/project-docs.txt`** (repo paths inlined into every prompt). The severity scale (P1/P2/P3) and verdict mapping live in the engine prompt — don't edit `scripts/reviewer/review-prompt.md` unless the user wants to change those contracts or the output format.
 - Run `REVIEWER_DRY_RUN=1` before enabling cron.
 - Enable cron only after a dry-run mints an installation token, Gemini headless mode works, required checks are configured, and a dry-run reviewer tick completes.
 

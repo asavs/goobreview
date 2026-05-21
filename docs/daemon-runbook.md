@@ -176,9 +176,16 @@ Environment for the daemon. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIE
 
 ### `personality.md`
 
-The reviewer's role, focus areas, and severity policy. **The main file
-you customize.** It is prepended to the engine prompt
-(`scripts/reviewer/review-prompt.md`) on every review.
+The reviewer's role, voice, and focus areas. **The main file you
+customize.** It is prepended to the engine prompt
+(`scripts/reviewer/review-prompt.md`) on every review. The severity
+scale (P1/P2/P3) and verdict mapping live in the engine prompt — this
+file may sharpen *what counts* as P1 for its lens, but does not
+redefine the scale.
+
+Pre-built personalities also live in `config/personalities/` (e.g.
+`linus.md`). `scripts/configure.sh` lists them and lets you seed
+`personality.md` from one.
 
 `config/personality.example.md` ships with sensible defaults for a
 general-purpose reviewer plus a "Fork Themes" section with starting
@@ -242,8 +249,8 @@ The daemon waits when required checks are missing or pending, and posts `REQUEST
 - Inline comments require `path` plus a right-side changed `line` value.
 
 Edit it only when you are intentionally changing those contracts. For
-everything else — voice, focus, severity — edit `config/personality.md`
-instead.
+voice, role, and focus — edit `config/personality.md` instead (or pick
+a pre-built one from `config/personalities/`).
 
 ## Known Limits
 

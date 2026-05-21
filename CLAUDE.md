@@ -26,9 +26,9 @@ State directory (`REVIEWER_STATE`, default `$HOME/.goobreview`) holds: `seen.txt
 
 **Prompt layering** — there are two prompt files and they have different owners:
 
-- `scripts/reviewer/review-prompt.md` (**engine, invariant**) — defines the output contract (verdict line + `REVIEW_META` JSON block) and the reference-validation rules. Parsed by `reviewer.sh`. Edit only if you're changing those contracts.
-- `config/personality.md` (**user, customizable**, falls back to `personality.example.md`) — defines the reviewer's role, focus, and severity policy. Prepended to the engine prompt. This is the surface forks are expected to edit. The example file has a "Fork Themes" section with security/accessibility/language-specific starting points.
-- `config/personalities/*.md` (**committed gallery**) — pre-built personalities (e.g. `linus.md`) users can pick from in `configure.sh`. Selecting one copies it to the gitignored `config/personality.md`. New personalities are added as PRs to this directory. The gallery is purely opt-in; `reviewer.sh` still reads `personality.md` and falls back to `personality.example.md` if it's missing.
+- `scripts/reviewer/review-prompt.md` (**engine, invariant**) — defines the output contract (verdict line + `REVIEW_META` JSON block), the severity scale (P1/P2/P3 definitions and verdict mapping), and the reference-validation rules. Parsed by `reviewer.sh`. Edit only if you're changing those contracts.
+- `config/personality.md` (**user, customizable**, falls back to `personality.example.md`) — defines the reviewer's **role, voice, and focus areas only**. Prepended to the engine prompt. It can sharpen *what counts as P1* for its lens, but it does not redefine the P1/P2/P3 scale or the verdict mapping — those are engine concerns. The example file has a "Fork Themes" section with security/accessibility/language-specific starting points.
+- `config/personalities/*.md` (**committed gallery**) — pre-built personalities (e.g. `linus.md`) users can pick from in `configure.sh`. Selecting one copies it to the gitignored `config/personality.md`. New personalities are added as PRs to this directory. Gallery entries should follow the same separation: voice + focus only, no severity-policy redefinition.
 
 Two contracts that span deployments — **never break these silently:**
 
