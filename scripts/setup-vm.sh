@@ -7,13 +7,28 @@ set -euo pipefail
 REPO_URL="${GOOBREVIEW_REPO_URL:-https://github.com/asavschaeffer/goobreview.git}"
 CHECKOUT_DIR="${GOOBREVIEW_CHECKOUT_DIR:-/opt/goobreview/example}"
 STATE_DIR="${GOOBREVIEW_STATE_DIR:-/var/lib/goobreview/example}"
-TARGET_USER="${GOOBREVIEW_USER:-$USER}"
+TARGET_USER="${GOOBREVIEW_USER:-${USER:-$(id -un)}}"
 
 log() { printf '[setup-vm] %s\n' "$*"; }
+die() { printf '[setup-vm] ERROR: %s\n' "$*" >&2; exit 1; }
+require_command() { command -v "$1" >/dev/null 2>&1 || die "$1 not found."; }
+require_absolute_path() {
+  local name="$1" value="$2"
+  case "$value" in
+    /*) ;;
+    *) die "$name must be an absolute path; got '$value'." ;;
+  esac
+}
 
 if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" = "root" ]; then
-  echo "Refusing to install for the root user. Re-run as a normal sudoer user, or set GOOBREVIEW_USER." >&2
-  exit 1
+  die "Refusing to install for the root user. Re-run as a normal sudoer user, or set GOOBREVIEW_USER."
+fi
+require_command sudo
+require_command apt-get
+require_absolute_path GOOBREVIEW_CHECKOUT_DIR "$CHECKOUT_DIR"
+require_absolute_path GOOBREVIEW_STATE_DIR "$STATE_DIR"
+if ! id -u "$TARGET_USER" >/dev/null 2>&1; then
+  die "Target user '$TARGET_USER' does not exist. Set GOOBREVIEW_USER to a real login user."
 fi
 
 log "apt: base packages"
@@ -103,5 +118,5 @@ cat <<EOF
   # private key into $STATE_DIR/app-key.pem, and run:
   scripts/configure.sh
 
-Then continue with docs/quickstart.md from step 6 (dry run, scheduler).
+Then continue with docs/quickstart.md from step 5 (dry run), then step 6 (scheduler).
 EOF

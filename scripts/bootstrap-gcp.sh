@@ -14,22 +14,14 @@ UPSTREAM_REPO="asavschaeffer/goobreview"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Convert a GitHub remote URL (ssh or https form) to canonical owner/repo.
-to_owner_repo() {
-  local url="$1"
-  case "$url" in
-    git@github.com:*) url="${url#git@github.com:}" ;;
-    https://github.com/*) url="${url#https://github.com/}" ;;
-    *) printf ''; return ;;
-  esac
-  url="${url%.git}"
-  printf '%s' "$url"
-}
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/ops.sh"
+OPS_LOG_PREFIX="bootstrap-gcp"
 
 detected_origin="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
-detected_owner_repo="$(to_owner_repo "$detected_origin")"
+detected_owner_repo="$(ops_to_owner_repo "$detected_origin")"
 if [ -z "$detected_owner_repo" ]; then
+  ops_warn "Could not detect a GitHub origin remote; using $UPSTREAM_REPO."
   detected_owner_repo="$UPSTREAM_REPO"
 fi
 
@@ -38,31 +30,16 @@ fi
 REPO_URL="${GOOBREVIEW_REPO_URL:-https://github.com/${detected_owner_repo}.git}"
 SETUP_VM_URL="${GOOBREVIEW_SETUP_VM_URL:-https://raw.githubusercontent.com/${detected_owner_repo}/main/scripts/setup-vm.sh}"
 
-prompt() {
-  local question="$1" default="$2" reply
-  if [ -n "$default" ]; then
-    read -r -p "$question [$default]: " reply
-    printf '%s' "${reply:-$default}"
-  else
-    read -r -p "$question: " reply
-    printf '%s' "$reply"
-  fi
-}
-
-if ! command -v gcloud >/dev/null 2>&1; then
-  echo "gcloud CLI not found. Run this in Google Cloud Shell, or install gcloud first." >&2
-  exit 1
-fi
+ops_require_command gcloud "Run this in Google Cloud Shell, or install gcloud first."
 
 current_project="$(gcloud config get-value project 2>/dev/null || true)"
-project="$(prompt 'GCP project ID' "$current_project")"
-if [ -z "$project" ]; then
-  echo "Project ID is required." >&2
-  exit 1
-fi
+project="$(ops_prompt 'GCP project ID' "$current_project")"
+ops_require_nonempty "Project ID" "$project"
 
-zone="$(prompt 'Zone' "$DEFAULT_ZONE")"
-vm_name="$(prompt 'VM name' "$DEFAULT_VM_NAME")"
+zone="$(ops_prompt 'Zone' "$DEFAULT_ZONE")"
+vm_name="$(ops_prompt 'VM name' "$DEFAULT_VM_NAME")"
+ops_require_nonempty "Zone" "$zone"
+ops_require_nonempty "VM name" "$vm_name"
 
 cat <<EOF
 
@@ -76,11 +53,7 @@ About to create:
   Source repo:   $REPO_URL
 
 EOF
-read -r -p "Proceed? [y/N] " confirm
-case "$confirm" in
-  y|Y|yes|YES) ;;
-  *) echo "Aborted."; exit 1 ;;
-esac
+ops_confirm "Proceed?" || { echo "Aborted."; exit 1; }
 
 gcloud config set project "$project" >/dev/null
 
@@ -145,6 +118,6 @@ To finish:
        gemini                # Google OAuth; trust this folder, /quit
        scripts/configure.sh  # App ID is pre-filled; auto-discovers installation ID
 
-Then continue with docs/quickstart.md from step 6 (labels, dry run, scheduler).
+Then continue with docs/quickstart.md from step 5 (dry run), then step 6 (scheduler).
 ============================================================
 EOF

@@ -9,27 +9,44 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${REVIEWER_ENV_FILE:-$REPO_ROOT/config/reviewer.env}"
+REVIEWER_SH="$SCRIPT_DIR/reviewer/reviewer.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/ops.sh"
+OPS_LOG_PREFIX="dry-run"
 
-if [ ! -f "$ENV_FILE" ]; then
-  echo "Missing $ENV_FILE. Run scripts/configure.sh first." >&2
-  exit 1
+ops_require_file "$ENV_FILE" "Run scripts/configure.sh first."
+ops_require_executable "$REVIEWER_SH" "This checkout looks incomplete."
+
+ops_source_env "$ENV_FILE"
+ops_require_envs REVIEWER_REPO REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH
+ops_validate_owner_repo "$REVIEWER_REPO" REVIEWER_REPO
+ops_validate_uint REVIEWER_APP_ID "$REVIEWER_APP_ID"
+ops_validate_uint REVIEWER_APP_INSTALLATION_ID "$REVIEWER_APP_INSTALLATION_ID"
+ops_require_file "$REVIEWER_APP_PRIVATE_KEY_PATH" "Set REVIEWER_APP_PRIVATE_KEY_PATH in $ENV_FILE."
+if [ ! -s "$REVIEWER_APP_PRIVATE_KEY_PATH" ] || [ ! -r "$REVIEWER_APP_PRIVATE_KEY_PATH" ]; then
+  ops_die "Private key is empty or unreadable: $REVIEWER_APP_PRIVATE_KEY_PATH"
 fi
-
-set -a
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-set +a
+if [ ! -d "$HOME/.gemini" ]; then
+  ops_die "Gemini CLI auth/trust state not found at $HOME/.gemini. Run 'gemini' once in this checkout, sign in, trust the folder, then /quit."
+fi
+for cmd in gh gemini jq node flock timeout; do
+  ops_require_command "$cmd" "Run scripts/setup-vm.sh first."
+done
 
 export REVIEWER_DRY_RUN=1
 export REVIEWER_MAX_PRS=1
 if [ -n "${1:-}" ]; then
+  ops_validate_uint PR_NUMBER "$1"
   export REVIEWER_ONLY_PR="$1"
   echo "[dry-run] Reviewing $REVIEWER_REPO PR #$REVIEWER_ONLY_PR (no review will be posted)..."
 else
   echo "[dry-run] Reviewing the oldest unseen PR in $REVIEWER_REPO (no review will be posted)..."
 fi
 
-"$SCRIPT_DIR/reviewer/reviewer.sh" || true
+set +e
+"$REVIEWER_SH"
+reviewer_status=$?
+set -e
 
 LOG_FILE="${REVIEWER_STATE:-/var/lib/goobreview/example}/log.txt"
 if [ -f "$LOG_FILE" ]; then
@@ -39,3 +56,5 @@ if [ -f "$LOG_FILE" ]; then
 else
   echo "Log file not found: $LOG_FILE" >&2
 fi
+
+exit "$reviewer_status"

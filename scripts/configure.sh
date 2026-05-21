@@ -14,40 +14,14 @@ CONFIG_DIR="$REPO_ROOT/config"
 ENV_FILE="$CONFIG_DIR/reviewer.env"
 EDITOR_CMD="${EDITOR:-nano}"
 APP_TOKEN_SH="$SCRIPT_DIR/reviewer/get-installation-token.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/ops.sh"
+OPS_LOG_PREFIX="configure"
 
-log() { printf '[configure] %s\n' "$*"; }
-
-ask() {
-  local prompt="$1" default="${2:-}" reply
-  if [ -n "$default" ]; then
-    read -r -p "$prompt [$default]: " reply
-    printf '%s' "${reply:-$default}"
-  else
-    read -r -p "$prompt: " reply
-    printf '%s' "$reply"
-  fi
-}
-
-confirm() {
-  local prompt="$1" reply
-  read -r -p "$prompt [y/N] " reply
-  case "$reply" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
-}
-
-copy_if_missing() {
-  local target="$1" example="$2"
-  if [ -f "$target" ]; then
-    log "$(basename "$target") already exists; leaving in place."
-    return 0
-  fi
-  if [ ! -f "$example" ]; then
-    log "Example $(basename "$example") missing; skipping $(basename "$target")."
-    return 1
-  fi
-  cp "$example" "$target"
-  log "Created $(basename "$target") from example."
-  return 0
-}
+log() { ops_log "$*"; }
+ask() { ops_prompt "$@"; }
+confirm() { ops_confirm "$@"; }
+copy_if_missing() { ops_copy_if_missing "$@"; }
 
 maybe_edit() {
   local file="$1"
@@ -56,26 +30,17 @@ maybe_edit() {
   fi
 }
 
-env_get() {
-  local name="$1"
-  awk -F= -v k="$name" '$1==k {sub(/^[^=]*=/,""); print; exit}' "$ENV_FILE" 2>/dev/null || true
-}
-
-env_set() {
-  local name="$1" value="$2" esc
-  esc=$(printf '%s' "$value" | sed -e 's|[\\/&]|\\&|g')
-  if grep -qE "^${name}=" "$ENV_FILE"; then
-    sed -i.bak "s|^${name}=.*|${name}=${esc}|" "$ENV_FILE"
-    rm -f "$ENV_FILE.bak"
-  else
-    printf '%s=%s\n' "$name" "$value" >> "$ENV_FILE"
-  fi
-}
+env_get() { ops_env_get "$ENV_FILE" "$@"; }
+env_set() { ops_env_set "$ENV_FILE" "$@"; }
 
 # --- Preflight: Gemini auth -----------------------------------------------
 # The reviewer shells out to `gemini` headlessly, which requires that the
 # current user has authenticated and trusted the checkout folder at least once.
 # Both auth and trust state live under ~/.gemini, so missing dir = unauthed.
+ops_require_command node "Run scripts/setup-vm.sh first."
+ops_require_command gemini "Run scripts/setup-vm.sh first, then authenticate Gemini."
+ops_require_executable "$APP_TOKEN_SH" "This checkout looks incomplete."
+ops_require_file "$CONFIG_DIR/reviewer.env.example" "This checkout looks incomplete."
 if [ ! -d "$HOME/.gemini" ]; then
   log "Warning: ~/.gemini not found — Gemini CLI does not look authenticated for $(whoami)."
   log "Without auth, dry runs and the reviewer daemon will fail. To authenticate:"
@@ -95,14 +60,15 @@ if [ -z "$current_repo" ] || [ "$current_repo" = "owner/repo" ]; then
     log "REVIEWER_REPO is required; aborting."
     exit 1
   fi
+  ops_validate_owner_repo "$current_repo" REVIEWER_REPO
   env_set REVIEWER_REPO "$current_repo"
+else
+  ops_validate_owner_repo "$current_repo" REVIEWER_REPO
 fi
 
 # Source for REVIEWER_STATE etc.
-set -a
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-set +a
+ops_source_env "$ENV_FILE"
+ops_require_nonempty "REVIEWER_STATE" "${REVIEWER_STATE:-}" "Set it in $ENV_FILE."
 
 # --- Step 2: GitHub App credentials ----------------------------------------
 cat <<EOF
@@ -123,6 +89,7 @@ if [ -z "$new_app_id" ]; then
   log "App ID required; aborting."
   exit 1
 fi
+ops_validate_uint REVIEWER_APP_ID "$new_app_id"
 env_set REVIEWER_APP_ID "$new_app_id"
 export REVIEWER_APP_ID="$new_app_id"
 
@@ -141,6 +108,11 @@ if [ ! -f "$key_path" ]; then
   log "Key file $key_path does not exist. scp it to the VM, then re-run."
   exit 1
 fi
+if [ ! -s "$key_path" ]; then
+  log "Key file $key_path is empty; aborting."
+  exit 1
+fi
+chmod 600 "$key_path"
 env_set REVIEWER_APP_PRIVATE_KEY_PATH "$key_path"
 export REVIEWER_APP_PRIVATE_KEY_PATH="$key_path"
 
@@ -210,6 +182,7 @@ done
 
 # --- Step 5: optional label creation ---------------------------------------
 if confirm "Create the four helper labels (agent-reviewed, agent-requested-changes, needs-human-decision, follow-up-candidates) on $current_repo now?"; then
+  ops_require_command gh "GitHub CLI is needed for label creation; setup-vm.sh installs it."
   if token=$("$APP_TOKEN_SH" 2>/dev/null); then
     GH_TOKEN="$token" "$SCRIPT_DIR/reviewer/ensure-labels.sh" || \
       log "ensure-labels.sh failed; you can re-run it later: GH_TOKEN=\$($APP_TOKEN_SH) scripts/reviewer/ensure-labels.sh"

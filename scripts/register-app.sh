@@ -10,6 +10,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/ops.sh"
+OPS_LOG_PREFIX="register-app"
 
 VM_NAME="${1:-goobreview-1}"
 ZONE="${2:-us-central1-a}"
@@ -18,18 +21,13 @@ VM_KEY_PATH="${REVIEWER_APP_PRIVATE_KEY_PATH:-/var/lib/goobreview/example/app-ke
 VM_ENV_PATH="${REVIEWER_ENV_FILE:-/opt/goobreview/example/config/reviewer.env}"
 VM_EXAMPLE_ENV_PATH="/opt/goobreview/example/config/reviewer.env.example"
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "node not found. In Cloud Shell, run 'sudo apt-get install -y nodejs' or use setup-vm.sh's install path." >&2
-  exit 1
-fi
-if ! command -v gcloud >/dev/null 2>&1; then
-  echo "gcloud not found. Run from Cloud Shell or install the gcloud CLI." >&2
-  exit 1
-fi
-if ! command -v jq >/dev/null 2>&1; then
-  echo "jq not found. In Cloud Shell, run 'sudo apt-get install -y jq'." >&2
-  exit 1
-fi
+ops_require_command node "In Cloud Shell, run 'sudo apt-get install -y nodejs' or use setup-vm.sh's install path."
+ops_require_command gcloud "Run from Cloud Shell or install the gcloud CLI."
+ops_require_command jq "In Cloud Shell, run 'sudo apt-get install -y jq'."
+ops_validate_uint GOOBREVIEW_REGISTER_PORT "$PORT"
+ops_require_nonempty "VM name" "$VM_NAME"
+ops_require_nonempty "Zone" "$ZONE"
+ops_require_file "$REPO_ROOT/config/app-manifest.json" "This checkout looks incomplete."
 
 # Fail fast if the VM doesn't exist — better to know now than after the user
 # clicks through the manifest flow and creates a real GitHub App.
@@ -87,6 +85,9 @@ fi
 APP_ID="$(jq -r .id "$OUTPUT_DIR/app.json")"
 APP_SLUG="$(jq -r .slug "$OUTPUT_DIR/app.json")"
 APP_NAME="$(jq -r .name "$OUTPUT_DIR/app.json")"
+ops_validate_uint "GitHub App ID returned by manifest flow" "$APP_ID"
+ops_require_nonempty "GitHub App slug returned by manifest flow" "$APP_SLUG"
+ops_require_nonempty "GitHub App name returned by manifest flow" "$APP_NAME"
 
 echo
 echo "App created: $APP_NAME (id=$APP_ID, slug=$APP_SLUG)"
