@@ -12,7 +12,7 @@ ENV_FILE="${REVIEWER_ENV_FILE:-$REPO_ROOT/config/reviewer.env}"
 RUN_ONCE="$SCRIPT_DIR/reviewer/run-once.sh"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
-OPS_LOG_PREFIX="enable-cron"
+export OPS_LOG_PREFIX="enable-cron"
 
 ops_require_command crontab "Install cron before enabling the scheduler."
 ops_require_file "$ENV_FILE" "Run scripts/configure.sh first."

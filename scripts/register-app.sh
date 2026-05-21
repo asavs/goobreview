@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
-OPS_LOG_PREFIX="register-app"
+export OPS_LOG_PREFIX="register-app"
 
 VM_NAME="${1:-goobreview-1}"
 ZONE="${2:-us-central1-a}"

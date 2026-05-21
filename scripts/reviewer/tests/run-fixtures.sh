@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Fixture globals are intentionally consumed by sourced reviewer libraries.
+# shellcheck disable=SC2034
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +63,7 @@ assert_contains() {
 test_output_parser() {
   local valid approve expected_body
 
+  # shellcheck disable=SC2016
   valid='VERDICT: REQUEST_CHANGES
 ## Summary
 This helper lets callers spoof users.
@@ -149,7 +152,7 @@ test_prompt_assembly() {
 
   gh() {
     local last_arg
-    last_arg="${@: -1}"
+    last_arg="${!#}"
     if [ "${1:-}" = "api" ]; then
       case "$last_arg" in
         *'/contents/AGENTS.md?'*)

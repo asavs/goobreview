@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
-OPS_LOG_PREFIX="bootstrap-gcp"
+export OPS_LOG_PREFIX="bootstrap-gcp"
 
 detected_origin="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
 detected_owner_repo="$(ops_to_owner_repo "$detected_origin")"

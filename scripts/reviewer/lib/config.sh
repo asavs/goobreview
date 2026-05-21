@@ -98,11 +98,11 @@ load_effective_required_checks_json() {
 
 load_required_checks_display() {
   if [ -n "$EFFECTIVE_REQUIRED_CHECKS_JSON" ]; then
-    required_checks_display="$EFFECTIVE_REQUIRED_CHECKS_JSON"
+    printf '%s\n' "$EFFECTIVE_REQUIRED_CHECKS_JSON"
     return 0
   fi
 
-  required_checks_display=$(jq -c . "$REQUIRED_CHECKS_FILE") || {
+  jq -c . "$REQUIRED_CHECKS_FILE" || {
     log "failed to read required checks from $REQUIRED_CHECKS_FILE"
     exit 1
   }

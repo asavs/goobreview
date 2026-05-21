@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Most top-level assignments are configuration globals consumed by sourced
+# reviewer libraries.
+# shellcheck disable=SC2034
 set -euo pipefail
 
 REPO="${REVIEWER_REPO:-}"
@@ -69,7 +72,7 @@ flock -n 9 || exit 0
 
 validate_reviewer_config
 load_effective_required_checks_json
-load_required_checks_display
+required_checks_display="$(load_required_checks_display)"
 
 PROJECT_DOC_PATHS="${REVIEWER_PROJECT_DOC_PATHS:-$(read_path_list "$PROJECT_DOCS_FILE" "$DEFAULT_PROJECT_DOC_PATHS")}"
 HEAD_CONTEXT_PATHS="${REVIEWER_HEAD_CONTEXT_PATHS:-$(read_path_list "$HEAD_CONTEXT_PATHS_FILE" "$DEFAULT_HEAD_CONTEXT_PATHS")}"

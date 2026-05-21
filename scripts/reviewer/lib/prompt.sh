@@ -96,7 +96,7 @@ build_review_prompt() {
   local meta="$5"
   local checks="$6"
   local tree_file="$7"
-  local prompt_file="$8"
+  local output_prompt_file="$8"
 
   {
     cat "$PERSONALITY_FILE"
@@ -112,5 +112,5 @@ build_review_prompt() {
     append_selected_head_context "$head_sha" "$tree_file"
     printf '\n---\nPR #%s diff:\n' "$num"
     gh pr diff "$num" --repo "$REPO"
-  } >"$prompt_file"
+  } >"$output_prompt_file"
 }

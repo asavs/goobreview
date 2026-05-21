@@ -54,7 +54,7 @@ if [ "$SWAP_SIZE" != "0" ]; then
   else
     log "Swap already active at $SWAPFILE"
   fi
-  if ! grep -qE "^$SWAPFILE[[:space:]]" /etc/fstab; then
+  if ! grep -qE "^${SWAPFILE}[[:space:]]" /etc/fstab; then
     echo "$SWAPFILE none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
   fi
 fi

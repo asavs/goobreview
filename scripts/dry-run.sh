@@ -12,7 +12,7 @@ ENV_FILE="${REVIEWER_ENV_FILE:-$REPO_ROOT/config/reviewer.env}"
 REVIEWER_SH="$SCRIPT_DIR/reviewer/reviewer.sh"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
-OPS_LOG_PREFIX="dry-run"
+export OPS_LOG_PREFIX="dry-run"
 
 ops_require_file "$ENV_FILE" "Run scripts/configure.sh first."
 ops_require_executable "$REVIEWER_SH" "This checkout looks incomplete."

@@ -88,6 +88,7 @@ else
 fi
 
 if [ "$REQUIRE_RESOLVED_THREADS" = "1" ]; then
+  # shellcheck disable=SC2016
   threads=$(gh api graphql \
     -f owner="$owner" \
     -f name="$repo_name" \

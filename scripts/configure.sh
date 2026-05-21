@@ -16,7 +16,7 @@ EDITOR_CMD="${EDITOR:-nano}"
 APP_TOKEN_SH="$SCRIPT_DIR/reviewer/get-installation-token.sh"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
-OPS_LOG_PREFIX="configure"
+export OPS_LOG_PREFIX="configure"
 
 log() { ops_log "$*"; }
 ask() { ops_prompt "$@"; }
