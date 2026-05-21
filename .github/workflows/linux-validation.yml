@@ -1,0 +1,72 @@
+name: Linux validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install validation tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
+          if sudo apt-get install -y shellcheck; then
+            echo "shellcheck_available=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::shellcheck is not available from apt; skipping ShellCheck."
+            echo "shellcheck_available=0" >> "$GITHUB_ENV"
+          fi
+
+      - name: Bash syntax
+        run: |
+          set -euo pipefail
+          mapfile -t shell_files < <(git ls-files '*.sh')
+          if [ "${#shell_files[@]}" -eq 0 ]; then
+            echo "No shell scripts found."
+            exit 0
+          fi
+          bash -n "${shell_files[@]}"
+
+      - name: Reviewer fixtures
+        run: bash scripts/reviewer/tests/run-fixtures.sh
+
+      - name: JSON validation
+        run: |
+          set -euo pipefail
+          mapfile -t json_files < <(git ls-files '*.json')
+          if [ "${#json_files[@]}" -eq 0 ]; then
+            echo "No JSON files found."
+            exit 0
+          fi
+          for file in "${json_files[@]}"; do
+            jq -e . "$file" >/dev/null
+          done
+
+      - name: ShellCheck
+        if: env.shellcheck_available == '1'
+        run: |
+          set -euo pipefail
+          mapfile -t shell_files < <(git ls-files '*.sh')
+          shellcheck "${shell_files[@]}"
+
+      - name: Whitespace
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --check "${{ github.event.pull_request.base.sha }}" HEAD
+          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            git diff-tree --check --no-commit-id --root -r HEAD
+          else
+            git diff --check "${{ github.event.before }}" HEAD
+          fi

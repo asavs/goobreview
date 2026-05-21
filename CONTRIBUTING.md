@@ -5,25 +5,31 @@ This template is intentionally small: shell scripts, prompt text, and setup docs
 ## Development Loop
 
 1. Make one focused change.
-2. Run syntax checks for changed shell scripts.
+2. Run the canonical Linux validation command.
 3. Run `git diff --check`.
 4. Keep example config generic and safe to publish.
 5. Open a PR that explains the target workflow and the checks run.
 
-Useful checks:
+Canonical local validation:
 
 ```bash
-bash -n scripts/reviewer/*.sh
-bash -n scripts/reviewer/lib/*.sh scripts/reviewer/tests/*.sh
+set -euo pipefail
+mapfile -t shell_files < <(git ls-files '*.sh')
+bash -n "${shell_files[@]}"
 bash scripts/reviewer/tests/run-fixtures.sh
-jq . config/required-checks.example.json
+mapfile -t json_files < <(git ls-files '*.json')
+for file in "${json_files[@]}"; do jq -e . "$file" >/dev/null; done
+if command -v shellcheck >/dev/null; then shellcheck "${shell_files[@]}"; else echo "shellcheck not installed; skipping"; fi
 git diff --check
 ```
 
-The fixture runner covers reviewer-core parser, prompt, and CI-gate behavior
-without GitHub credentials, Gemini auth, or network access. Run the shell
-checks from Linux or a working WSL environment; a Windows host with no WSL
-distribution is not authoritative for Bash syntax.
+The GitHub Actions workflow in `.github/workflows/linux-validation.yml` runs
+the same required checks on Ubuntu and installs `jq` through apt. It also
+enforces ShellCheck when apt can provide it; local runs may skip ShellCheck if
+it is not installed. The fixture runner covers reviewer-core parser, prompt,
+and CI-gate behavior without GitHub credentials, Gemini auth, or network
+access. Run the shell checks from Linux or a working WSL environment; a
+Windows host with no WSL distribution is not authoritative for Bash syntax.
 
 ## Forks And Reviewer Personalities
 
