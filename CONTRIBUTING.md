@@ -24,16 +24,18 @@ Forks are encouraged. The reviewer is designed to be specialized through
 **config files**, not by editing scripts. To change personality, edit (in
 order of impact):
 
-1. `config/personality.example.md` — role, voice, focus areas. The file includes fork themes you can adapt: security-focused, frontend accessibility, infrastructure/deployment, test coverage, language-specific, documentation accuracy. Pre-built personalities also live in `config/personalities/` and can be picked during `configure.sh`. (The severity scale and verdict mapping live in the engine prompt, not here.)
+1. `config/personalities/<name>.md` — role, voice, focus areas. Add new personalities by dropping a `.md` file in this directory. Existing entries (e.g. `linus.md`, `control.md`) are committed verbatim; pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. (The severity scale and verdict mapping live in the engine prompt, not here.)
 2. `config/project-docs.example.txt` — repo paths whose contents the reviewer should treat as your house standards.
 3. `config/head-context-paths.example.txt` — extra files the reviewer should fetch to ground itself against PR-head reality.
 4. `config/required-checks.example.json` — CI gates that must pass before the reviewer calls Gemini.
 
 Edit the `.example.*` siblings in your fork. End users will copy them to
-their non-example names with `scripts/configure.sh`.
+their non-example names with `scripts/configure.sh`. (Personalities are the
+exception — gallery files have no `.example` layer; users select an existing
+gallery entry or write a new one and PR it.)
 
-Keep forks honest about scope. If a reviewer is specialized, make
-`personality.md` say what it is good at and when it should use `COMMENT`
+Keep forks honest about scope. If a reviewer is specialized, make the
+personality file say what it is good at and when it should use `COMMENT`
 instead of pretending to approve or block.
 
 The engine prompt at `scripts/reviewer/review-prompt.md` owns the

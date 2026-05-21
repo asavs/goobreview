@@ -69,10 +69,10 @@ config/                              Per-deployment files. *.example.* ships;
                                      the non-example copy is gitignored.
   app-manifest.json                  GitHub App template used by register-app.sh
                                      (permissions, name pattern). Committed.
-  personality.example.md             Reviewer role, voice, focus areas.
-                                     The main file you customize.
-  personalities/                     Pre-built personalities (linus.md, etc.)
-                                     selectable via configure.sh.
+  personalities/                     Reviewer personalities (control.md,
+                                     linus.md, etc.). Pick one via
+                                     REVIEWER_PERSONALITY_FILE in reviewer.env.
+                                     The main thing you customize.
   project-docs.example.txt           Repo paths fetched from the PR head and
                                      pasted into every review prompt.
   head-context-paths.example.txt     Extra files fetched for reference validation
@@ -96,8 +96,8 @@ scripts/
   reviewer/
     reviewer.sh                      Poll, prompt Gemini, post reviews.
     review-prompt.md                 Engine prompt (output contract, severity
-                                     scale, validation rules). Edit
-                                     personality.md instead.
+                                     scale, validation rules). Edit a file
+                                     in config/personalities/ instead.
     run-once.sh                      Load env, sync checkout, run one tick.
     sync-worktree.sh                 Keep the daemon checkout detached at
                                      the configured branch.
@@ -124,7 +124,7 @@ deploy/systemd/
 
 Three ways to shape what your reviewer does, in order of impact:
 
-1. **`config/personality.md`** — role, voice, focus areas. Forking for security, accessibility, language-specific reviews, etc. happens here. The file includes example "fork themes" you can adapt, and `config/personalities/` ships pre-built options you can pick during `configure.sh`. (The severity scale and verdict mapping live in the engine prompt, not here.)
+1. **`config/personalities/<name>.md`** — role, voice, focus areas. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`. (The severity scale and verdict mapping live in the engine prompt, not here.)
 2. **`config/project-docs.txt`** — repository paths to fetch from the PR head and inline into every review prompt. Put your house style, architecture notes, and review standards here.
 3. **`config/head-context-paths.txt`** — extra files to fetch for reference validation (e.g. `package.json`, `.github/workflows/ci.yml`). The reviewer uses these to avoid hallucinating missing files or scripts.
 

@@ -29,14 +29,14 @@ DEFAULT_HEAD_CONTEXT_PATHS_FILE="$CONFIG_DIR/head-context-paths.txt"
 if [ ! -f "$DEFAULT_HEAD_CONTEXT_PATHS_FILE" ] && [ -f "$CONFIG_DIR/head-context-paths.example.txt" ]; then
   DEFAULT_HEAD_CONTEXT_PATHS_FILE="$CONFIG_DIR/head-context-paths.example.txt"
 fi
-DEFAULT_PERSONALITY_FILE="$CONFIG_DIR/personality.md"
-if [ ! -f "$DEFAULT_PERSONALITY_FILE" ] && [ -f "$CONFIG_DIR/personality.example.md" ]; then
-  DEFAULT_PERSONALITY_FILE="$CONFIG_DIR/personality.example.md"
-fi
 REQUIRED_CHECKS_FILE="${REVIEWER_REQUIRED_CHECKS_FILE:-$DEFAULT_REQUIRED_CHECKS_FILE}"
 PROJECT_DOCS_FILE="${REVIEWER_PROJECT_DOCS_FILE:-$DEFAULT_PROJECT_DOCS_FILE}"
 HEAD_CONTEXT_PATHS_FILE="${REVIEWER_HEAD_CONTEXT_PATHS_FILE:-$DEFAULT_HEAD_CONTEXT_PATHS_FILE}"
-PERSONALITY_FILE="${REVIEWER_PERSONALITY_FILE:-$DEFAULT_PERSONALITY_FILE}"
+PERSONALITY_FILE="${REVIEWER_PERSONALITY_FILE:-}"
+case "$PERSONALITY_FILE" in
+  ''|/*) ;;
+  *) PERSONALITY_FILE="$REPO_DIR/$PERSONALITY_FILE" ;;
+esac
 ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
 HEAD_CONTEXT_MAX_LINES="${REVIEWER_HEAD_CONTEXT_MAX_LINES:-180}"
 PROJECT_DOC_MAX_LINES="${REVIEWER_PROJECT_DOC_MAX_LINES:-240}"
@@ -59,6 +59,15 @@ log() { printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG_FILE"; }
 
 if [ -z "$REPO" ]; then
   log "missing REVIEWER_REPO; set it to owner/repo"
+  exit 1
+fi
+
+if [ -z "$PERSONALITY_FILE" ]; then
+  log "REVIEWER_PERSONALITY_FILE is required (set it in reviewer.env). See config/personalities/ for options."
+  exit 1
+fi
+if [ ! -f "$PERSONALITY_FILE" ]; then
+  log "REVIEWER_PERSONALITY_FILE points at '$PERSONALITY_FILE' which does not exist."
   exit 1
 fi
 
@@ -527,10 +536,8 @@ EOF
   fi
 
   {
-    if [ -f "$PERSONALITY_FILE" ]; then
-      cat "$PERSONALITY_FILE"
-      printf '\n---\n'
-    fi
+    cat "$PERSONALITY_FILE"
+    printf '\n---\n'
     cat "$PROMPT_FILE"
     printf '\n---\nPR #%s metadata (JSON):\n%s\n' "$num" "$meta"
     printf '\n---\nPR #%s required CI gate:\nstate: %s\nrequired checks: %s\n' "$num" "$ci_state" "$required_checks_display"

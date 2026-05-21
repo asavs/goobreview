@@ -174,27 +174,34 @@ without any edits.
 
 Environment for the daemon. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`. See `config/reviewer.env.example` for the full list with inline comments.
 
-### `personality.md`
+### Personality
 
-The reviewer's role, voice, and focus areas. **The main file you
-customize.** It is prepended to the engine prompt
-(`scripts/reviewer/review-prompt.md`) on every review. The severity
-scale (P1/P2/P3) and verdict mapping live in the engine prompt — this
-file may sharpen *what counts* as P1 for its lens, but does not
-redefine the scale.
+The reviewer's role, voice, and focus areas. **The main thing you
+customize.** Personalities live in `config/personalities/<name>.md`
+and are committed verbatim — there is no `.example` layer. Select one
+via `REVIEWER_PERSONALITY_FILE` in `reviewer.env` (defaults to
+`config/personalities/control.md`). The selected file is prepended to
+the engine prompt (`scripts/reviewer/review-prompt.md`) on every review.
 
-Pre-built personalities also live in `config/personalities/` (e.g.
-`linus.md`). `scripts/configure.sh` lists them and lets you seed
-`personality.md` from one.
+The severity scale (P1/P2/P3) and verdict mapping live in the engine
+prompt — personalities may sharpen *what counts* as P1 for their lens,
+but do not redefine the scale.
 
-`config/personality.example.md` ships with sensible defaults for a
-general-purpose reviewer plus a "Fork Themes" section with starting
-points for security, accessibility, test coverage, language-specific,
-documentation-accuracy, and infrastructure reviewers.
+Available out of the box:
 
-Override at runtime by setting `REVIEWER_PERSONALITY_FILE` to a different
-path — useful for running multiple reviewer personalities from the same
-checkout.
+- `control.md` — Role + responsibilities only, no voice. Sensible
+  default for general-purpose review and the research-baseline arm of
+  any A/B comparison.
+- `linus.md` — Opinionated, profane-when-warranted voice on top of the
+  same Role.
+
+To add a new personality, drop a `.md` file in `config/personalities/`
+and point `REVIEWER_PERSONALITY_FILE` at it. To run a dry-run with a
+different personality, override the env var inline:
+
+```bash
+REVIEWER_PERSONALITY_FILE=config/personalities/linus.md scripts/dry-run.sh 42
+```
 
 ### `project-docs.txt`
 
@@ -249,8 +256,8 @@ The daemon waits when required checks are missing or pending, and posts `REQUEST
 - Inline comments require `path` plus a right-side changed `line` value.
 
 Edit it only when you are intentionally changing those contracts. For
-voice, role, and focus — edit `config/personality.md` instead (or pick
-a pre-built one from `config/personalities/`).
+voice, role, and focus — pick (or write) a file in
+`config/personalities/` and point `REVIEWER_PERSONALITY_FILE` at it.
 
 ## Known Limits
 

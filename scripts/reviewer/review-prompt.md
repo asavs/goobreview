@@ -8,9 +8,9 @@ only if you are intentionally changing those contracts — the runtime
 parser in `scripts/reviewer/reviewer.sh` makes the same assumptions.
 
 The reviewer's role, voice, and focus areas live in
-`config/personality.md` (copied from `config/personality.example.md`
-or `config/personalities/<name>.md` by `scripts/configure.sh`). That
-file is prepended to this one at runtime.
+`config/personalities/<name>.md`, selected at runtime via
+`REVIEWER_PERSONALITY_FILE` in `reviewer.env`. That file is prepended
+to this one at runtime.
 
 ---
 

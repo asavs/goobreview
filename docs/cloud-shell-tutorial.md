@@ -76,9 +76,9 @@ gemini                # Google OAuth — sign in, trust this folder, then /quit
 scripts/configure.sh
 ```
 
-`configure.sh` copies each gitignored config file (`reviewer.env`, `personality.md`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from its `.example` sibling, prompts for the target repo, auto-discovers the installation ID, and offers to open each file in `$EDITOR`.
+`configure.sh` copies each gitignored config file (`reviewer.env`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from its `.example` sibling, prompts for the target repo, auto-discovers the installation ID, lets you pick a personality from `config/personalities/`, and offers to open each file in `$EDITOR`.
 
-`personality.md` is the most useful one to edit before your first dry run — it defines what kind of reviewer this is (general-purpose, security-focused, accessibility-focused, etc.). The example file ships with sensible defaults plus a "Fork Themes" section you can adapt.
+Personality choice is the most consequential decision before your first dry run — it defines what kind of reviewer this is (general-purpose `control`, opinionated `linus`, etc.). `configure.sh` writes your pick into `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. To add a new personality, drop a `.md` file in `config/personalities/` and select it.
 
 ## 5. Dry run, then enable the scheduler
 

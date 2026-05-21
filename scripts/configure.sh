@@ -162,38 +162,43 @@ if confirm "Open reviewer.env in $EDITOR_CMD to review other settings?"; then
   "$EDITOR_CMD" "$ENV_FILE"
 fi
 
-# --- Step 3: other config files --------------------------------------------
-# personality.md is handled first (and specially): if config/personalities/ has
-# pre-built personalities, let the user pick one; otherwise fall back to the
-# general-purpose personality.example.md.
-PERSONALITY_TARGET="$CONFIG_DIR/personality.md"
+# --- Step 3: personality ---------------------------------------------------
+# Pick a gallery entry and write its path into REVIEWER_PERSONALITY_FILE.
+# To add a new personality, drop a .md file in config/personalities/.
 PERSONALITY_GALLERY="$CONFIG_DIR/personalities"
-if [ -f "$PERSONALITY_TARGET" ]; then
-  log "personality.md already exists; leaving in place."
-else
-  gallery=()
-  if [ -d "$PERSONALITY_GALLERY" ]; then
-    while IFS= read -r f; do
-      gallery+=("$f")
-    done < <(find "$PERSONALITY_GALLERY" -maxdepth 1 -type f -name '*.md' | sort)
-  fi
-  personality_source="$CONFIG_DIR/personality.example.md"
-  if [ ${#gallery[@]} -gt 0 ]; then
-    log "Available personalities:"
-    log "  0) default  (general-purpose, from personality.example.md)"
-    for i in "${!gallery[@]}"; do
-      log "  $((i+1))) $(basename "${gallery[$i]}" .md)"
-    done
-    pick=$(ask 'Pick a personality by number' '0')
-    if [[ "$pick" =~ ^[0-9]+$ ]] && [ "$pick" -ge 1 ] && [ "$pick" -le "${#gallery[@]}" ]; then
-      personality_source="${gallery[$((pick-1))]}"
-    fi
-  fi
-  cp "$personality_source" "$PERSONALITY_TARGET"
-  log "Created personality.md from $(basename "$personality_source")."
-  maybe_edit "$PERSONALITY_TARGET"
+gallery=()
+if [ -d "$PERSONALITY_GALLERY" ]; then
+  while IFS= read -r f; do
+    gallery+=("$f")
+  done < <(find "$PERSONALITY_GALLERY" -maxdepth 1 -type f -name '*.md' | sort)
+fi
+if [ ${#gallery[@]} -eq 0 ]; then
+  log "No personalities found in $PERSONALITY_GALLERY; cannot continue."
+  exit 1
 fi
 
+current_personality=$(env_get REVIEWER_PERSONALITY_FILE)
+default_idx=0
+log "Available personalities:"
+for i in "${!gallery[@]}"; do
+  rel="${gallery[$i]#$REPO_ROOT/}"
+  marker=" "
+  if [ "$rel" = "$current_personality" ]; then
+    marker="*"
+    default_idx="$i"
+  fi
+  log "  $i) [$marker] $(basename "${gallery[$i]}" .md)"
+done
+pick=$(ask 'Pick a personality by number' "$default_idx")
+if [[ "$pick" =~ ^[0-9]+$ ]] && [ "$pick" -ge 0 ] && [ "$pick" -lt "${#gallery[@]}" ]; then
+  chosen="${gallery[$pick]#$REPO_ROOT/}"
+  env_set REVIEWER_PERSONALITY_FILE "$chosen"
+  log "Set REVIEWER_PERSONALITY_FILE=$chosen"
+else
+  log "Invalid choice; leaving REVIEWER_PERSONALITY_FILE as-is."
+fi
+
+# --- Step 4: other config files --------------------------------------------
 for name in project-docs.txt head-context-paths.txt required-checks.json; do
   base="${name%.*}"
   ext="${name##*.}"
@@ -203,7 +208,7 @@ for name in project-docs.txt head-context-paths.txt required-checks.json; do
   fi
 done
 
-# --- Step 4: optional label creation ---------------------------------------
+# --- Step 5: optional label creation ---------------------------------------
 if confirm "Create the four helper labels (agent-reviewed, agent-requested-changes, needs-human-decision, follow-up-candidates) on $current_repo now?"; then
   if token=$("$APP_TOKEN_SH" 2>/dev/null); then
     GH_TOKEN="$token" "$SCRIPT_DIR/reviewer/ensure-labels.sh" || \
