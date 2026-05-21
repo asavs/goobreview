@@ -14,9 +14,16 @@ Useful checks:
 
 ```bash
 bash -n scripts/reviewer/*.sh
+bash -n scripts/reviewer/lib/*.sh scripts/reviewer/tests/*.sh
+bash scripts/reviewer/tests/run-fixtures.sh
 jq . config/required-checks.example.json
 git diff --check
 ```
+
+The fixture runner covers reviewer-core parser, prompt, and CI-gate behavior
+without GitHub credentials, Gemini auth, or network access. Run the shell
+checks from Linux or a working WSL environment; a Windows host with no WSL
+distribution is not authoritative for Bash syntax.
 
 ## Forks And Reviewer Personalities
 
