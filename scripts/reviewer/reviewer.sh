@@ -11,7 +11,6 @@ GEMINI_QUOTA_DEFAULT_BACKOFF="${REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF:-3600}"
 GEMINI_QUOTA_BACKOFF_PADDING="${REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING:-300}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
-UPDATE_CHECKLIST="${REVIEWER_UPDATE_CHECKLIST:-1}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
@@ -152,7 +151,7 @@ EOF
         review_actions=$((review_actions + 1))
         continue
       fi
-      if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body" "[]"; then
+      if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body"; then
         echo "$seen_key" >> "$SEEN_FILE"
         log "Posted REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
         review_actions=$((review_actions + 1))
@@ -173,17 +172,11 @@ EOF
   checks=$(gh pr checks "$num" --repo "$REPO" 2>>"$LOG_FILE" || true)
   prompt_tmp=$(mktemp "$STATE_DIR/prompt.$num.XXXXXX")
   tree_tmp=$(mktemp "$STATE_DIR/tree.$num.XXXXXX")
-  diff_paths_tmp=$(mktemp "$STATE_DIR/diff-paths.$num.XXXXXX")
 
   if ! gh api "repos/$REPO/git/trees/$head_sha?recursive=1" \
     --jq '.tree[] | select(.type=="blob") | .path' >"$tree_tmp" 2>>"$LOG_FILE"; then
     log "PR #$num@$head_sha: failed to read PR head file tree; continuing with empty tree context"
     : >"$tree_tmp"
-  fi
-
-  if ! gh pr diff "$num" --repo "$REPO" --name-only >"$diff_paths_tmp" 2>>"$LOG_FILE"; then
-    log "PR #$num@$head_sha: failed to read PR diff paths; inline comments will rely on GitHub validation"
-    rm -f "$diff_paths_tmp"
   fi
 
   build_review_prompt "$num" "$head_sha" "$ci_state" "$required_checks_display" "$meta" "$checks" "$tree_tmp" "$prompt_tmp"
@@ -193,7 +186,7 @@ EOF
   if ! review=$(run_gemini_review "$prompt_tmp" "$gemini_err_tmp"); then
     cat "$gemini_err_tmp" >> "$LOG_FILE"
     set_gemini_quota_backoff "$gemini_err_tmp" || true
-    rm -f "$prompt_tmp" "$gemini_err_tmp" "$diff_paths_tmp"
+    rm -f "$prompt_tmp" "$gemini_err_tmp"
     log "gemini failed for PR #$num, will retry next tick"
     continue
   fi
@@ -201,23 +194,17 @@ EOF
   rm -f "$prompt_tmp" "$gemini_err_tmp"
 
   if [ -z "${review// }" ]; then
-    rm -f "$diff_paths_tmp"
     log "gemini returned empty for PR #$num, will retry next tick"
     continue
   fi
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
-    rm -f "$diff_paths_tmp"
     verdict_line=$(printf '%s' "$review" | grep -m 1 '^VERDICT: ' || true)
     log "PR #$num: gemini did not emit a valid VERDICT line (got: $verdict_line), will retry next tick"
     continue
   fi
 
-  meta_json=$(printf '%s' "$review" | review_meta_json_or_empty "PR #$num")
-  comments_json=$(review_inline_comments_json "$meta_json" "$diff_paths_tmp")
-  rm -f "$diff_paths_tmp"
-
-  review_body=$(printf '%s' "$review" | review_body_after_verdict | strip_review_meta)
+  review_body=$(printf '%s' "$review" | review_body_after_verdict)
   if [ "$author" = "$BOT_LOGIN" ] && [ "$event" != "COMMENT" ]; then
     log "PR #$num is authored by $BOT_LOGIN; posting $event verdict as COMMENT"
     event="COMMENT"
@@ -238,15 +225,13 @@ EOF
 )
 
   if [ -n "$DRY_RUN" ]; then
-    inline_count=$(printf '%s' "$comments_json" | jq 'length')
-    log "Dry run: would post $event review on PR #$num@$head_sha with $inline_count inline comments"
+    log "Dry run: would post $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
     continue
   fi
 
-  if post_review "$num" "$event" "$body" "$comments_json"; then
-    sync_pr_checklist "$num" "$meta_json" || log "PR #$num: failed to sync agent checklist"
-    apply_review_labels "$num" "$event" "$meta_json" || log "PR #$num: failed to apply review labels"
+  if post_review "$num" "$event" "$body"; then
+    apply_review_labels "$num" "$event" || log "PR #$num: failed to apply review labels"
     echo "$seen_key" >> "$SEEN_FILE"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))

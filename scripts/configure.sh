@@ -181,7 +181,7 @@ for name in project-docs.txt head-context-paths.txt required-checks.json; do
 done
 
 # --- Step 5: optional label creation ---------------------------------------
-if confirm "Create the four helper labels (agent-reviewed, agent-requested-changes, needs-human-decision, follow-up-candidates) on $current_repo now?"; then
+if confirm "Create the helper labels (agent-reviewed, agent-requested-changes, needs-human-decision) on $current_repo now?"; then
   ops_require_command gh "GitHub CLI is needed for label creation; setup-vm.sh installs it."
   if token=$("$APP_TOKEN_SH" 2>/dev/null); then
     GH_TOKEN="$token" "$SCRIPT_DIR/reviewer/ensure-labels.sh" || \

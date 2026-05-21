@@ -59,98 +59,32 @@ assert_contains() {
 }
 
 test_output_parser() {
-  local diff_paths meta comments invalid duplicate missing_meta fenced p2_only
-  diff_paths="$TMP_ROOT/diff-paths.txt"
-  printf 'src/auth.py\n' > "$diff_paths"
+  local valid approve expected_body
 
   valid='VERDICT: REQUEST_CHANGES
 ## Summary
-Review body.
+This helper lets callers spoof users.
 
-<!-- REVIEW_META
-{
-  "findings": [
-    {
-      "id": "p1-user-spoofing",
-      "severity": "P1",
-      "title": "User spoofing",
-      "path": "src/auth.py",
-      "line": 42,
-      "body": "Use the authenticated session user instead.",
-      "blocking": true,
-      "follow_up": false
-    },
-    {
-      "id": "p2-unanchored",
-      "severity": "P2",
-      "title": "Unanchored",
-      "path": "src/auth.py",
-      "line": null,
-      "body": "Needs a follow-up.",
-      "blocking": false,
-      "follow_up": false
-    },
-    {
-      "id": "p1-bogus-path",
-      "severity": "P1",
-      "title": "Bogus path",
-      "path": "docs/nope.md",
-      "line": 1,
-      "body": "This should not inline because the path is not in the diff.",
-      "blocking": true,
-      "follow_up": false
-    }
-  ],
-  "follow_up_issues": []
-}
-REVIEW_META -->'
+## Blocking Findings
+### [P1] User spoofing
+**File:** `src/auth.py:42`
+**What can break:** Anyone can select a different user by query string.
+**Suggested fix:** Use the authenticated session user instead.'
+  expected_body=$(printf '%s' "$valid" | sed '1d')
 
   assert_eq "valid verdict maps to event" "REQUEST_CHANGES" "$(printf '%s' "$valid" | review_verdict_event)"
-  meta=$(printf '%s' "$valid" | review_meta_json_or_empty "fixture valid")
-  comments=$(review_inline_comments_json "$meta" "$diff_paths")
-  assert_eq "only changed numeric-line findings become inline comments" "1" "$(printf '%s' "$comments" | jq 'length')"
-  assert_eq "inline comment keeps finding id" "p1-user-spoofing" "$(printf '%s' "$comments" | jq -r '.[0].body | capture("Finding-ID: (?<id>[^`]+)").id')"
+  assert_eq "review body strips only verdict line" "$expected_body" "$(printf '%s' "$valid" | review_body_after_verdict)"
+  assert_eq "file and line references stay in body" "1" "$(printf '%s' "$valid" | review_body_after_verdict | grep -c 'src/auth.py:42')"
 
   if printf 'VERDICT: NOPE\n' | review_verdict_event >/dev/null; then
     fail "malformed verdict is rejected"
   fi
   pass "malformed verdict is rejected"
 
-  missing_meta='VERDICT: APPROVE
+  approve='VERDICT: APPROVE
 ## Summary
 No findings.'
-  assert_eq "missing metadata yields empty metadata" "" "$(printf '%s' "$missing_meta" | review_meta_json_or_empty "fixture missing")"
-
-  fenced='VERDICT: COMMENT
-<!-- REVIEW_META
-```json
-{"findings":[],"follow_up_issues":[]}
-```
-REVIEW_META -->'
-  assert_eq "fenced metadata is still parsed for compatibility" "0" "$(printf '%s' "$fenced" | review_meta_json_or_empty "fixture fenced" | jq '.findings | length')"
-
-  invalid='VERDICT: COMMENT
-<!-- REVIEW_META
-{"findings": [
-REVIEW_META -->'
-  assert_eq "invalid metadata is ignored" "" "$(printf '%s' "$invalid" | review_meta_json_or_empty "fixture invalid")"
-
-  duplicate='VERDICT: COMMENT
-<!-- REVIEW_META
-{"findings":[]}
-REVIEW_META -->
-<!-- REVIEW_META
-{"findings":[]}
-REVIEW_META -->'
-  assert_eq "duplicate metadata blocks are ignored" "" "$(printf '%s' "$duplicate" | review_meta_json_or_empty "fixture duplicate")"
-
-  p2_only='VERDICT: APPROVE
-<!-- REVIEW_META
-{"findings":[{"id":"p2-note","severity":"P2","title":"Note","path":"src/auth.py","line":42,"body":"Optional fix.","blocking":false}],"follow_up_issues":[]}
-REVIEW_META -->'
-  meta=$(printf '%s' "$p2_only" | review_meta_json_or_empty "fixture p2")
-  assert_eq "P2-only approve output remains parseable" "APPROVE" "$(printf '%s' "$p2_only" | review_verdict_event)"
-  assert_eq "P2-only findings can still be inlined" "1" "$(review_inline_comments_json "$meta" "$diff_paths" | jq 'length')"
+  assert_eq "approve output remains parseable without metadata" "APPROVE" "$(printf '%s' "$approve" | review_verdict_event)"
 }
 
 test_ci_states() {

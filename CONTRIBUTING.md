@@ -52,7 +52,7 @@ personality file say what it is good at and when it should use `COMMENT`
 instead of pretending to approve or block.
 
 The engine prompt at `scripts/reviewer/review-prompt.md` owns the
-verdict-line format and `REVIEW_META` JSON block that `reviewer.sh`
+verdict-line format and markdown review shape that `reviewer.sh`
 parses. Don't edit it unless you are intentionally changing the engine's
 output contract.
 

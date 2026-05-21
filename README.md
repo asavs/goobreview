@@ -27,7 +27,7 @@ If you can't or don't want to use the one-click path - say, you already have a V
 2. Register and install the GitHub App. See [docs/github-app-setup.md](docs/github-app-setup.md).
 3. Finish the on-VM flow in [docs/quickstart.md](docs/quickstart.md#4-finish-setup-on-the-vm): authenticate Gemini, run `scripts/configure.sh`, dry-run, then enable cron or systemd.
 
-The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews under a clearly-bot login (`<your-app>[bot]`) without burning a second GitHub user account or org seat. It can also add inline comments, update a managed PR checklist, and re-review every new PR head commit.
+The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews under a clearly-bot login (`<your-app>[bot]`) without burning a second GitHub user account or org seat. It can also apply helper labels and re-review every new PR head commit.
 
 ## What It Does
 
@@ -130,4 +130,4 @@ Three ways to shape what your reviewer does, in order of impact:
 
 The daemon trusts a GitHub App installation token (minted from a private key stored at `REVIEWER_APP_PRIVATE_KEY_PATH`) and local `gemini` authentication on the VM. Keep the private key file at mode `0600`, owned by the user that runs the cron. Do not run this from a developer's active working checkout.
 
-The daemon does not merge PRs and does not edit source code. It only posts reviews, updates a managed checklist block in PR bodies, and applies optional labels.
+The daemon does not merge PRs and does not edit source code. It only posts reviews and applies optional labels.

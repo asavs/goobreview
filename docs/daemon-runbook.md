@@ -124,10 +124,9 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 8. Builds a prompt from base instructions, configured project docs, PR metadata, check summaries, file tree, selected file contents, and diff.
 9. Runs Gemini CLI headlessly.
 10. Parses the verdict and optional metadata.
-11. Posts a GitHub review and best-effort inline comments.
-12. Updates the managed checklist block in the PR body.
-13. Applies optional labels.
-14. Records the head in `seen.txt` only after successful posting.
+11. Posts a top-level GitHub review with `gh pr review`.
+12. Applies optional labels.
+13. Records the head in `seen.txt` only after successful posting.
 
 ## Operations
 
@@ -246,16 +245,15 @@ The daemon waits when required checks are missing or pending, and posts `REQUEST
 
 ### Labels (optional)
 
-`scripts/reviewer/ensure-labels.sh` creates or updates four labels in the target repo: `agent-reviewed`, `agent-requested-changes`, `needs-human-decision`, `follow-up-candidates`. Review posting does not depend on them.
+`scripts/reviewer/ensure-labels.sh` creates or updates three labels in the target repo: `agent-reviewed`, `agent-requested-changes`, and `needs-human-decision`. Review posting does not depend on them.
 
 ### Engine Prompt (Advanced)
 
-`scripts/reviewer/review-prompt.md` defines the output contract that
-`reviewer.sh` parses:
+`scripts/reviewer/review-prompt.md` defines the small output contract
+that `reviewer.sh` parses:
 
 - The first verdict line must be `VERDICT: APPROVE`, `VERDICT: REQUEST_CHANGES`, or `VERDICT: COMMENT`.
-- The metadata block must remain valid JSON between `<!-- REVIEW_META` and `REVIEW_META -->`.
-- Inline comments require `path` plus a right-side changed `line` value.
+- Findings should include markdown file/line references such as `**File:** path/to/file.ts:42` when an anchor is available.
 
 Edit it only when you are intentionally changing those contracts. For
 voice, role, and focus — pick (or write) a file in
@@ -263,7 +261,7 @@ voice, role, and focus — pick (or write) a file in
 
 ## Known Limits
 
-- Inline comments are best-effort. Invalid anchors fall back to a top-level review body.
+- Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
 - Very large diffs may exceed useful Gemini context.
 - The daemon does not inspect full CI logs; it sees check summaries and the configured required-check state.
 - The daemon does not create follow-up issues automatically.

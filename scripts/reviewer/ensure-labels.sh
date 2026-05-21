@@ -33,4 +33,3 @@ ensure_label() {
 ensure_label "agent-reviewed" "0e8a16" "Reviewed by the peer-account reviewer cron."
 ensure_label "agent-requested-changes" "d73a4a" "Agent review found blocking changes."
 ensure_label "needs-human-decision" "fbca04" "Agent review needs a human decision before merge."
-ensure_label "follow-up-candidates" "1d76db" "Agent review proposed non-blocking follow-up issues."

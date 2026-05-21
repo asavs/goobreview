@@ -67,7 +67,7 @@ scripts/configure.sh  # prompts for target repo; auto-discovers installation ID
 - Auto-discovers the installation ID by minting an App token and looking up the install on the target repo.
 - Lists the personalities in `config/personalities/` and writes your pick to `REVIEWER_PERSONALITY_FILE` in `reviewer.env`.
 - Offers to open each config file in `$EDITOR`.
-- Offers to create the four helper labels on the target repo.
+- Offers to create the helper labels on the target repo.
 
 The most consequential choice is **which personality**: it defines the reviewer's role, voice, and focus areas. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.
 

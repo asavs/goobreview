@@ -49,7 +49,7 @@ Fill in:
   | Contents | Read-only | Reads file tree and project docs from the PR head SHA |
   | Issues | Read & Write | Posts labels (`agent-reviewed`, etc.) via the Issues API |
   | Metadata | Read-only | Auto-selected; required for any repo API access |
-  | Pull requests | Read & Write | Lists PRs, submits reviews, edits PR body for the checklist block |
+  | Pull requests | Read & Write | Lists PRs and submits reviews |
 
   Everything else on that list (Actions, Administration, Attestations, Code scanning, Commit statuses, Dependabot, Deployments, Discussions, Environments, Packages, Pages, Projects, Secrets, Webhooks, Workflows, etc.) — **No access**.
 

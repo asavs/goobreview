@@ -80,9 +80,9 @@ function renderForm(req) {
     <ul>
       <li>Checks: <code>read</code> — to gate reviews on CI status</li>
       <li>Contents: <code>read</code> — to read changed files and project docs</li>
-      <li>Issues: <code>write</code> — to post labels and a managed checklist</li>
+      <li>Issues: <code>write</code> — to post labels</li>
       <li>Metadata: <code>read</code> — required for any repo API access</li>
-      <li>Pull requests: <code>write</code> — to submit reviews and inline comments</li>
+      <li>Pull requests: <code>write</code> — to submit reviews</li>
     </ul>
     <p class="muted">No webhooks. No user OAuth. No org-level permissions.</p>
   </div>
