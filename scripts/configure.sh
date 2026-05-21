@@ -163,9 +163,38 @@ if confirm "Open reviewer.env in $EDITOR_CMD to review other settings?"; then
 fi
 
 # --- Step 3: other config files --------------------------------------------
-# personality.md is listed first because it is the highest-value customization
-# point: it defines the reviewer's role, focus areas, and severity policy.
-for name in personality.md project-docs.txt head-context-paths.txt required-checks.json; do
+# personality.md is handled first (and specially): if config/personalities/ has
+# pre-built personalities, let the user pick one; otherwise fall back to the
+# general-purpose personality.example.md.
+PERSONALITY_TARGET="$CONFIG_DIR/personality.md"
+PERSONALITY_GALLERY="$CONFIG_DIR/personalities"
+if [ -f "$PERSONALITY_TARGET" ]; then
+  log "personality.md already exists; leaving in place."
+else
+  gallery=()
+  if [ -d "$PERSONALITY_GALLERY" ]; then
+    while IFS= read -r f; do
+      gallery+=("$f")
+    done < <(find "$PERSONALITY_GALLERY" -maxdepth 1 -type f -name '*.md' | sort)
+  fi
+  personality_source="$CONFIG_DIR/personality.example.md"
+  if [ ${#gallery[@]} -gt 0 ]; then
+    log "Available personalities:"
+    log "  0) default  (general-purpose, from personality.example.md)"
+    for i in "${!gallery[@]}"; do
+      log "  $((i+1))) $(basename "${gallery[$i]}" .md)"
+    done
+    pick=$(ask 'Pick a personality by number' '0')
+    if [[ "$pick" =~ ^[0-9]+$ ]] && [ "$pick" -ge 1 ] && [ "$pick" -le "${#gallery[@]}" ]; then
+      personality_source="${gallery[$((pick-1))]}"
+    fi
+  fi
+  cp "$personality_source" "$PERSONALITY_TARGET"
+  log "Created personality.md from $(basename "$personality_source")."
+  maybe_edit "$PERSONALITY_TARGET"
+fi
+
+for name in project-docs.txt head-context-paths.txt required-checks.json; do
   base="${name%.*}"
   ext="${name##*.}"
   example="$CONFIG_DIR/${base}.example.${ext}"

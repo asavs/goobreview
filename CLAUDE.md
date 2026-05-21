@@ -28,6 +28,7 @@ State directory (`REVIEWER_STATE`, default `$HOME/.goobreview`) holds: `seen.txt
 
 - `scripts/reviewer/review-prompt.md` (**engine, invariant**) — defines the output contract (verdict line + `REVIEW_META` JSON block) and the reference-validation rules. Parsed by `reviewer.sh`. Edit only if you're changing those contracts.
 - `config/personality.md` (**user, customizable**, falls back to `personality.example.md`) — defines the reviewer's role, focus, and severity policy. Prepended to the engine prompt. This is the surface forks are expected to edit. The example file has a "Fork Themes" section with security/accessibility/language-specific starting points.
+- `config/personalities/*.md` (**committed gallery**) — pre-built personalities (e.g. `linus.md`) users can pick from in `configure.sh`. Selecting one copies it to the gitignored `config/personality.md`. New personalities are added as PRs to this directory. The gallery is purely opt-in; `reviewer.sh` still reads `personality.md` and falls back to `personality.example.md` if it's missing.
 
 Two contracts that span deployments — **never break these silently:**
 
