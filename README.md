@@ -35,8 +35,8 @@ The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `C
 - Skips PRs authored by the authenticated reviewer account.
 - Gates reviews on configured GitHub check-run names.
 - Sends personality text, the diff, and GitHub review formatting rules to Gemini CLI.
-- Runs Gemini from a cached PR-head source snapshot so it can inspect nearby files when needed.
-- Can render the exact Gemini prompt payload for a PR without posting or calling Gemini.
+- Runs Gemini from a daemon-owned runtime directory with the cached PR-head source snapshot attached as read-only context.
+- Can render the exact Gemini prompt text for a PR without posting or calling Gemini.
 - Posts one consolidated GitHub review.
 - Records `PR_NUMBER HEAD_SHA` pairs only after successful review posting.
 
@@ -122,6 +122,6 @@ Two ways to shape what your reviewer does, in order of impact:
 
 ## Safety Model
 
-The daemon trusts a GitHub App installation token (minted from a private key stored at `REVIEWER_APP_PRIVATE_KEY_PATH`) and local `gemini` authentication on the VM. Keep the private key file at mode `0600`, owned by the user that runs the cron. Do not run this from a developer's active working checkout. PR-head source snapshots under `REVIEWER_STATE/worktrees/<repo>/current` are read-only review context; the daemon does not execute project code from them.
+The daemon trusts a GitHub App installation token (minted from a private key stored at `REVIEWER_APP_PRIVATE_KEY_PATH`) and local `gemini` authentication on the VM. Keep the private key file at mode `0600`, owned by the user that runs the cron. Do not run this from a developer's active working checkout. PR-head source snapshots under `REVIEWER_STATE/worktrees/<repo>/current` are read-only review context; Gemini runs from `REVIEWER_STATE/gemini-runtime` with PR-authored `GEMINI.md` / `.env` files excluded from automatic context and MCP servers disabled for the review invocation, and the daemon does not execute project code from snapshots.
 
 The daemon does not merge PRs and does not edit source code. It only posts reviews and applies optional labels.

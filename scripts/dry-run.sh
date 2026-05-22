@@ -27,7 +27,7 @@ if [ ! -s "$REVIEWER_APP_PRIVATE_KEY_PATH" ] || [ ! -r "$REVIEWER_APP_PRIVATE_KE
   ops_die "Private key is empty or unreadable: $REVIEWER_APP_PRIVATE_KEY_PATH"
 fi
 if [ ! -d "$HOME/.gemini" ]; then
-  ops_die "Gemini CLI auth/trust state not found at $HOME/.gemini. Run 'gemini' once in this checkout, sign in, trust the folder, then /quit. If the first dry run later reports the generated PR snapshot as untrusted, run gemini once from REVIEWER_STATE/worktrees/<repo>/current too."
+  ops_die "Gemini CLI auth/trust state not found at $HOME/.gemini. Run 'gemini' once in this checkout, sign in, trust the folder, then /quit. If the first dry run later reports the daemon runtime as untrusted, run gemini once from REVIEWER_STATE/gemini-runtime too."
 fi
 for cmd in gh gemini jq node tar flock timeout; do
   ops_require_command "$cmd" "Run scripts/setup-vm.sh first."

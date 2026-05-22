@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render the exact prompt payload that would be sent to Gemini for one PR.
+# Render the exact prompt text that would be sent to Gemini for one PR.
 # No Gemini call is made, no review is posted, and seen.txt is not updated.
 #
 # Usage:
@@ -50,5 +50,5 @@ fi
 "$REVIEWER_SH"
 
 if [ -n "$output_file" ]; then
-  ops_log "Wrote prompt payload for $REVIEWER_REPO PR #$pr_number to $output_file"
+  ops_log "Wrote prompt text for $REVIEWER_REPO PR #$pr_number to $output_file"
 fi

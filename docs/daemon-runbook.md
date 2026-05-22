@@ -40,7 +40,7 @@ set +a
 REVIEWER_DRY_RUN=1 REVIEWER_MAX_PRS=1 scripts/reviewer/reviewer.sh
 ```
 
-Render the exact Gemini prompt payload for one PR without calling Gemini
+Render the exact Gemini prompt text for one PR without calling Gemini
 or posting a review:
 
 ```bash
@@ -106,7 +106,7 @@ sudo journalctl -u goobreview.service -n 100 --no-pager
 If this fails, fix the service before enabling the timer. Common causes:
 
 - App private key not readable by the `goobreview` Unix user, or `REVIEWER_APP_*` env vars not set.
-- Gemini CLI has not trusted the reviewer checkout or the generated PR snapshot under `REVIEWER_STATE/worktrees/<repo>/current`.
+- Gemini CLI has not trusted the reviewer checkout or daemon runtime under `REVIEWER_STATE/gemini-runtime`.
 - `config/reviewer.env` is missing or points to the wrong target repo.
 - The App is not installed on `REVIEWER_REPO` (token mint will fail).
 - The checkout is dirty, so `sync-worktree.sh` refuses to run.
@@ -134,7 +134,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 7. Applies the required-check gate.
 8. Downloads a PR-head source snapshot to `REVIEWER_STATE/worktrees/<repo>/current`.
 9. Builds a prompt from personality text, the diff, and the GitHub review formatting rule.
-10. Runs Gemini CLI headlessly from the PR-head source snapshot.
+10. Runs Gemini CLI headlessly from `REVIEWER_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, and MCP servers disabled for the review invocation.
 11. Parses the GitHub review event line.
 12. Posts a top-level GitHub review with `gh pr review`.
 13. Applies optional labels.
@@ -244,7 +244,7 @@ voice, role, and focus — pick (or write) a file in
 
 - Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
 - Very large diffs may exceed useful Gemini context.
-- PR-head source snapshots are provided as read-only context under `REVIEWER_STATE/worktrees/<repo>/current`; the daemon does not run project code from them.
+- PR-head source snapshots are provided as read-only context under `REVIEWER_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot.
 - The daemon does not inspect full CI logs; it gates on the configured required-check state.
 - The daemon does not create follow-up issues automatically.
 - The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.

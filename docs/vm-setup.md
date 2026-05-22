@@ -96,7 +96,7 @@ Verify headless mode from the same checkout:
 printf 'say hi in three words' | timeout 60s gemini -m auto -p ""
 ```
 
-If this prompts for authorization, reports an untrusted workspace, or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_STATE/worktrees/<repo>/current`; if the first dry run reports that generated snapshot as untrusted, `cd` into that path and run `gemini` once there too.
+If this prompts for authorization, reports an untrusted workspace, or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_STATE/gemini-runtime` with the PR-head source snapshot attached as read-only workspace context; if the first dry run reports that runtime path as untrusted, `cd` into that path and run `gemini` once there too.
 
 ## Clone The Template
 

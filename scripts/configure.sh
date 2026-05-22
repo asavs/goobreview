@@ -35,8 +35,8 @@ env_set() { ops_env_set "$ENV_FILE" "$@"; }
 # --- Preflight: Gemini auth -----------------------------------------------
 # The reviewer shells out to `gemini` headlessly, which requires that the
 # current user has authenticated and trusted the checkout folder at least once.
-# Gemini may also ask to trust the generated PR snapshot path during the
-# first dry run (`$REVIEWER_STATE/worktrees/<repo>/current`).
+# Gemini may also ask to trust the daemon-owned runtime path during the
+# first dry run (`$REVIEWER_STATE/gemini-runtime`).
 # Both auth and trust state live under ~/.gemini, so missing dir = unauthed.
 ops_require_command node "Run scripts/setup-vm.sh first."
 ops_require_command gemini "Run scripts/setup-vm.sh first, then authenticate Gemini."

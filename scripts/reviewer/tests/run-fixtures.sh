@@ -18,6 +18,8 @@ LOG_FILE="$TMP_ROOT/test.log"
 # shellcheck disable=SC1091
 . "$LIB_DIR/ci.sh"
 # shellcheck disable=SC1091
+. "$LIB_DIR/gemini.sh"
+# shellcheck disable=SC1091
 . "$LIB_DIR/output.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/prompt.sh"
@@ -178,7 +180,7 @@ test_prompt_assembly() {
   PERSONALITY_FILE="$TMP_ROOT/personality.md"
   PROMPT_FILE="$TMP_ROOT/engine.md"
   printf '## Role\nBe sharp.\n' > "$PERSONALITY_FILE"
-  printf '# GitHub Review Format\nFirst line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+  printf '# GitHub Review Format\nFirst line: APPROVE, REQUEST_CHANGES, or COMMENT.\nUse REQUEST_CHANGES only for concrete issues that should block merge.\nUse COMMENT when the review is informational.\nUse file references such as `path/to/file.ext:123`.\n' > "$PROMPT_FILE"
 
   REPO="example/repo"
 
@@ -199,6 +201,9 @@ test_prompt_assembly() {
     "# GitHub Review Format"
   assert_contains "prompt includes PR diff" "diff --git a/src/auth.py b/src/auth.py" "$prompt_file"
   assert_contains "prompt includes GitHub formatting rules last" "First line: APPROVE, REQUEST_CHANGES, or COMMENT." "$prompt_file"
+  assert_contains "prompt includes request-changes policy" "Use REQUEST_CHANGES only for concrete issues that should block merge." "$prompt_file"
+  assert_contains "prompt includes comment policy" "Use COMMENT when the review is informational." "$prompt_file"
+  assert_contains "prompt includes GitHub file references" 'Use file references such as `path/to/file.ext:123`.' "$prompt_file"
   assert_not_contains "prompt omits CI gate" "CI Gate" "$prompt_file"
   assert_not_contains "prompt omits file tree" "File Tree" "$prompt_file"
   assert_not_contains "prompt omits project docs" "Project Docs" "$prompt_file"
@@ -207,8 +212,49 @@ test_prompt_assembly() {
   assert_not_contains "prompt omits all-check summary" "all-check summary" "$prompt_file"
 }
 
+test_gemini_invocation_isolates_review_context() {
+  local prompt_file err_file output worktree_dir settings_path
+
+  STATE_DIR="$TMP_ROOT/state"
+  GEMINI_TIMEOUT=60
+  GEMINI_MODEL=auto
+  mkdir -p "$STATE_DIR"
+  worktree_dir="$TMP_ROOT/worktree"
+  mkdir -p "$worktree_dir"
+  prompt_file="$TMP_ROOT/prompt-for-gemini.md"
+  err_file="$TMP_ROOT/gemini.err"
+  printf 'APPROVE\n' > "$prompt_file"
+
+  GH_TOKEN=secret-token
+  GITHUB_TOKEN=secret-github-token
+  REVIEWER_APP_PRIVATE_KEY_PATH=/private/key.pem
+  export GH_TOKEN GITHUB_TOKEN REVIEWER_APP_PRIVATE_KEY_PATH
+
+  timeout() {
+    printf 'cwd=%s\n' "$PWD"
+    printf 'gh_token=%s\n' "${GH_TOKEN:-unset}"
+    printf 'github_token=%s\n' "${GITHUB_TOKEN:-unset}"
+    printf 'key_path=%s\n' "${REVIEWER_APP_PRIVATE_KEY_PATH:-unset}"
+    printf 'settings=%s\n' "$GEMINI_CLI_SYSTEM_SETTINGS_PATH"
+  }
+
+  output=$(run_gemini_review "$prompt_file" "$err_file" "$worktree_dir")
+  settings_path=$(printf '%s\n' "$output" | sed -n 's/^settings=//p')
+
+  assert_contains "gemini runs outside PR snapshot" "cwd=$STATE_DIR/gemini-runtime" <(printf '%s\n' "$output")
+  assert_contains "gemini child gets no gh token" "gh_token=unset" <(printf '%s\n' "$output")
+  assert_contains "gemini child gets no github token" "github_token=unset" <(printf '%s\n' "$output")
+  assert_contains "gemini child gets no app key path" "key_path=unset" <(printf '%s\n' "$output")
+  assert_eq "gemini settings disables context filename" ".goobreview-gemini-context-disabled.md" "$(jq -r '.context.fileName' "$settings_path")"
+  assert_eq "gemini settings attaches PR snapshot" "$worktree_dir" "$(jq -r '.context.includeDirectories[0]' "$settings_path")"
+  assert_eq "gemini settings disables local env" "true" "$(jq -r '.advanced.ignoreLocalEnv' "$settings_path")"
+  assert_eq "gemini settings excludes shell tool" "false" "$(jq '.tools.core | index("run_shell_command") != null' "$settings_path")"
+  assert_eq "gemini settings excludes mcp servers" "0" "$(jq '.mcp.allowed | length' "$settings_path")"
+}
+
 test_output_parser
 test_prompt_assembly
+test_gemini_invocation_isolates_review_context
 test_ci_states
 
 printf 'passed %s fixture assertions\n' "$pass_count"

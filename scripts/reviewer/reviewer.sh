@@ -5,7 +5,7 @@
 set -euo pipefail
 
 REPO="${REVIEWER_REPO:-}"
-SKIP_USER="${REVIEWER_USER:-}"
+EXTRA_SKIP_USER="${REVIEWER_USER:-}"
 ONLY_PR="${REVIEWER_ONLY_PR:-}"
 DRY_RUN="${REVIEWER_DRY_RUN:-}"
 RENDER_PROMPT_ONLY="${REVIEWER_RENDER_PROMPT_ONLY:-}"
@@ -79,9 +79,6 @@ if [ -z "${REVIEWER_APP_SLUG:-}" ]; then
   REVIEWER_APP_SLUG=$("$SCRIPT_DIR/get-installation-token.sh" slug 2>>"$LOG_FILE") || { log "failed to fetch app slug"; exit 1; }
 fi
 BOT_LOGIN="${REVIEWER_APP_SLUG}[bot]"
-if [ -z "$SKIP_USER" ]; then
-  SKIP_USER="$BOT_LOGIN"
-fi
 
 PRS=$(gh pr list --repo "$REPO" --state open --json number,author,headRefOid,isDraft \
   --jq '.[] | select(.isDraft == false) | [.number, .author.login, .headRefOid] | @tsv')
@@ -92,7 +89,8 @@ while IFS=$'\t' read -r num author head_sha; do
   [ -n "${num:-}" ] || continue
   [ -n "${head_sha:-}" ] || { log "PR #$num has no head SHA, skipping"; continue; }
   [ -z "$ONLY_PR" ] || [ "$num" = "$ONLY_PR" ] || continue
-  [ "$author" != "$SKIP_USER" ] || continue
+  [ "$author" != "$BOT_LOGIN" ] || continue
+  [ -z "$EXTRA_SKIP_USER" ] || [ "$author" != "$EXTRA_SKIP_USER" ] || continue
 
   if [ "$review_actions" -ge "$MAX_PRS" ]; then
     log "Reached REVIEWER_MAX_PRS=$MAX_PRS, stopping this tick"

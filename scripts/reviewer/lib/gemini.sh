@@ -57,9 +57,43 @@ run_gemini_review() {
   local prompt_file="$1"
   local err_file="$2"
   local worktree_dir="$3"
+  local runtime_dir settings_file context_file_name
+
+  runtime_dir="$STATE_DIR/gemini-runtime"
+  settings_file="$STATE_DIR/gemini-settings.json"
+  context_file_name=".goobreview-gemini-context-disabled.md"
+
+  mkdir -p "$runtime_dir"
+  jq -n \
+    --arg context_file_name "$context_file_name" \
+    --arg worktree_dir "$worktree_dir" \
+    '{
+      context: {
+        fileName: $context_file_name,
+        includeDirectories: [$worktree_dir],
+        loadMemoryFromIncludeDirectories: false
+      },
+      tools: {
+        core: [
+          "glob",
+          "list_directory",
+          "read_file",
+          "read_many_files",
+          "search_file_content"
+        ]
+      },
+      mcp: {
+        allowed: []
+      },
+      advanced: {
+        ignoreLocalEnv: true
+      }
+    }' >"$settings_file"
 
   (
-    cd "$worktree_dir" || exit
+    cd "$runtime_dir" || exit
+    export GEMINI_CLI_SYSTEM_SETTINGS_PATH="$settings_file"
+    unset GH_TOKEN GITHUB_TOKEN REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH
     timeout "$GEMINI_TIMEOUT" gemini -m "$GEMINI_MODEL" -p "" <"$prompt_file" 2>"$err_file"
   )
 }
