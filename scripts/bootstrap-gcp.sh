@@ -14,6 +14,7 @@ UPSTREAM_REPO="asavschaeffer/goobreview"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+STATE_FILE="$REPO_ROOT/.goobreview-cloud-shell.env"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
 export OPS_LOG_PREFIX="bootstrap-gcp"
@@ -32,6 +33,191 @@ SETUP_VM_URL="${GOOBREVIEW_SETUP_VM_URL:-https://raw.githubusercontent.com/${det
 
 ops_require_command gcloud "Run this in Google Cloud Shell, or install gcloud first."
 
+print_billing_setup_help() {
+  cat >&2 <<MSG
+[bootstrap-gcp] No active billing accounts found on this Google account.
+
+A billing account is required to enable Compute Engine, even though the
+default VM (e2-micro in us-central1) is intended to stay within GCP's
+always-free tier when you keep the defaults.
+
+Create or attach a Cloud Billing account in the browser:
+  https://console.cloud.google.com/billing
+
+Cloud Shell has Gemini preinstalled. If you want a guided walkthrough, run:
+  gemini
+and ask:
+  Help me create a Cloud Billing account for a small Compute Engine VM,
+  then come back to this Cloud Shell command.
+
+After billing is active, re-run:
+  bash scripts/bootstrap-gcp.sh
+MSG
+}
+
+list_open_billing_accounts() {
+  gcloud billing accounts list --filter='open=true' \
+    --format='value(name,displayName)' 2>/dev/null || true
+}
+
+select_billing_account() {
+  local billing_raw="$1"
+  local count name display choice
+  local -a accounts=() displays=()
+
+  if [ -z "$billing_raw" ]; then
+    print_billing_setup_help
+    return 1
+  fi
+
+  count=$(printf '%s\n' "$billing_raw" | wc -l)
+  if [ "$count" -eq 1 ]; then
+    IFS=$'\t' read -r name display <<< "$billing_raw"
+    printf '[bootstrap-gcp] Using billing account: %s (%s)\n' "${display:-$name}" "$name" >&2
+    printf '%s' "$name"
+    return 0
+  fi
+
+  printf 'Multiple active billing accounts:\n' >&2
+  local i=1
+  while IFS=$'\t' read -r name display; do
+    printf '  [%d] %s (%s)\n' "$i" "${display:-$name}" "$name" >&2
+    accounts+=("$name")
+    displays+=("${display:-$name}")
+    i=$((i + 1))
+  done <<< "$billing_raw"
+
+  choice=$(ops_prompt 'Pick number' '1')
+  if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
+    printf '[bootstrap-gcp] Invalid choice.\n' >&2
+    return 1
+  fi
+
+  printf '[bootstrap-gcp] Using billing account: %s (%s)\n' \
+    "${displays[$((choice - 1))]}" "${accounts[$((choice - 1))]}" >&2
+  printf '%s' "${accounts[$((choice - 1))]}"
+}
+
+validate_project_id() {
+  local project_id="$1"
+  if ! [[ "$project_id" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]; then
+    cat >&2 <<MSG
+[bootstrap-gcp] Project ID must be 6-30 chars, start with a lowercase
+letter, contain only lowercase letters/digits/hyphens, and not end with
+a hyphen. Got: $project_id
+MSG
+    return 1
+  fi
+}
+
+create_project_with_billing() {
+  local project_id="$1"
+  local billing_raw billing_account
+
+  validate_project_id "$project_id" || return 1
+
+  printf '[bootstrap-gcp] Listing your billing accounts...\n' >&2
+  billing_raw=$(list_open_billing_accounts)
+  billing_account=$(select_billing_account "$billing_raw") || return 1
+
+  printf '[bootstrap-gcp] Creating project %s...\n' "$project_id" >&2
+  if ! gcloud projects create "$project_id" --set-as-default >&2; then
+    printf '[bootstrap-gcp] Project creation failed. The ID may be taken, or your org may restrict project creation.\n' >&2
+    return 1
+  fi
+
+  printf '[bootstrap-gcp] Linking billing account...\n' >&2
+  if ! gcloud billing projects link "$project_id" --billing-account="$billing_account" >&2; then
+    cat >&2 <<MSG
+[bootstrap-gcp] Failed to link billing to project '$project_id'.
+
+The project was created but is not usable until billing is attached.
+Try manually:
+  gcloud billing projects link '$project_id' --billing-account='$billing_account'
+or attach in the console: https://console.cloud.google.com/billing/linkedaccount?project=$project_id
+MSG
+    return 1
+  fi
+
+  printf '[bootstrap-gcp] Project %s ready.\n' "$project_id" >&2
+}
+
+project_exists() {
+  gcloud projects describe "$1" --format='value(projectId)' >/dev/null 2>&1
+}
+
+project_billing_enabled() {
+  local enabled
+  enabled=$(gcloud billing projects describe "$1" --format='value(billingEnabled)' 2>/dev/null || true)
+  case "$enabled" in
+    True|true|TRUE) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+link_project_billing_interactive() {
+  local project_id="$1"
+  local billing_raw billing_account
+
+  if ! ops_confirm "Link project '$project_id' to a Cloud Billing account now?"; then
+    return 1
+  fi
+
+  printf '[bootstrap-gcp] Listing your billing accounts...\n' >&2
+  billing_raw=$(list_open_billing_accounts)
+  billing_account=$(select_billing_account "$billing_raw") || return 1
+
+  printf '[bootstrap-gcp] Linking billing account...\n' >&2
+  gcloud billing projects link "$project_id" --billing-account="$billing_account" >&2
+}
+
+ensure_project_ready() {
+  local project_id="$1"
+
+  if ! project_exists "$project_id"; then
+    cat >&2 <<EOF
+[bootstrap-gcp] Project '$project_id' does not exist or you cannot access it.
+EOF
+    if ops_confirm "Create project '$project_id' + link billing now?"; then
+      create_project_with_billing "$project_id" || return 1
+      return 0
+    else
+      return 1
+    fi
+  fi
+
+  if project_billing_enabled "$project_id"; then
+    return 0
+  fi
+
+  cat >&2 <<EOF
+[bootstrap-gcp] Project '$project_id' is not linked to an active Cloud Billing account.
+EOF
+  link_project_billing_interactive "$project_id" || return 1
+}
+
+# Offer to create a new GCP project + link billing inline. Returns the new
+# project ID on stdout; everything else goes to stderr. Returns nonzero if
+# the user opts out, has no billing account, or any gcloud call fails, in
+# which case the caller falls back to printing manual instructions.
+create_project_interactive() {
+  local project_id default_id
+
+  if ! ops_confirm 'Create a new GCP project + link a billing account now?'; then
+    return 1
+  fi
+
+  default_id="goobreview-${RANDOM}${RANDOM}"
+  project_id=$(ops_prompt 'New project ID (6-30 lowercase chars/digits/hyphens, globally unique)' "$default_id")
+  if [ -z "$project_id" ]; then
+    printf '[bootstrap-gcp] Project ID is required.\n' >&2
+    return 1
+  fi
+
+  create_project_with_billing "$project_id" || return 1
+  printf '%s' "$project_id"
+}
+
 current_project="$(gcloud config get-value project 2>/dev/null || true)"
 case "$current_project" in
   ''|'(unset)'|cloudshell-*)
@@ -41,24 +227,47 @@ case "$current_project" in
 Cloud Shell's session-default project ($current_project) can't run
 Compute Engine. You need a normal GCP project with a billing account.
 
-  - If you already have one:
-      gcloud config set project YOUR_PROJECT_ID
-
-  - If you don't, create one and attach a billing account:
-      https://console.cloud.google.com/projectcreate
-      https://console.cloud.google.com/billing
-
 The default VM (e2-micro in us-central1) is on GCP's always-free tier,
 so you won't be charged for the default setup.
 
+EOF
+    if new_project=$(create_project_interactive); then
+      current_project="$new_project"
+      printf '\n[bootstrap-gcp] Continuing with project %s.\n\n' "$current_project" >&2
+    else
+      cat >&2 <<EOF
+
+To finish setup manually:
+
+  - If you already have a project:
+      gcloud config set project YOUR_PROJECT_ID
+
+  - If you need to create one:
+      https://console.cloud.google.com/projectcreate
+      https://console.cloud.google.com/billing
+
+    You can also type 'gemini' in Cloud Shell and ask it to walk you
+    through the Google Cloud billing/project console step.
+
 Then re-run: bash scripts/bootstrap-gcp.sh
 EOF
-    exit 1
+      exit 1
+    fi
     ;;
 esac
 
 project="$(ops_prompt 'GCP project ID' "$current_project")"
 ops_require_nonempty "Project ID" "$project"
+
+if ! ensure_project_ready "$project"; then
+  cat >&2 <<EOF
+
+[bootstrap-gcp] Cannot continue until '$project' exists and billing is enabled.
+Fix the project/billing state, then re-run:
+  bash scripts/bootstrap-gcp.sh
+EOF
+  exit 1
+fi
 
 zone="$(ops_prompt 'Zone' "$DEFAULT_ZONE")"
 vm_name="$(ops_prompt 'VM name' "$DEFAULT_VM_NAME")"
@@ -80,6 +289,16 @@ EOF
 ops_confirm "Proceed?" || { echo "Aborted."; exit 1; }
 
 gcloud config set project "$project" >/dev/null
+
+cat > "$STATE_FILE" <<EOF
+# Written by scripts/bootstrap-gcp.sh for the next Cloud Shell setup step.
+# Safe to delete; scripts/register-app.sh also accepts VM name and zone args.
+GOOBREVIEW_GCP_PROJECT=$(ops_shell_quote "$project")
+GOOBREVIEW_VM_NAME=$(ops_shell_quote "$vm_name")
+GOOBREVIEW_ZONE=$(ops_shell_quote "$zone")
+GOOBREVIEW_REPO_URL=$(ops_shell_quote "$REPO_URL")
+EOF
+chmod 600 "$STATE_FILE" 2>/dev/null || true
 
 # Fresh GCP projects don't have the Compute Engine API enabled. Without this,
 # the next gcloud compute call will prompt interactively to enable it and
@@ -129,10 +348,14 @@ VM is provisioned and dependencies are installed.
 To finish:
 
   1. Register the GitHub App and ship its key to the VM (still in Cloud Shell):
-       bash scripts/register-app.sh $vm_name $zone
+       bash scripts/register-app.sh
 
      Click the Web Preview button (port 8080); the page walks you through
      creating the App via a pre-filled GitHub form and uploading its key.
+
+     This checkout saved your VM details in .goobreview-cloud-shell.env.
+     If you run from another checkout, use:
+       bash scripts/register-app.sh $vm_name $zone
 
      (See docs/github-app-setup.md for the full walkthrough.)
 

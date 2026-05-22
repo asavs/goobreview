@@ -12,12 +12,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+STATE_FILE="$REPO_ROOT/.goobreview-cloud-shell.env"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
 export OPS_LOG_PREFIX="register-app"
 
-VM_NAME="${1:-goobreview-1}"
-ZONE="${2:-us-central1-a}"
+if [ "$#" -eq 0 ] && [ -f "$STATE_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+fi
+
+VM_NAME="${1:-${GOOBREVIEW_VM_NAME:-goobreview-1}}"
+ZONE="${2:-${GOOBREVIEW_ZONE:-us-central1-a}}"
 PORT="${GOOBREVIEW_REGISTER_PORT:-8080}"
 VM_KEY_PATH="${REVIEWER_APP_PRIVATE_KEY_PATH:-/var/lib/goobreview/example/app-key.pem}"
 VM_ENV_PATH="${REVIEWER_ENV_FILE:-/opt/goobreview/example/config/reviewer.env}"
@@ -58,6 +64,10 @@ GoobReview: GitHub App registration
 This will spin up a small local web server, then walk you
 through creating the App on GitHub and uploading its private
 key. The key is shipped straight to $VM_NAME.
+
+Target VM:
+  Name:  $VM_NAME
+  Zone:  $ZONE
 
 Next steps once the server starts:
 

@@ -2,27 +2,25 @@
 
 This walkthrough is the Cloud Shell version of [docs/quickstart.md](quickstart.md). It provisions a small Compute Engine VM, registers the GitHub App, and then sends you to the shared on-VM setup steps.
 
-## 1. Pick (or create) a billing-enabled GCP project
+## 1. Check your Google Cloud account
 
-Cloud Shell is signed in to your Google account, but its session-default project (`cloudshell-NNNN`) can't run Compute Engine. You need a normal GCP project with a billing account attached.
+Cloud Shell is signed in to your Google account, but its session-default project (`cloudshell-NNNN`) can't run Compute Engine. You need a normal GCP project linked to an active Cloud Billing account.
 
-**If you already have one:**
+The bootstrap script can create a project, link it to an existing billing account, or repair a selected project whose billing is disabled. If your Google account has no active Cloud Billing account yet, Google requires a browser/payment setup step before any CLI can create the VM.
+
+**If you already have a billing-enabled project:**
 
 ```bash
 gcloud config set project YOUR_PROJECT_ID
 ```
 
-**If you don't:** create one at https://console.cloud.google.com/projectcreate, then attach a billing account at https://console.cloud.google.com/billing.
+**If you have billing but no project:** continue to Step 2; `bootstrap-gcp.sh` can create and link one.
+
+**If you have no Cloud Billing account yet:** open https://console.cloud.google.com/billing and create one, then come back and run Step 2.
 
 A billing account is required to enable Compute Engine, but the default GoobReview VM is an `e2-micro` in `us-central1`, which runs within GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) (1 instance + 30 GB standard disk per month). You won't be charged unless you bump to a larger machine, run multiple VMs, or move to a non-free region. New Google Cloud accounts also get $300 in 90-day credits.
 
-Confirm it took:
-
-```bash
-gcloud config get-value project
-```
-
-> **Stuck on any of this?** Type `gemini` at the Cloud Shell prompt and ask it to walk you through the console step — it's pre-installed here and can guide you on GCP project creation, billing setup, and gcloud commands.
+> **Stuck on billing or project setup?** Type `gemini` at the Cloud Shell prompt and ask it to walk you through the console step. Gemini is preinstalled in Cloud Shell and can guide you while this repo's Bash scripts handle the deterministic setup commands.
 
 ## 2. Run the bootstrap script
 
@@ -30,11 +28,11 @@ gcloud config get-value project
 bash scripts/bootstrap-gcp.sh
 ```
 
-You'll be asked for three things (defaults shown in brackets):
+The script checks your active project and billing state first. You'll be asked for three things (defaults shown in brackets):
 
-- **GCP project ID** — defaults to whatever `gcloud config get-value project` returns
-- **Zone** — defaults to `us-central1-a`
-- **VM name** — defaults to `goobreview-1`
+- **GCP project ID** - defaults to whatever `gcloud config get-value project` returns, or a new project ID if the script is creating one
+- **Zone** - defaults to `us-central1-a`
+- **VM name** - defaults to `goobreview-1`
 
 After you confirm, the script will:
 
@@ -52,6 +50,12 @@ From Cloud Shell (still in the goobreview checkout):
 
 ```bash
 bash scripts/register-app.sh
+```
+
+If you accepted a custom VM name or zone during bootstrap, keep using the no-argument command above from the same Cloud Shell checkout. `bootstrap-gcp.sh` saved the handoff details locally. If you start from a fresh checkout instead, pass them explicitly:
+
+```bash
+bash scripts/register-app.sh YOUR_VM_NAME YOUR_ZONE
 ```
 
 This starts a tiny local server. The walkthrough is:

@@ -15,7 +15,7 @@ bash scripts/bootstrap-gcp.sh
 bash scripts/register-app.sh
 ```
 
-`bootstrap-gcp.sh` creates the VM and installs dependencies. `register-app.sh` spins up a local web helper that walks you through creating the GitHub App from a pre-filled form, uploading its private key, and installing it on your target repo &mdash; with the `.pem` going straight from Cloud Shell to the VM, never to your local machine.
+`bootstrap-gcp.sh` creates the VM, installs dependencies, and saves the selected VM name/zone for the next step. `register-app.sh` uses that saved handoff, then spins up a local web helper that walks you through creating the GitHub App from a pre-filled form, uploading its private key, and installing it on your target repo &mdash; with the `.pem` going straight from Cloud Shell to the VM, never to your local machine.
 
 > Want your own copy to customize? Click **Use this template** at the top of this repo on GitHub. A first-push workflow (`.github/workflows/template-cleanup.yml`) auto-personalizes the Cloud Shell button, bootstrap script, and clone URL to point at your new repo.
 

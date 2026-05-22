@@ -10,7 +10,11 @@ If you can't use Cloud Shell, see the [Manual VM Setup](#manual-vm-setup) append
 
 ## 2. Provision The VM
 
-You need a billing-enabled GCP project (Cloud Shell's session-default `cloudshell-NNNN` won't work for Compute Engine). If you don't have one, create one at https://console.cloud.google.com/projectcreate and attach a billing account; then `gcloud config set project YOUR_PROJECT_ID`. The default VM is an `e2-micro` in `us-central1`, which is on GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) — you won't be charged unless you bump to a larger machine.
+You need a billing-enabled GCP project (Cloud Shell's session-default `cloudshell-NNNN` won't work for Compute Engine). The bootstrap script can create a project, link it to an existing billing account, or repair a selected project whose billing is disabled. If your Google account has no active Cloud Billing account yet, open https://console.cloud.google.com/billing first; Google requires that browser/payment step before the CLI can create the VM.
+
+The default VM is an `e2-micro` in `us-central1`, which is on GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) when you keep the defaults. You won't be charged unless you bump to a larger machine, run multiple VMs, move to a non-free region, or otherwise exceed free-tier limits.
+
+Cloud Shell has Gemini preinstalled. If the billing/project page is confusing, type `gemini` and ask it to walk you through that Google Cloud console step; then come back here and rerun the same bootstrap command.
 
 From the Cloud Shell checkout:
 
@@ -18,7 +22,7 @@ From the Cloud Shell checkout:
 bash scripts/bootstrap-gcp.sh
 ```
 
-It prompts for GCP project, zone, and VM name, then:
+It checks project/billing state, prompts for GCP project, zone, and VM name, then:
 
 - Creates an `e2-micro` Ubuntu 24.04 VM (1 shared vCPU, 1 GB RAM, 20 GB disk). See [docs/vm-setup.md](vm-setup.md) for the full spec and larger-machine alternatives.
 - Installs the required packages, GitHub CLI, Gemini CLI, and a 2 GB swap file.
@@ -32,6 +36,12 @@ Still in Cloud Shell:
 
 ```bash
 bash scripts/register-app.sh
+```
+
+The bootstrap step saved your selected VM name and zone in `.goobreview-cloud-shell.env`, so this command still works if you changed either default. From a fresh checkout, pass them explicitly:
+
+```bash
+bash scripts/register-app.sh YOUR_VM_NAME YOUR_ZONE
 ```
 
 It starts a tiny local server. Click Cloud Shell's **Web Preview** button -> **Preview on port 8080**. The page walks you through two steps:

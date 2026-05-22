@@ -13,6 +13,12 @@ bash scripts/register-app.sh                       # personal account
 GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh  # organization
 ```
 
+The bootstrap step saves the selected VM name and zone in `.goobreview-cloud-shell.env`, so the no-argument command works even when you did not accept the default VM details. If you are using a different checkout or bypassed bootstrap, pass them explicitly:
+
+```bash
+bash scripts/register-app.sh YOUR_VM_NAME YOUR_ZONE
+```
+
 The script spins up a tiny local web server on port 8080. You open Cloud Shell's **Web Preview** at that port and the page walks you through two steps:
 
 1. **Create the App on GitHub.** A button links you to GitHub's App-creation form with name, homepage, description, webhook setting, and all five permissions pre-filled from `config/app-manifest.json`. You click **Create GitHub App** at the bottom of the form, then on the resulting settings page click **Generate a private key** (the `.pem` downloads) and note the **App ID** at the top.
