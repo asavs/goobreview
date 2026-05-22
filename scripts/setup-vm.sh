@@ -34,7 +34,7 @@ fi
 log "apt: base packages"
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils
+  git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils tar
 
 # Small VMs (e2-micro = 1 GB RAM) can OOM when Gemini CLI spikes during a
 # review. A 2 GB swap file turns hard OOM kills into slower-but-successful

@@ -1,7 +1,0 @@
-# Repository paths to include in every review prompt when present at the PR head.
-# Keep this list focused: review standards, architecture notes, contributor rules,
-# security constraints, and feature specs that reviewers should enforce.
-AGENTS.md
-CONTRIBUTING.md
-README.md
-docs/pr-review-workflow.md

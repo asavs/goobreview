@@ -1,6 +1,6 @@
 # VM Setup
 
-Use this page for any non-Cloud-Shell install, or when you need to understand what `scripts/bootstrap-gcp.sh` and `scripts/setup-vm.sh` create for you. The VM needs `git`, `gh`, `jq`, `flock`, `timeout`, Node/npm, and Gemini CLI. Ubuntu LTS is the easiest default.
+Use this page for any non-Cloud-Shell install, or when you need to understand what `scripts/bootstrap-gcp.sh` and `scripts/setup-vm.sh` create for you. The VM needs `git`, `gh`, `jq`, `tar`, `flock`, `timeout`, Node/npm, and Gemini CLI. Ubuntu LTS is the easiest default.
 
 Minimum practical shape:
 
@@ -96,7 +96,7 @@ Verify headless mode from the same checkout:
 printf 'say hi in three words' | timeout 60s gemini -m auto -p ""
 ```
 
-If this prompts for authorization, reports an untrusted workspace, or times out, run `gemini` interactively again from the exact checkout path cron will use.
+If this prompts for authorization, reports an untrusted workspace, or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_STATE/worktrees/<repo>/current`; if the first dry run reports that generated snapshot as untrusted, `cd` into that path and run `gemini` once there too.
 
 ## Clone The Template
 

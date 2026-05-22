@@ -79,7 +79,7 @@ function renderForm(req) {
     <p><strong>The App will request:</strong></p>
     <ul>
       <li>Checks: <code>read</code> — to gate reviews on CI status</li>
-      <li>Contents: <code>read</code> — to read changed files and project docs</li>
+      <li>Contents: <code>read</code> — to read the PR-head source snapshot</li>
       <li>Issues: <code>write</code> — to post labels</li>
       <li>Metadata: <code>read</code> — required for any repo API access</li>
       <li>Pull requests: <code>write</code> — to submit reviews</li>

@@ -76,7 +76,7 @@ gemini                # Google OAuth - sign in, trust this folder, then /quit
 scripts/configure.sh
 ```
 
-`configure.sh` copies each gitignored config file (`reviewer.env`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from its `.example` sibling, prompts for the target repo, auto-discovers the installation ID, lets you pick a personality from `config/personalities/`, and offers to open each file in `$EDITOR`.
+`configure.sh` copies each gitignored config file (`reviewer.env`, `required-checks.json`) from its `.example` sibling, prompts for the target repo, auto-discovers the installation ID, lets you pick a personality from `config/personalities/`, and offers to open each file in `$EDITOR`.
 
 Personality choice is the most consequential decision before your first dry run: it defines what kind of reviewer this is. `configure.sh` writes your pick into `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. See [docs/daemon-runbook.md#configuration-reference](daemon-runbook.md#configuration-reference) for the full config reference.
 

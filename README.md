@@ -2,7 +2,7 @@
 
 An end-to-end pull request reviewer template powered by Gemini CLI and GitHub.
 
-GoobReview is designed for users who want to point a Google AI Pro-backed Gemini CLI setup at their repository and get real GitHub PR reviews from a reviewer identity. It turns a small VM into a durable review daemon that reads your project docs, waits for CI, reviews non-draft PRs, and posts `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews.
+GoobReview is designed for users who want to point a Google AI Pro-backed Gemini CLI setup at their repository and get real GitHub PR reviews from a reviewer identity. It turns a small VM into a durable review daemon that waits for CI, reviews non-draft PRs from a PR-head source snapshot, and posts `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews.
 
 ## One-Click Setup On Google Cloud
 
@@ -34,8 +34,8 @@ The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `C
 - Polls open, non-draft pull requests.
 - Skips PRs authored by the authenticated reviewer account.
 - Gates reviews on configured GitHub check-run names.
-- Fetches selected project documentation from the PR head.
-- Sends the prompt contract, CI gate, file tree, selected file contents, and diff to Gemini CLI.
+- Sends personality text, the diff, and GitHub review formatting rules to Gemini CLI.
+- Runs Gemini from a cached PR-head source snapshot so it can inspect nearby files when needed.
 - Can render the exact Gemini prompt payload for a PR without posting or calling Gemini.
 - Posts one consolidated GitHub review.
 - Records `PR_NUMBER HEAD_SHA` pairs only after successful review posting.
@@ -70,10 +70,6 @@ config/                              Per-deployment files. *.example.* ships;
                                      linus.md, etc.). Pick one via
                                      REVIEWER_PERSONALITY_FILE in reviewer.env.
                                      The main thing you customize.
-  project-docs.example.txt           Repo paths fetched from the PR head and
-                                     pasted into every review prompt.
-  head-context-paths.example.txt     Extra files fetched for reference validation
-                                     (package.json, ci.yml, etc.).
   required-checks.example.json       GitHub check-run names that gate review posting.
   reviewer.env.example               Runtime env: target repo, App credentials,
                                      state dir, Gemini model.
@@ -92,9 +88,7 @@ scripts/
                                      App Manifest Flow. Used only at setup.
   reviewer/
     reviewer.sh                      Poll, prompt Gemini, post reviews.
-    review-prompt.md                 Engine prompt (output contract, severity
-                                     scale, validation rules). Edit a file
-                                     in config/personalities/ instead.
+    review-prompt.md                 Minimal GitHub review output format.
     run-once.sh                      Load env, sync checkout, run one tick.
     sync-worktree.sh                 Keep the daemon checkout detached at
                                      the configured branch.
@@ -119,16 +113,15 @@ deploy/systemd/
 
 ## Customizing The Reviewer
 
-Three ways to shape what your reviewer does, in order of impact:
+Two ways to shape what your reviewer does, in order of impact:
 
-1. **`config/personalities/<name>.md`** - role, voice, focus areas. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`. (The severity scale and verdict mapping live in the engine prompt, not here.)
-2. **`config/project-docs.txt`** - repository paths to fetch from the PR head and inline into every review prompt. Put your house style, architecture notes, and review standards here.
-3. **`config/head-context-paths.txt`** - extra files to fetch for reference validation (e.g. `package.json`, `.github/workflows/ci.yml`). The reviewer uses these to avoid hallucinating missing files or scripts.
+1. **`config/personalities/<name>.md`** - role, voice, focus areas. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`.
+2. **`config/required-checks.json`** - exact GitHub check-run names that must pass before Gemini is called.
 
 `scripts/configure.sh` walks you through copying the `.example` files and editing them. See [docs/daemon-runbook.md](docs/daemon-runbook.md#configuration-reference) for the full reference.
 
 ## Safety Model
 
-The daemon trusts a GitHub App installation token (minted from a private key stored at `REVIEWER_APP_PRIVATE_KEY_PATH`) and local `gemini` authentication on the VM. Keep the private key file at mode `0600`, owned by the user that runs the cron. Do not run this from a developer's active working checkout.
+The daemon trusts a GitHub App installation token (minted from a private key stored at `REVIEWER_APP_PRIVATE_KEY_PATH`) and local `gemini` authentication on the VM. Keep the private key file at mode `0600`, owned by the user that runs the cron. Do not run this from a developer's active working checkout. PR-head source snapshots under `REVIEWER_STATE/worktrees/<repo>/current` are read-only review context; the daemon does not execute project code from them.
 
 The daemon does not merge PRs and does not edit source code. It only posts reviews and applies optional labels.

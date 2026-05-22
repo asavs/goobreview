@@ -33,32 +33,20 @@ CONFIG_DIR="${REVIEWER_CONFIG_DIR:-$REPO_DIR/config}"
 . "$LIB_DIR/output.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/prompt.sh"
+# shellcheck disable=SC1091
+. "$LIB_DIR/worktree.sh"
 
 DEFAULT_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.json"
 if [ ! -f "$DEFAULT_REQUIRED_CHECKS_FILE" ] && [ -f "$CONFIG_DIR/required-checks.example.json" ]; then
   DEFAULT_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.example.json"
 fi
-DEFAULT_PROJECT_DOCS_FILE="$CONFIG_DIR/project-docs.txt"
-if [ ! -f "$DEFAULT_PROJECT_DOCS_FILE" ] && [ -f "$CONFIG_DIR/project-docs.example.txt" ]; then
-  DEFAULT_PROJECT_DOCS_FILE="$CONFIG_DIR/project-docs.example.txt"
-fi
-DEFAULT_HEAD_CONTEXT_PATHS_FILE="$CONFIG_DIR/head-context-paths.txt"
-if [ ! -f "$DEFAULT_HEAD_CONTEXT_PATHS_FILE" ] && [ -f "$CONFIG_DIR/head-context-paths.example.txt" ]; then
-  DEFAULT_HEAD_CONTEXT_PATHS_FILE="$CONFIG_DIR/head-context-paths.example.txt"
-fi
 REQUIRED_CHECKS_FILE="${REVIEWER_REQUIRED_CHECKS_FILE:-$DEFAULT_REQUIRED_CHECKS_FILE}"
-PROJECT_DOCS_FILE="${REVIEWER_PROJECT_DOCS_FILE:-$DEFAULT_PROJECT_DOCS_FILE}"
-HEAD_CONTEXT_PATHS_FILE="${REVIEWER_HEAD_CONTEXT_PATHS_FILE:-$DEFAULT_HEAD_CONTEXT_PATHS_FILE}"
 PERSONALITY_FILE="${REVIEWER_PERSONALITY_FILE:-}"
 case "$PERSONALITY_FILE" in
   ''|/*) ;;
   *) PERSONALITY_FILE="$REPO_DIR/$PERSONALITY_FILE" ;;
 esac
 ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
-HEAD_CONTEXT_MAX_LINES="${REVIEWER_HEAD_CONTEXT_MAX_LINES:-180}"
-PROJECT_DOC_MAX_LINES="${REVIEWER_PROJECT_DOC_MAX_LINES:-240}"
-DEFAULT_PROJECT_DOC_PATHS=$'AGENTS.md\nCONTRIBUTING.md\nREADME.md\ndocs/pr-review-workflow.md'
-DEFAULT_HEAD_CONTEXT_PATHS=$'README.md\nCONTRIBUTING.md\nAGENTS.md\n.github/workflows/ci.yml'
 REVIEWER_RUNNER_NAME="${REVIEWER_RUNNER_NAME:-reviewer daemon}"
 
 SEEN_FILE="$STATE_DIR/seen.txt"
@@ -74,10 +62,7 @@ flock -n 9 || exit 0
 
 validate_reviewer_config
 load_effective_required_checks_json
-required_checks_display="$(load_required_checks_display)"
-
-PROJECT_DOC_PATHS="${REVIEWER_PROJECT_DOC_PATHS:-$(read_path_list "$PROJECT_DOCS_FILE" "$DEFAULT_PROJECT_DOC_PATHS")}"
-HEAD_CONTEXT_PATHS="${REVIEWER_HEAD_CONTEXT_PATHS:-$(read_path_list "$HEAD_CONTEXT_PATHS_FILE" "$DEFAULT_HEAD_CONTEXT_PATHS")}"
+load_required_checks_display >/dev/null
 
 if [ -z "$RENDER_PROMPT_ONLY" ]; then
   if remaining=$(gemini_backoff_remaining); then
@@ -183,16 +168,14 @@ EOF
   log "Reviewing PR #$num@$head_sha"
 
   prompt_tmp=$(mktemp "$STATE_DIR/prompt.$num.XXXXXX")
-  tree_tmp=$(mktemp "$STATE_DIR/tree.$num.XXXXXX")
 
-  if ! gh api "repos/$REPO/git/trees/$head_sha?recursive=1" \
-    --jq '.tree[] | select(.type=="blob") | .path' >"$tree_tmp" 2>>"$LOG_FILE"; then
-    log "PR #$num@$head_sha: failed to read PR head file tree; continuing with empty tree context"
-    : >"$tree_tmp"
+  if ! review_worktree=$(prepare_review_worktree "$head_sha"); then
+    rm -f "$prompt_tmp"
+    log "PR #$num@$head_sha: failed to prepare PR-head worktree, will retry next tick"
+    continue
   fi
 
-  build_review_prompt "$num" "$head_sha" "$ci_state" "$required_checks_display" "$tree_tmp" "$prompt_tmp"
-  rm -f "$tree_tmp"
+  build_review_prompt "$num" "$prompt_tmp"
 
   if [ -n "$RENDER_PROMPT_ONLY" ]; then
     if [ -n "$PROMPT_OUT" ] && [ "$PROMPT_OUT" != "-" ]; then
@@ -209,7 +192,7 @@ EOF
   fi
 
   gemini_err_tmp=$(mktemp "$STATE_DIR/gemini.$num.err.XXXXXX")
-  if ! review=$(run_gemini_review "$prompt_tmp" "$gemini_err_tmp"); then
+  if ! review=$(run_gemini_review "$prompt_tmp" "$gemini_err_tmp" "$review_worktree"); then
     cat "$gemini_err_tmp" >> "$LOG_FILE"
     set_gemini_quota_backoff "$gemini_err_tmp" || true
     rm -f "$prompt_tmp" "$gemini_err_tmp"
@@ -225,8 +208,8 @@ EOF
   fi
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
-    verdict_line=$(printf '%s' "$review" | grep -m 1 '^VERDICT: ' || true)
-    log "PR #$num: gemini did not emit a valid VERDICT line (got: $verdict_line), will retry next tick"
+    verdict_line=$(printf '%s' "$review" | sed -n '1p')
+    log "PR #$num: gemini did not emit a valid first-line GitHub review event (got: $verdict_line), will retry next tick"
     continue
   fi
 

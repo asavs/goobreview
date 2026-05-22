@@ -56,6 +56,10 @@ set_gemini_quota_backoff() {
 run_gemini_review() {
   local prompt_file="$1"
   local err_file="$2"
+  local worktree_dir="$3"
 
-  timeout "$GEMINI_TIMEOUT" gemini -m "$GEMINI_MODEL" -p "" <"$prompt_file" 2>"$err_file"
+  (
+    cd "$worktree_dir" || exit
+    timeout "$GEMINI_TIMEOUT" gemini -m "$GEMINI_MODEL" -p "" <"$prompt_file" 2>"$err_file"
+  )
 }

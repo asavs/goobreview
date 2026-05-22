@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Interactive on-VM setup for GoobReview's per-deployment config:
-#   - the four gitignored files under config/
-#   - GitHub App credentials (App ID, installation ID, private key)
+# Interactive on-VM setup for GoobReview's per-deployment config and
+# GitHub App credentials (App ID, installation ID, private key).
 #
 # Run after setup-vm.sh has prepared the VM and after `gemini` has been
 # authenticated interactively. The App itself must be registered and
@@ -36,6 +35,8 @@ env_set() { ops_env_set "$ENV_FILE" "$@"; }
 # --- Preflight: Gemini auth -----------------------------------------------
 # The reviewer shells out to `gemini` headlessly, which requires that the
 # current user has authenticated and trusted the checkout folder at least once.
+# Gemini may also ask to trust the generated PR snapshot path during the
+# first dry run (`$REVIEWER_STATE/worktrees/<repo>/current`).
 # Both auth and trust state live under ~/.gemini, so missing dir = unauthed.
 ops_require_command node "Run scripts/setup-vm.sh first."
 ops_require_command gemini "Run scripts/setup-vm.sh first, then authenticate Gemini."
@@ -170,15 +171,14 @@ else
   log "Invalid choice; leaving REVIEWER_PERSONALITY_FILE as-is."
 fi
 
-# --- Step 4: other config files --------------------------------------------
-for name in project-docs.txt head-context-paths.txt required-checks.json; do
-  base="${name%.*}"
-  ext="${name##*.}"
-  example="$CONFIG_DIR/${base}.example.${ext}"
-  if copy_if_missing "$CONFIG_DIR/$name" "$example"; then
-    maybe_edit "$CONFIG_DIR/$name"
-  fi
-done
+# --- Step 4: required-check config -----------------------------------------
+name="required-checks.json"
+base="${name%.*}"
+ext="${name##*.}"
+example="$CONFIG_DIR/${base}.example.${ext}"
+if copy_if_missing "$CONFIG_DIR/$name" "$example"; then
+  maybe_edit "$CONFIG_DIR/$name"
+fi
 
 # --- Step 5: optional label creation ---------------------------------------
 if confirm "Create the helper labels (agent-reviewed, agent-requested-changes, needs-human-decision) on $current_repo now?"; then

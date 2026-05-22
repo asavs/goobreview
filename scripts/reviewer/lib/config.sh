@@ -10,17 +10,6 @@ require() {
   }
 }
 
-read_path_list() {
-  local file="$1"
-  local fallback="$2"
-
-  if [ -f "$file" ]; then
-    sed -E '/^[[:space:]]*(#|$)/d' "$file"
-  else
-    printf '%s\n' "$fallback"
-  fi
-}
-
 validate_uint_env() {
   local name="$1"
   local value="$2"
@@ -63,8 +52,6 @@ validate_reviewer_config() {
   fi
 
   validate_uint_env REVIEWER_MAX_PRS "$MAX_PRS"
-  validate_uint_env REVIEWER_HEAD_CONTEXT_MAX_LINES "$HEAD_CONTEXT_MAX_LINES"
-  validate_uint_env REVIEWER_PROJECT_DOC_MAX_LINES "$PROJECT_DOC_MAX_LINES"
   validate_uint_env REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF "$GEMINI_QUOTA_DEFAULT_BACKOFF"
   validate_uint_env REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING "$GEMINI_QUOTA_BACKOFF_PADDING"
   validate_bool_env REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE "$ALLOW_REQUIRED_CHECKS_OVERRIDE"
@@ -73,6 +60,7 @@ validate_reviewer_config() {
   require flock
   require jq
   require node
+  require tar
   if [ -z "${RENDER_PROMPT_ONLY:-}" ]; then
     require gemini
     require timeout

@@ -46,7 +46,7 @@ Fill in:
   | Permission | Setting | Why |
   |---|---|---|
   | Checks | Read-only | CI gate — reads check-runs before calling Gemini |
-  | Contents | Read-only | Reads file tree and project docs from the PR head SHA |
+  | Contents | Read-only | Downloads the PR-head source snapshot for read-only review context |
   | Issues | Read & Write | Posts labels (`agent-reviewed`, etc.) via the Issues API |
   | Metadata | Read-only | Auto-selected; required for any repo API access |
   | Pull requests | Read & Write | Lists PRs and submits reviews |

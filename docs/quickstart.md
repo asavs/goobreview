@@ -62,7 +62,7 @@ scripts/configure.sh  # prompts for target repo; auto-discovers installation ID
 
 `configure.sh`:
 
-- Copies each gitignored config file (`reviewer.env`, `project-docs.txt`, `head-context-paths.txt`, `required-checks.json`) from its `.example` sibling.
+- Copies each gitignored config file (`reviewer.env`, `required-checks.json`) from its `.example` sibling.
 - Prompts for `REVIEWER_REPO` (the App ID is already filled in after `scripts/register-app.sh`; manual App registration prompts for it).
 - Auto-discovers the installation ID by minting an App token and looking up the install on the target repo.
 - Lists the personalities in `config/personalities/` and writes your pick to `REVIEWER_PERSONALITY_FILE` in `reviewer.env`.

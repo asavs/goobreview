@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Dry-run the reviewer once against the configured target repo. No reviews
-# are posted; everything else runs (token mint, file fetch, prompt assembly,
-# Gemini call, verdict parse) so you can inspect the result in the log.
+# are posted; everything else runs (token mint, PR-head snapshot, prompt
+# assembly, Gemini call, verdict parse) so you can inspect the result in the log.
 #
 # Usage:  scripts/dry-run.sh [PR_NUMBER]
 set -euo pipefail
@@ -27,9 +27,9 @@ if [ ! -s "$REVIEWER_APP_PRIVATE_KEY_PATH" ] || [ ! -r "$REVIEWER_APP_PRIVATE_KE
   ops_die "Private key is empty or unreadable: $REVIEWER_APP_PRIVATE_KEY_PATH"
 fi
 if [ ! -d "$HOME/.gemini" ]; then
-  ops_die "Gemini CLI auth/trust state not found at $HOME/.gemini. Run 'gemini' once in this checkout, sign in, trust the folder, then /quit."
+  ops_die "Gemini CLI auth/trust state not found at $HOME/.gemini. Run 'gemini' once in this checkout, sign in, trust the folder, then /quit. If the first dry run later reports the generated PR snapshot as untrusted, run gemini once from REVIEWER_STATE/worktrees/<repo>/current too."
 fi
-for cmd in gh gemini jq node flock timeout; do
+for cmd in gh gemini jq node tar flock timeout; do
   ops_require_command "$cmd" "Run scripts/setup-vm.sh first."
 done
 

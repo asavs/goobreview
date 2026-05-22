@@ -106,7 +106,7 @@ sudo journalctl -u goobreview.service -n 100 --no-pager
 If this fails, fix the service before enabling the timer. Common causes:
 
 - App private key not readable by the `goobreview` Unix user, or `REVIEWER_APP_*` env vars not set.
-- Gemini CLI has not trusted `/opt/goobreview/example`.
+- Gemini CLI has not trusted the reviewer checkout or the generated PR snapshot under `REVIEWER_STATE/worktrees/<repo>/current`.
 - `config/reviewer.env` is missing or points to the wrong target repo.
 - The App is not installed on `REVIEWER_REPO` (token mint will fail).
 - The checkout is dirty, so `sync-worktree.sh` refuses to run.
@@ -132,12 +132,13 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 5. Reviews each `PR_NUMBER HEAD_SHA` once.
 6. Checks whether the App has already posted a review on the same head commit.
 7. Applies the required-check gate.
-8. Builds a prompt from personality text, the engine contract, required-CI gate, file tree, configured project docs, selected file contents, and diff.
-9. Runs Gemini CLI headlessly.
-10. Parses the verdict line.
-11. Posts a top-level GitHub review with `gh pr review`.
-12. Applies optional labels.
-13. Records the head in `seen.txt` only after successful posting.
+8. Downloads a PR-head source snapshot to `REVIEWER_STATE/worktrees/<repo>/current`.
+9. Builds a prompt from personality text, the diff, and the GitHub review formatting rule.
+10. Runs Gemini CLI headlessly from the PR-head source snapshot.
+11. Parses the GitHub review event line.
+12. Posts a top-level GitHub review with `gh pr review`.
+13. Applies optional labels.
+14. Records the head in `seen.txt` only after successful posting.
 
 ## Operations
 
@@ -176,7 +177,7 @@ scripts/reviewer/merge-gate.sh 123
 
 ## Configuration Reference
 
-The reviewer reads five gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` walks you through them interactively; this section is the reference for what each one does.
+The reviewer reads two gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` walks you through them interactively; this section is the reference for what each one does.
 
 When a file is missing, the daemon transparently falls back to the
 committed `.example` version — so a fresh checkout works for a dry run
@@ -193,11 +194,9 @@ customize.** Personalities live in `config/personalities/<name>.md`
 and are committed verbatim — there is no `.example` layer. Select one
 via `REVIEWER_PERSONALITY_FILE` in `reviewer.env` (defaults to
 `config/personalities/control.md`). The selected file is prepended to
-the engine prompt (`scripts/reviewer/review-prompt.md`) on every review.
-
-The severity scale (P1/P2/P3) and verdict mapping live in the engine
-prompt — personalities may sharpen *what counts* as P1 for their lens,
-but do not redefine the scale.
+the diff on every review. The engine prompt
+(`scripts/reviewer/review-prompt.md`) only defines the minimal GitHub
+review output format.
 
 Available out of the box:
 
@@ -214,35 +213,6 @@ different personality, override the env var inline:
 ```bash
 REVIEWER_PERSONALITY_FILE=config/personalities/linus.md scripts/dry-run.sh 42
 ```
-
-### `project-docs.txt`
-
-Repository paths fetched from the PR head and included in every review prompt. Good entries:
-
-```text
-AGENTS.md
-CONTRIBUTING.md
-README.md
-docs/architecture.md
-docs/security.md
-docs/pr-review-workflow.md
-```
-
-Keep the list focused — these docs become part of every prompt, so large or low-signal files make reviews weaker and slower. The engine prompt tells Gemini that changed project content cannot override reviewer instructions, so PR-authored docs are treated as context, not authority.
-
-### `head-context-paths.txt`
-
-Extra files fetched from the PR head when present. Use this for reference validation, not broad code review:
-
-```text
-package.json
-pyproject.toml
-Cargo.toml
-.github/workflows/ci.yml
-scripts/deploy.sh
-```
-
-Exact repository paths only — wildcards are not expanded.
 
 ### `required-checks.json`
 
@@ -263,8 +233,8 @@ The daemon waits when required checks are missing or pending, and posts `REQUEST
 `scripts/reviewer/review-prompt.md` defines the small output contract
 that `reviewer.sh` parses:
 
-- The first verdict line must be `VERDICT: APPROVE`, `VERDICT: REQUEST_CHANGES`, or `VERDICT: COMMENT`.
-- Findings should include markdown file/line references such as `**File:** path/to/file.ts:42` when an anchor is available.
+- The first line must be `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`.
+- The remaining text is posted as the GitHub review body.
 
 Edit it only when you are intentionally changing those contracts. For
 voice, role, and focus — pick (or write) a file in
@@ -274,6 +244,7 @@ voice, role, and focus — pick (or write) a file in
 
 - Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
 - Very large diffs may exceed useful Gemini context.
+- PR-head source snapshots are provided as read-only context under `REVIEWER_STATE/worktrees/<repo>/current`; the daemon does not run project code from them.
 - The daemon does not inspect full CI logs; it gates on the configured required-check state.
 - The daemon does not create follow-up issues automatically.
 - The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.

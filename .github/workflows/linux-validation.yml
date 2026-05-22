@@ -65,7 +65,7 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git diff --check "${{ github.event.pull_request.base.sha }}" HEAD
-          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
             git diff-tree --check --no-commit-id --root -r HEAD
           else
             git diff --check "${{ github.event.before }}" HEAD
