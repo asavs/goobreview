@@ -33,6 +33,30 @@ SETUP_VM_URL="${GOOBREVIEW_SETUP_VM_URL:-https://raw.githubusercontent.com/${det
 ops_require_command gcloud "Run this in Google Cloud Shell, or install gcloud first."
 
 current_project="$(gcloud config get-value project 2>/dev/null || true)"
+case "$current_project" in
+  ''|'(unset)'|cloudshell-*)
+    cat >&2 <<EOF
+[bootstrap-gcp] No usable GCP project is active.
+
+Cloud Shell's session-default project ($current_project) can't run
+Compute Engine. You need a normal GCP project with a billing account.
+
+  - If you already have one:
+      gcloud config set project YOUR_PROJECT_ID
+
+  - If you don't, create one and attach a billing account:
+      https://console.cloud.google.com/projectcreate
+      https://console.cloud.google.com/billing
+
+The default VM (e2-micro in us-central1) is on GCP's always-free tier,
+so you won't be charged for the default setup.
+
+Then re-run: bash scripts/bootstrap-gcp.sh
+EOF
+    exit 1
+    ;;
+esac
+
 project="$(ops_prompt 'GCP project ID' "$current_project")"
 ops_require_nonempty "Project ID" "$project"
 

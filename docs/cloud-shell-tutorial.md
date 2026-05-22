@@ -2,21 +2,27 @@
 
 This walkthrough is the Cloud Shell version of [docs/quickstart.md](quickstart.md). It provisions a small Compute Engine VM, registers the GitHub App, and then sends you to the shared on-VM setup steps.
 
-## 1. Confirm your project
+## 1. Pick (or create) a billing-enabled GCP project
 
-Cloud Shell is already authenticated to your Google account. Check which GCP project is active:
+Cloud Shell is signed in to your Google account, but its session-default project (`cloudshell-NNNN`) can't run Compute Engine. You need a normal GCP project with a billing account attached.
 
-```bash
-gcloud config get-value project
-```
-
-If that's not the project you want to use, set it now:
+**If you already have one:**
 
 ```bash
 gcloud config set project YOUR_PROJECT_ID
 ```
 
-The VM will be billed to this project. The bootstrap script will also prompt you to confirm.
+**If you don't:** create one at https://console.cloud.google.com/projectcreate, then attach a billing account at https://console.cloud.google.com/billing.
+
+A billing account is required to enable Compute Engine, but the default GoobReview VM is an `e2-micro` in `us-central1`, which runs within GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) (1 instance + 30 GB standard disk per month). You won't be charged unless you bump to a larger machine, run multiple VMs, or move to a non-free region. New Google Cloud accounts also get $300 in 90-day credits.
+
+Confirm it took:
+
+```bash
+gcloud config get-value project
+```
+
+> **Stuck on any of this?** Type `gemini` at the Cloud Shell prompt and ask it to walk you through the console step — it's pre-installed here and can guide you on GCP project creation, billing setup, and gcloud commands.
 
 ## 2. Run the bootstrap script
 
@@ -32,9 +38,9 @@ You'll be asked for three things (defaults shown in brackets):
 
 After you confirm, the script will:
 
-1. Create the small Ubuntu VM described in [docs/vm-setup.md](vm-setup.md).
-2. Wait for SSH to become reachable
-3. Run `setup-vm.sh` on the VM, which installs the required tools, configures swap, then clones the template into `/opt/goobreview/example`
+1. Create an `e2-micro` Ubuntu 24.04 VM (1 shared vCPU, 1 GB RAM, 20 GB disk) in your chosen zone. See [docs/vm-setup.md](vm-setup.md) for the full spec and larger-machine alternatives.
+2. Wait for SSH to become reachable.
+3. Run `setup-vm.sh` on the VM, which installs the required tools, configures a 2 GB swap file, then clones the template into `/opt/goobreview/example`.
 
 When it finishes, it will print an SSH command and the remaining manual steps.
 

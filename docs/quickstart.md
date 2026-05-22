@@ -10,6 +10,8 @@ If you can't use Cloud Shell, see the [Manual VM Setup](#manual-vm-setup) append
 
 ## 2. Provision The VM
 
+You need a billing-enabled GCP project (Cloud Shell's session-default `cloudshell-NNNN` won't work for Compute Engine). If you don't have one, create one at https://console.cloud.google.com/projectcreate and attach a billing account; then `gcloud config set project YOUR_PROJECT_ID`. The default VM is an `e2-micro` in `us-central1`, which is on GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) — you won't be charged unless you bump to a larger machine.
+
 From the Cloud Shell checkout:
 
 ```bash
@@ -18,8 +20,8 @@ bash scripts/bootstrap-gcp.sh
 
 It prompts for GCP project, zone, and VM name, then:
 
-- Creates the small Ubuntu VM described in [docs/vm-setup.md](vm-setup.md).
-- Installs the required packages, GitHub CLI, Gemini CLI, and swap.
+- Creates an `e2-micro` Ubuntu 24.04 VM (1 shared vCPU, 1 GB RAM, 20 GB disk). See [docs/vm-setup.md](vm-setup.md) for the full spec and larger-machine alternatives.
+- Installs the required packages, GitHub CLI, Gemini CLI, and a 2 GB swap file.
 - Clones this template into `/opt/goobreview/example` on the VM.
 
 Takes about 3 minutes. When it finishes, it prints the remaining commands.
