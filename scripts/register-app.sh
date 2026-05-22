@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Register a GitHub App for GoobReview via GitHub's Manifest Flow, then ship
-# its private key to the VM and pre-populate reviewer.env with the App ID.
-# Run from Cloud Shell (or anywhere with Node 20 + gcloud authed to the project).
+# Drive GitHub App registration for GoobReview: spin up a local helper server
+# that hands the user a pre-filled GitHub App-creation link, receives the
+# resulting .pem + App ID, ships them to the VM, and pre-populates
+# reviewer.env with the App ID. Run from Cloud Shell (or anywhere with Node 20
+# + gcloud authed to the project).
 #
 # Usage:  scripts/register-app.sh [VM_NAME] [ZONE]
 # Env:    GOOBREVIEW_GH_ORG=myorg  Register under an organization (defaults to personal account)
@@ -30,7 +32,7 @@ ops_require_nonempty "Zone" "$ZONE"
 ops_require_file "$REPO_ROOT/config/app-manifest.json" "This checkout looks incomplete."
 
 # Fail fast if the VM doesn't exist — better to know now than after the user
-# clicks through the manifest flow and creates a real GitHub App.
+# creates a real GitHub App and uploads its key.
 if ! gcloud compute instances describe "$VM_NAME" --zone="$ZONE" >/dev/null 2>&1; then
   cat >&2 <<EOF
 VM '$VM_NAME' not found in zone '$ZONE'.
@@ -53,17 +55,19 @@ cat <<EOF
 ============================================================
 GoobReview: GitHub App registration
 
-This will spin up a small local web server. You'll click two
-buttons (one here, one on GitHub) and the App's private key
-will be uploaded to $VM_NAME automatically.
+This will spin up a small local web server, then walk you
+through creating the App on GitHub and uploading its private
+key. The key is shipped straight to $VM_NAME.
 
 Next steps once the server starts:
 
   1. Click the **Web Preview** button at the top-right of
      Cloud Shell (square icon with an arrow).
   2. Choose **Preview on port $PORT**. A new browser tab opens.
-  3. Click "Create GoobReview App on GitHub →".
-  4. Confirm on GitHub.
+  3. Follow the two-step page that loads:
+       a. Click through to the pre-filled GitHub form and
+          create the App, then generate a private key.
+       b. Upload the .pem and paste the App ID.
 
 The server will exit on its own after registration completes.
 ============================================================
@@ -75,7 +79,7 @@ export GOOBREVIEW_MANIFEST="$REPO_ROOT/config/app-manifest.json"
 export GOOBREVIEW_REGISTER_PORT="$PORT"
 # GOOBREVIEW_GH_ORG already exported by caller if set
 
-node "$SCRIPT_DIR/lib/manifest-server.mjs"
+node "$SCRIPT_DIR/lib/register-server.mjs"
 
 if [ ! -f "$OUTPUT_DIR/app-key.pem" ] || [ ! -f "$OUTPUT_DIR/app.json" ]; then
   echo "Registration did not complete — no key found in $OUTPUT_DIR." >&2
@@ -85,9 +89,9 @@ fi
 APP_ID="$(jq -r .id "$OUTPUT_DIR/app.json")"
 APP_SLUG="$(jq -r .slug "$OUTPUT_DIR/app.json")"
 APP_NAME="$(jq -r .name "$OUTPUT_DIR/app.json")"
-ops_validate_uint "GitHub App ID returned by manifest flow" "$APP_ID"
-ops_require_nonempty "GitHub App slug returned by manifest flow" "$APP_SLUG"
-ops_require_nonempty "GitHub App name returned by manifest flow" "$APP_NAME"
+ops_validate_uint "GitHub App ID" "$APP_ID"
+ops_require_nonempty "GitHub App slug" "$APP_SLUG"
+ops_require_nonempty "GitHub App name" "$APP_NAME"
 
 echo
 echo "App created: $APP_NAME (id=$APP_ID, slug=$APP_SLUG)"

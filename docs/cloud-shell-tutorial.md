@@ -48,14 +48,14 @@ From Cloud Shell (still in the goobreview checkout):
 bash scripts/register-app.sh
 ```
 
-This starts a tiny local server, then prompts you to:
+This starts a tiny local server. The walkthrough is:
 
 1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port 8080**.
-2. In the new browser tab, click **Create GoobReview App on GitHub ->**.
-3. Confirm on GitHub (you can rename the App on that page if you want).
-4. Click **Install ... on a repo ->** on the success page and pick your target repo.
+2. In the new browser tab, click through to the **pre-filled GitHub form** (it already has the name, homepage, webhook setting, and the five permissions set). At the bottom click **Create GitHub App**.
+3. On the App's settings page that loads, click **Generate a private key** to download the `.pem`, and note the **App ID** at the top.
+4. Back on the Web Preview page, upload the `.pem` and paste the App ID. After it verifies, click **Install ... on a repo ->** and pick your target repo.
 
-When the script finishes, the private key is already on the VM at `/var/lib/goobreview/example/app-key.pem` and the App ID is pre-filled in `reviewer.env`. The key never touches your local machine.
+When the script finishes, the private key is on the VM at `/var/lib/goobreview/example/app-key.pem` and the App ID is pre-filled in `reviewer.env`. The key only lives in Cloud Shell and on the VM &mdash; never on your local machine.
 
 Registering the App under an organization instead of your personal account? Pass the org name:
 
@@ -63,7 +63,7 @@ Registering the App under an organization instead of your personal account? Pass
 GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh
 ```
 
-(If you'd rather register manually, see [docs/github-app-setup.md](github-app-setup.md).)
+(For the by-hand path or troubleshooting, see [docs/github-app-setup.md](github-app-setup.md).)
 
 ## 4. Configure the reviewer
 

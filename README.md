@@ -15,13 +15,13 @@ bash scripts/bootstrap-gcp.sh
 bash scripts/register-app.sh
 ```
 
-`bootstrap-gcp.sh` creates the VM and installs dependencies. `register-app.sh` uses GitHub's [Manifest Flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) to create the App, install it on your target repo, and place the private key on the VM without downloading it to your local machine.
+`bootstrap-gcp.sh` creates the VM and installs dependencies. `register-app.sh` spins up a local web helper that walks you through creating the GitHub App from a pre-filled form, uploading its private key, and installing it on your target repo &mdash; with the `.pem` going straight from Cloud Shell to the VM, never to your local machine.
 
 > Want your own copy to customize? Click **Use this template** at the top of this repo on GitHub. A first-push workflow (`.github/workflows/template-cleanup.yml`) auto-personalizes the Cloud Shell button, bootstrap script, and clone URL to point at your new repo.
 
 ## Manual Setup
 
-If you can't or don't want to use the one-click path - say, you already have a VM, or you're on a corporate GitHub that disallows manifest-flow App creation - follow the same high-level order with the manual references:
+If you can't or don't want to use the one-click path - say, you already have a VM, or you can't run a local helper server in your environment - follow the same high-level order with the manual references:
 
 1. Provision a small Linux VM and install the required tools. See [docs/vm-setup.md](docs/vm-setup.md).
 2. Register and install the GitHub App. See [docs/github-app-setup.md](docs/github-app-setup.md).
@@ -46,9 +46,10 @@ Give your coding agent this repository and ask:
 
 ```text
 Use this template to set up an automated PR reviewer for OWNER/REPO. Walk me
-through bootstrap-gcp.sh (VM provisioning), register-app.sh (GitHub App via
-manifest flow), configure.sh (target repo + auto-discover installation ID),
-a dry-run review, and enabling the scheduler only after the dry run is clean.
+through bootstrap-gcp.sh (VM provisioning), register-app.sh (GitHub App
+registration helper), configure.sh (target repo + auto-discover installation
+ID), a dry-run review, and enabling the scheduler only after the dry run is
+clean.
 ```
 
 The agent should follow:
@@ -65,7 +66,8 @@ The agent should follow:
 config/                              Per-deployment files. *.example.* ships;
                                      the non-example copy is gitignored.
   app-manifest.json                  GitHub App template used by register-app.sh
-                                     (permissions, name pattern). Committed.
+                                     to pre-fill the App-creation form
+                                     (permissions, name, url). Committed.
   personalities/                     Reviewer personalities (control.md,
                                      linus.md, etc.). Pick one via
                                      REVIEWER_PERSONALITY_FILE in reviewer.env.
@@ -79,13 +81,14 @@ scripts/
                                      runs setup-vm.sh on it.
   setup-vm.sh                        Installs gh, Node, Gemini CLI, configures
                                      swap; clones the template. Runs on the VM.
-  register-app.sh                    Manifest-flow GitHub App registration:
-                                     runs lib/manifest-server.mjs, scps the key
-                                     to the VM, writes REVIEWER_APP_ID.
+  register-app.sh                    GitHub App registration: runs
+                                     lib/register-server.mjs, scps the key to
+                                     the VM, writes REVIEWER_APP_ID.
   configure.sh                       On-VM interactive setup for config/ and
                                      App credentials.
-  lib/manifest-server.mjs            Tiny Node HTTP server that drives GitHub's
-                                     App Manifest Flow. Used only at setup.
+  lib/register-server.mjs            Tiny Node HTTP server: hands the user a
+                                     pre-filled GitHub form, receives the
+                                     .pem + App ID. Used only at setup.
   reviewer/
     reviewer.sh                      Poll, prompt Gemini, post reviews.
     review-prompt.md                 Minimal GitHub review output format.

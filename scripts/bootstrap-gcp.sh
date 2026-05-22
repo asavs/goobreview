@@ -107,10 +107,10 @@ To finish:
   1. Register the GitHub App and ship its key to the VM (still in Cloud Shell):
        bash scripts/register-app.sh $vm_name $zone
 
-     Click the Web Preview button (port 8080) → "Create GoobReview App" →
-     confirm on GitHub → "Install on a repo". About 30 seconds total.
+     Click the Web Preview button (port 8080); the page walks you through
+     creating the App via a pre-filled GitHub form and uploading its key.
 
-     (Or follow docs/github-app-setup.md to register manually.)
+     (See docs/github-app-setup.md for the full walkthrough.)
 
   2. SSH in, trust Gemini, and run configure.sh:
        gcloud compute ssh $vm_name --zone=$zone
