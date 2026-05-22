@@ -138,7 +138,7 @@ ops_env_get() {
 
 ops_env_set() {
   local env_file="$1" name="$2" value="$3" esc
-  esc=$(printf '%s' "$value" | sed -e 's|[\/&]|\\&|g')
+  esc=$(printf '%s' "$value" | sed -e 's/[\\|&]/\\&/g')
   if grep -qE "^${name}=" "$env_file"; then
     sed -i.bak "s|^${name}=.*|${name}=${esc}|" "$env_file"
     rm -f "$env_file.bak"
