@@ -10,23 +10,23 @@ If you can't use Cloud Shell, see the [Manual VM Setup](#manual-vm-setup) append
 
 ## 2. Provision The VM
 
-You need a billing-enabled GCP project (Cloud Shell's session-default `cloudshell-NNNN` won't work for Compute Engine). The bootstrap script can create a project, link it to an existing billing account, or repair a selected project whose billing is disabled. It looks for billing accounts directly, and can also infer one from an existing project that already has billing enabled. If your Google account has no active Cloud Billing account yet, open https://console.cloud.google.com/billing first; Google requires that browser/payment step before the CLI can create the VM.
-
-The default VM is an `e2-micro` in `us-central1`, which is on GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) when you keep the defaults. You won't be charged unless you bump to a larger machine, run multiple VMs, move to a non-free region, or otherwise exceed free-tier limits.
-
-Cloud Shell has Gemini preinstalled. If the billing/project page is confusing, type `gemini` and ask it to walk you through that Google Cloud console step; then come back here and rerun the same bootstrap command.
-
 From the Cloud Shell checkout:
 
 ```bash
 bash scripts/bootstrap-gcp.sh
 ```
 
-It checks project/billing state, prompts for GCP project, zone, and VM name, then:
+Start with this command. It checks project/billing state, prompts for GCP project, zone, and VM name, then:
 
 - Creates an `e2-micro` Ubuntu 24.04 VM (1 shared vCPU, 1 GB RAM, 20 GB disk). See [docs/vm-setup.md](vm-setup.md) for the full spec and larger-machine alternatives.
 - Installs the required packages, GitHub CLI, Gemini CLI, and a 2 GB swap file.
 - Clones this template into `/opt/goobreview/example` on the VM.
+
+The script can create a project, link it to an existing billing account, or repair a selected project whose billing is disabled. It looks for billing accounts directly, and can also infer one from an existing project that already has billing enabled. If your Google account has no active Cloud Billing account yet, it will send you to https://console.cloud.google.com/billing and tell you to rerun the same command afterward.
+
+The default VM is an `e2-micro` in `us-central1`, which is on GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) when you keep the defaults. You won't be charged unless you bump to a larger machine, run multiple VMs, move to a non-free region, or otherwise exceed free-tier limits.
+
+Cloud Shell has Gemini preinstalled. If the billing/project page is confusing, type `gemini` and ask it to walk you through that Google Cloud console step; then come back here and rerun the same bootstrap command.
 
 Takes about 3 minutes. When it finishes, it prints the remaining commands.
 
