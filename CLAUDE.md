@@ -8,7 +8,7 @@ A **template** for a VM-side daemon that polls a target GitHub repo, asks Gemini
 
 Implications for editing:
 
-- The daemon runs on someone else's machine, often via cron or systemd. There's no local dev server, build step, or test suite.
+- The daemon runs on someone else's machine, often via cron or systemd. There's no local dev server or build step. The test suite is `scripts/reviewer/tests/run-fixtures.sh` (covers parser, CI-gate, prompt assembly, and Gemini invocation isolation); it runs in CI and is the canonical check for reviewer-core behavior.
 - `sync-worktree.sh` **refuses to sync a dirty checkout**. Any new per-deployment config file under `config/` that isn't gitignored will brick every deployed VM on next tick. The ignored per-deployment files are `reviewer.env` and `required-checks.json`; only their `.example.*` siblings are committed. Adding another local config file means updating `.gitignore`, config resolution, setup docs, and `configure.sh` in the same PR. Personality is the exception: it doesn't follow the `.example` pattern — gallery files in `config/personalities/` are committed verbatim and selected via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`.
 - Forks/template instantiations rely on `.github/workflows/template-cleanup.yml` rewriting every `asavschaeffer/goobreview` literal to the new `owner/repo` on first push to `main`. Hardcode that string in new docs/scripts the same way existing ones do — don't introduce an alternate spelling, or fork personalization will silently miss it.
 
@@ -22,7 +22,7 @@ Three layers, executed top-down on each tick:
 
 There's one other Node script, off the hot path: **`scripts/lib/manifest-server.mjs`**, run by `scripts/register-app.sh` to drive GitHub's Manifest Flow during initial setup. It binds to port 8080, renders a form that POSTs to `github.com/settings/apps/new` with the contents of `config/app-manifest.json` (the source of truth for App name template, permissions, and `default_events`), receives GitHub's redirect at `/callback?code=...&state=...`, and exchanges the code for the App's private key. The PEM is written to a tempdir; `register-app.sh` then `scp`s it to the VM and pre-populates `REVIEWER_APP_ID` in `reviewer.env`. **Contracts here:** the manifest JSON shape is GitHub's, not ours — don't add fields beyond what GitHub documents; the state token must be URL-only (form-only didn't round-trip reliably in testing); and the `redirect_url` is computed at form-render time from the `Host`/`x-forwarded-host` header, so Cloud Shell's per-session Web Preview URL doesn't need to be known in advance.
 
-State directory (`REVIEWER_STATE`, default `$HOME/.goobreview`) holds: `seen.txt`, `log.txt`, `lock`, `app_token.json`, `app-key.pem` (you provide, mode 0600), `gemini_backoff_until` (set by `set_gemini_quota_backoff` when Gemini emits quota errors), `sync.log`, `cron.log`.
+State directory (`REVIEWER_STATE`, default `$HOME/.goobreview`) holds: `seen.txt`, `log.txt`, `lock`, `app_token.json`, `app-key.pem` (you provide, mode 0600), `gemini_backoff_until` (set by `set_gemini_quota_backoff` when Gemini emits quota errors), `sync.log`, `cron.log`, `gemini-settings.json` (written before each Gemini invocation; configures allowed tools, workspace context path, and MCP policy).
 
 **Prompt layering** — there are two prompt inputs and they have different owners:
 
@@ -41,8 +41,10 @@ Bootstrap flow (Cloud Shell path): `scripts/bootstrap-gcp.sh` creates a GCE VM, 
 ## Common Commands
 
 ```bash
-# Syntax-check changed shell scripts (the closest thing to a test suite)
-bash -n scripts/reviewer/*.sh
+# Syntax-check all shell scripts and run the fixture test suite
+mapfile -t shell_files < <(git ls-files '*.sh')
+bash -n "${shell_files[@]}"
+bash scripts/reviewer/tests/run-fixtures.sh
 
 # Validate example JSON
 jq . config/required-checks.example.json

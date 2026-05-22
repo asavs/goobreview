@@ -21,6 +21,7 @@ lock                    flock lock file.
 gemini_backoff_until    Quota/capacity retry timestamp.
 sync.log                Checkout sync log.
 app_token.json          Cached App installation token + slug (refreshed when <5 min remain).
+gemini-settings.json    Gemini CLI settings written before each review call (tools, context, MCP policy).
 app-key.pem             GitHub App private key (you provide; mode 0600).
 ```
 
