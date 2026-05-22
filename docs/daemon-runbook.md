@@ -225,6 +225,15 @@ Exact GitHub check-run display names that gate review posting:
 
 The daemon waits when required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when a required check fails. An empty array means "do not gate" — use that only for initial setup or repos without CI.
 
+### Runtime CI Override (Advanced)
+
+Two env vars let you override the required-check gate without editing `required-checks.json` — useful for one-off dry runs against a different target repo:
+
+- `REVIEWER_REQUIRED_CHECKS_JSON` — a JSON array of check-run name strings, e.g. `["Unit tests","Build"]`. When set and the override flag is enabled, it takes precedence over the file.
+- `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE` — must be `1` to allow the env override to apply. Defaults to `0`; the env var is silently ignored when this is not `1`.
+
+These are intentionally off by default so a stray env var cannot accidentally loosen the gate on a production reviewer.
+
 ### Labels (optional)
 
 `scripts/reviewer/ensure-labels.sh` creates or updates three labels in the target repo: `agent-reviewed`, `agent-requested-changes`, and `needs-human-decision`. Review posting does not depend on them.
