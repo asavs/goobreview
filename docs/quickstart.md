@@ -10,7 +10,7 @@ If you can't use Cloud Shell, see the [Manual VM Setup](#manual-vm-setup) append
 
 ## 2. Provision The VM
 
-You need a billing-enabled GCP project (Cloud Shell's session-default `cloudshell-NNNN` won't work for Compute Engine). The bootstrap script can create a project, link it to an existing billing account, or repair a selected project whose billing is disabled. If your Google account has no active Cloud Billing account yet, open https://console.cloud.google.com/billing first; Google requires that browser/payment step before the CLI can create the VM.
+You need a billing-enabled GCP project (Cloud Shell's session-default `cloudshell-NNNN` won't work for Compute Engine). The bootstrap script can create a project, link it to an existing billing account, or repair a selected project whose billing is disabled. It looks for billing accounts directly, and can also infer one from an existing project that already has billing enabled. If your Google account has no active Cloud Billing account yet, open https://console.cloud.google.com/billing first; Google requires that browser/payment step before the CLI can create the VM.
 
 The default VM is an `e2-micro` in `us-central1`, which is on GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) when you keep the defaults. You won't be charged unless you bump to a larger machine, run multiple VMs, move to a non-free region, or otherwise exceed free-tier limits.
 

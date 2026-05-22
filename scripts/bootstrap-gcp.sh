@@ -55,9 +55,42 @@ After billing is active, re-run:
 MSG
 }
 
-list_open_billing_accounts() {
+list_direct_billing_accounts() {
   gcloud billing accounts list --filter='open=true' \
     --format='value(name,displayName)' 2>/dev/null || true
+}
+
+list_project_linked_billing_accounts() {
+  local project_id info billing_account billing_enabled seen
+  seen=""
+
+  while IFS= read -r project_id; do
+    [ -n "$project_id" ] || continue
+    info=$(gcloud billing projects describe "$project_id" \
+      --format='value(billingAccountName,billingEnabled)' 2>/dev/null || true)
+    IFS=$'\t' read -r billing_account billing_enabled <<< "$info"
+    case "$billing_enabled" in
+      True|true|TRUE) ;;
+      *) continue ;;
+    esac
+    billing_account="${billing_account#billingAccounts/}"
+    [ -n "$billing_account" ] || continue
+    case "$seen" in
+      *"|$billing_account|"*) continue ;;
+    esac
+    seen="${seen}|$billing_account|"
+    printf '%s\tlinked via %s\n' "$billing_account" "$project_id"
+  done < <(gcloud projects list --format='value(projectId)' 2>/dev/null || true)
+}
+
+list_open_billing_accounts() {
+  local direct linked combined
+
+  direct=$(list_direct_billing_accounts)
+  linked=$(list_project_linked_billing_accounts)
+  combined=$(printf '%s\n%s\n' "$direct" "$linked" | awk -F '\t' 'NF && !seen[$1]++')
+
+  printf '%s' "$combined"
 }
 
 select_billing_account() {
@@ -116,7 +149,7 @@ create_project_with_billing() {
 
   validate_project_id "$project_id" || return 1
 
-  printf '[bootstrap-gcp] Listing your billing accounts...\n' >&2
+  printf '[bootstrap-gcp] Finding usable billing accounts...\n' >&2
   billing_raw=$(list_open_billing_accounts)
   billing_account=$(select_billing_account "$billing_raw") || return 1
 
@@ -163,7 +196,7 @@ link_project_billing_interactive() {
     return 1
   fi
 
-  printf '[bootstrap-gcp] Listing your billing accounts...\n' >&2
+  printf '[bootstrap-gcp] Finding usable billing accounts...\n' >&2
   billing_raw=$(list_open_billing_accounts)
   billing_account=$(select_billing_account "$billing_raw") || return 1
 

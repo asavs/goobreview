@@ -6,7 +6,7 @@ This walkthrough is the Cloud Shell version of [docs/quickstart.md](quickstart.m
 
 Cloud Shell is signed in to your Google account, but its session-default project (`cloudshell-NNNN`) can't run Compute Engine. You need a normal GCP project linked to an active Cloud Billing account.
 
-The bootstrap script can create a project, link it to an existing billing account, or repair a selected project whose billing is disabled. If your Google account has no active Cloud Billing account yet, Google requires a browser/payment setup step before any CLI can create the VM.
+The bootstrap script can create a project, link it to an existing billing account, or repair a selected project whose billing is disabled. It looks for billing accounts directly, and can also infer one from an existing project that already has billing enabled. If your Google account has no active Cloud Billing account yet, Google requires a browser/payment setup step before any CLI can create the VM.
 
 **If you already have a billing-enabled project:**
 
