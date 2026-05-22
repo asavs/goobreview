@@ -51,13 +51,11 @@ esac
 ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
 REVIEWER_RUNNER_NAME="${REVIEWER_RUNNER_NAME:-reviewer daemon}"
 
-SEEN_FILE="$STATE_DIR/seen.txt"
 LOG_FILE="$STATE_DIR/log.txt"
 LOCK_FILE="$STATE_DIR/lock"
 GEMINI_BACKOFF_FILE="$STATE_DIR/gemini_backoff_until"
 
 mkdir -p "$STATE_DIR"
-touch "$SEEN_FILE"
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
@@ -98,17 +96,11 @@ while IFS=$'\t' read -r num author head_sha; do
     break
   fi
 
-  seen_key="$num $head_sha"
-  if [ -z "$RENDER_PROMPT_ONLY" ] && grep -qxF "$seen_key" "$SEEN_FILE"; then
-    continue
-  fi
-
   if [ -z "$RENDER_PROMPT_ONLY" ]; then
     existing=$(gh api "repos/$REPO/pulls/$num/reviews" \
       --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and .commit_id == \"$head_sha\")] | length")
     if [ "$existing" -gt 0 ]; then
-      log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, marking seen"
-      echo "$seen_key" >> "$SEEN_FILE"
+      log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, skipping"
       continue
     fi
   fi
@@ -150,7 +142,6 @@ EOF
         continue
       fi
       if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body"; then
-        echo "$seen_key" >> "$SEEN_FILE"
         log "Posted REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
         review_actions=$((review_actions + 1))
       else
@@ -240,7 +231,6 @@ EOF
 
   if post_review "$num" "$event" "$body"; then
     apply_review_labels "$num" "$event" || log "PR #$num: failed to apply review labels"
-    echo "$seen_key" >> "$SEEN_FILE"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
   else

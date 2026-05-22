@@ -14,7 +14,6 @@ Preferred layout:
 Runtime state:
 
 ```text
-seen.txt                PR_NUMBER HEAD_SHA pairs reviewed successfully.
 log.txt                 Reviewer log.
 cron.log                Cron wrapper log.
 lock                    flock lock file.
@@ -130,16 +129,14 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 2. Mints a GitHub App installation token (cached in `app_token.json`) and exports it as `GH_TOKEN` so `gh` calls authenticate as the App.
 3. Lists open non-draft PRs in `REVIEWER_REPO`.
 4. Skips PRs authored by `BOT_LOGIN` (`<app-slug>[bot]`); also skips PRs authored by `REVIEWER_USER` if set.
-5. Reviews each `PR_NUMBER HEAD_SHA` once.
-6. Checks whether the App has already posted a review on the same head commit.
-7. Applies the required-check gate.
-8. Downloads a PR-head source snapshot to `REVIEWER_STATE/worktrees/<repo>/current`.
-9. Builds a prompt from personality text, the diff, and the GitHub review formatting rule.
-10. Runs Gemini CLI headlessly from `REVIEWER_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, and MCP servers disabled for the review invocation.
-11. Parses the GitHub review event line.
-12. Posts a top-level GitHub review with `gh pr review`.
-13. Applies optional labels.
-14. Records the head in `seen.txt` only after successful posting.
+5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
+6. Applies the required-check gate.
+7. Downloads a PR-head source snapshot to `REVIEWER_STATE/worktrees/<repo>/current`.
+8. Builds a prompt from personality text, the diff, and the GitHub review formatting rule.
+9. Runs Gemini CLI headlessly from `REVIEWER_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, and MCP servers disabled for the review invocation.
+10. Parses the GitHub review event line.
+11. Posts a top-level GitHub review with `gh pr review`.
+12. Applies optional labels.
 
 ## Operations
 
@@ -159,13 +156,9 @@ tail -f /var/lib/goobreview/example/cron.log
 tail -f /var/lib/goobreview/example/sync.log
 ```
 
-Force future PR heads to be considered again:
+Force a re-review of a PR at its current head commit:
 
-```bash
-rm /var/lib/goobreview/example/seen.txt
-```
-
-The script still checks GitHub for an existing review by the App on the same head commit, so deleting local state should not duplicate reviews that posted successfully.
+Delete the bot's review on GitHub (via the pull request UI or `gh api -X DELETE "repos/OWNER/REPO/pulls/PR/reviews/REVIEW_ID"`), then the daemon will re-review on the next tick.
 
 Run a pre-merge mechanical gate:
 
