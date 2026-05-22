@@ -14,8 +14,6 @@ fi
 
 required_checks_json=$(reviewer_required_checks_json "$REQUIRED_CHECKS_FILE")
 
-reviewer_validate_required_checks_json "$required_checks_json"
-
 if [ "$(printf '%s' "$required_checks_json" | jq 'length')" -eq 0 ]; then
   printf 'success\n'
   exit 0

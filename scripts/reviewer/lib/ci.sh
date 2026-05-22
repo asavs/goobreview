@@ -11,12 +11,16 @@ reviewer_validate_required_checks_json() {
 
 reviewer_required_checks_json() {
   local file="$1"
+  local required_checks_json
 
   if [ -n "${REQUIRED_CHECKS_JSON:-}" ]; then
-    printf '%s' "$REQUIRED_CHECKS_JSON"
+    required_checks_json="$REQUIRED_CHECKS_JSON"
   else
-    jq -c . "$file"
+    required_checks_json=$(jq -c . "$file") || return 1
   fi
+
+  reviewer_validate_required_checks_json "$required_checks_json" || return 1
+  printf '%s' "$required_checks_json" | jq -c .
 }
 
 reviewer_ci_state_from_json() {

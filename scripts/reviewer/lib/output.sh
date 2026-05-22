@@ -6,6 +6,11 @@ review_verdict_event() {
   local verdict_line
 
   IFS= read -r verdict_line || true
+  # Accept CRLF and accidental surrounding whitespace, then enforce a strict token.
+  verdict_line=${verdict_line//$'\r'/}
+  verdict_line=${verdict_line#"${verdict_line%%[![:space:]]*}"}
+  verdict_line=${verdict_line%"${verdict_line##*[![:space:]]}"}
+
   case "$verdict_line" in
     APPROVE|REQUEST_CHANGES|COMMENT) printf '%s\n' "$verdict_line" ;;
     *)                               return 1 ;;

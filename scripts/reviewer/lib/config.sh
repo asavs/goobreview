@@ -55,6 +55,7 @@ validate_reviewer_config() {
   validate_uint_env REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF "$GEMINI_QUOTA_DEFAULT_BACKOFF"
   validate_uint_env REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING "$GEMINI_QUOTA_BACKOFF_PADDING"
   validate_bool_env REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE "$ALLOW_REQUIRED_CHECKS_OVERRIDE"
+  validate_bool_env REVIEWER_APPLY_LABELS "$APPLY_LABELS"
 
   require gh
   require flock
@@ -79,21 +80,21 @@ load_effective_required_checks_json() {
   EFFECTIVE_REQUIRED_CHECKS_JSON=""
   if [ -n "${REVIEWER_REQUIRED_CHECKS_JSON:-}" ]; then
     if [ "$ALLOW_REQUIRED_CHECKS_OVERRIDE" = "1" ]; then
-      EFFECTIVE_REQUIRED_CHECKS_JSON="$REVIEWER_REQUIRED_CHECKS_JSON"
+      if ! EFFECTIVE_REQUIRED_CHECKS_JSON=$(REQUIRED_CHECKS_JSON="$REVIEWER_REQUIRED_CHECKS_JSON" reviewer_required_checks_json "$REQUIRED_CHECKS_FILE"); then
+        log "invalid REVIEWER_REQUIRED_CHECKS_JSON; expected a JSON array of nonempty strings"
+        exit 1
+      fi
     else
       log "Ignoring REVIEWER_REQUIRED_CHECKS_JSON because REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE is not 1"
     fi
   fi
-}
 
-load_required_checks_display() {
-  if [ -n "$EFFECTIVE_REQUIRED_CHECKS_JSON" ]; then
-    printf '%s\n' "$EFFECTIVE_REQUIRED_CHECKS_JSON"
-    return 0
+  if [ -z "$EFFECTIVE_REQUIRED_CHECKS_JSON" ]; then
+    if ! EFFECTIVE_REQUIRED_CHECKS_JSON=$(REQUIRED_CHECKS_JSON='' reviewer_required_checks_json "$REQUIRED_CHECKS_FILE"); then
+      log "invalid required checks config in $REQUIRED_CHECKS_FILE; expected a JSON array of nonempty strings"
+      exit 1
+    fi
   fi
 
-  jq -c . "$REQUIRED_CHECKS_FILE" || {
-    log "failed to read required checks from $REQUIRED_CHECKS_FILE"
-    exit 1
-  }
+  printf '%s\n' "$EFFECTIVE_REQUIRED_CHECKS_JSON"
 }

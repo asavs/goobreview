@@ -24,6 +24,8 @@ REPO_DIR="${REVIEWER_REPO_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 CONFIG_DIR="${REVIEWER_CONFIG_DIR:-$REPO_DIR/config}"
 
 # shellcheck disable=SC1091
+. "$LIB_DIR/ci.sh"
+# shellcheck disable=SC1091
 . "$LIB_DIR/config.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/gemini.sh"
@@ -61,8 +63,7 @@ exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
 validate_reviewer_config
-load_effective_required_checks_json
-load_required_checks_display >/dev/null
+load_effective_required_checks_json >/dev/null
 
 if [ -z "$RENDER_PROMPT_ONLY" ]; then
   if remaining=$(gemini_backoff_remaining); then

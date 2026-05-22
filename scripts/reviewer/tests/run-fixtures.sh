@@ -14,9 +14,9 @@ LOG_FILE="$TMP_ROOT/test.log"
 : > "$LOG_FILE"
 
 # shellcheck disable=SC1091
-. "$LIB_DIR/config.sh"
-# shellcheck disable=SC1091
 . "$LIB_DIR/ci.sh"
+# shellcheck disable=SC1091
+. "$LIB_DIR/config.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/gemini.sh"
 # shellcheck disable=SC1091
@@ -128,6 +128,12 @@ This helper lets callers spoof users.
 ## Summary
 No findings.'
   assert_eq "approve output remains parseable without metadata" "APPROVE" "$(printf '%s' "$approve" | review_verdict_event)"
+
+  assert_eq "verdict line tolerates CRLF and whitespace" "APPROVE" "$(printf '%s\r\n' '  APPROVE' | review_verdict_event)"
+  if printf '%s\n' 'approve' | review_verdict_event >/dev/null; then
+    fail "verdict remains case-sensitive"
+  fi
+  pass "verdict remains case-sensitive"
 }
 
 test_ci_states() {
@@ -170,6 +176,35 @@ test_ci_states() {
     fail "required check config rejects empty names"
   fi
   pass "required check config rejects empty names"
+
+  required_file="$TMP_ROOT/required-checks.json"
+  printf '["test"]\n' > "$required_file"
+  REQUIRED_CHECKS_FILE="$required_file"
+  ALLOW_REQUIRED_CHECKS_OVERRIDE=0
+  unset REVIEWER_REQUIRED_CHECKS_JSON
+  assert_eq "required check config loads canonical file JSON" '["test"]' "$(load_effective_required_checks_json)"
+
+  REVIEWER_REQUIRED_CHECKS_JSON='["override"]'
+  assert_eq "required check env override is ignored by default" '["test"]' "$(load_effective_required_checks_json)"
+
+  ALLOW_REQUIRED_CHECKS_OVERRIDE=1
+  assert_eq "required check env override is explicit" '["override"]' "$(load_effective_required_checks_json)"
+
+  printf '[""]\n' > "$required_file"
+  unset REVIEWER_REQUIRED_CHECKS_JSON
+  ALLOW_REQUIRED_CHECKS_OVERRIDE=0
+  if ( REQUIRED_CHECKS_FILE="$required_file"; load_effective_required_checks_json ) >/dev/null 2>&1; then
+    fail "required check file rejects empty names early"
+  fi
+  pass "required check file rejects empty names early"
+
+  printf '["test"]\n' > "$required_file"
+  REVIEWER_REQUIRED_CHECKS_JSON='{"bad":true}'
+  ALLOW_REQUIRED_CHECKS_OVERRIDE=1
+  if ( REQUIRED_CHECKS_FILE="$required_file"; load_effective_required_checks_json ) >/dev/null 2>&1; then
+    fail "required check env override rejects non-array JSON"
+  fi
+  pass "required check env override rejects non-array JSON"
 }
 
 test_prompt_assembly() {
@@ -180,7 +215,13 @@ test_prompt_assembly() {
   PERSONALITY_FILE="$TMP_ROOT/personality.md"
   PROMPT_FILE="$TMP_ROOT/engine.md"
   printf '## Role\nBe sharp.\n' > "$PERSONALITY_FILE"
-  printf '# GitHub Review Format\nFirst line: APPROVE, REQUEST_CHANGES, or COMMENT.\nUse REQUEST_CHANGES only for concrete issues that should block merge.\nUse COMMENT when the review is informational.\nUse file references such as `path/to/file.ext:123`.\n' > "$PROMPT_FILE"
+  {
+    printf '%s\n' '# GitHub Review Format'
+    printf '%s\n' 'First line: APPROVE, REQUEST_CHANGES, or COMMENT.'
+    printf '%s\n' 'Use REQUEST_CHANGES only for concrete issues that should block merge.'
+    printf '%s\n' 'Use COMMENT when the review is informational.'
+    printf '%s\n' "Use file references such as \`path/to/file.ext:123\`."
+  } > "$PROMPT_FILE"
 
   REPO="example/repo"
 
@@ -203,7 +244,7 @@ test_prompt_assembly() {
   assert_contains "prompt includes GitHub formatting rules last" "First line: APPROVE, REQUEST_CHANGES, or COMMENT." "$prompt_file"
   assert_contains "prompt includes request-changes policy" "Use REQUEST_CHANGES only for concrete issues that should block merge." "$prompt_file"
   assert_contains "prompt includes comment policy" "Use COMMENT when the review is informational." "$prompt_file"
-  assert_contains "prompt includes GitHub file references" 'Use file references such as `path/to/file.ext:123`.' "$prompt_file"
+  assert_contains "prompt includes GitHub file references" "Use file references such as \`path/to/file.ext:123\`." "$prompt_file"
   assert_not_contains "prompt omits CI gate" "CI Gate" "$prompt_file"
   assert_not_contains "prompt omits file tree" "File Tree" "$prompt_file"
   assert_not_contains "prompt omits project docs" "Project Docs" "$prompt_file"
