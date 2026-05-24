@@ -43,6 +43,11 @@ if [ ! -f "$DEFAULT_REQUIRED_CHECKS_FILE" ] && [ -f "$CONFIG_DIR/required-checks
   DEFAULT_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.example.json"
 fi
 REQUIRED_CHECKS_FILE="${REVIEWER_REQUIRED_CHECKS_FILE:-$DEFAULT_REQUIRED_CHECKS_FILE}"
+DEFAULT_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.json"
+if [ ! -f "$DEFAULT_PROMPT_PAYLOAD_FILE" ] && [ -f "$CONFIG_DIR/prompt-payload.example.json" ]; then
+  DEFAULT_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.example.json"
+fi
+PROMPT_PAYLOAD_FILE="${REVIEWER_PROMPT_PAYLOAD_FILE:-$DEFAULT_PROMPT_PAYLOAD_FILE}"
 PERSONALITY_FILE="${REVIEWER_PERSONALITY_FILE:-}"
 case "$PERSONALITY_FILE" in
   ''|/*) ;;
@@ -165,7 +170,7 @@ EOF
     continue
   fi
 
-  build_review_prompt "$num" "$prompt_tmp"
+  build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree"
 
   if [ -n "$RENDER_PROMPT_ONLY" ]; then
     if [ -n "$PROMPT_OUT" ] && [ "$PROMPT_OUT" != "-" ]; then

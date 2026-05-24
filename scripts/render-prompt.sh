@@ -3,7 +3,7 @@
 # No Gemini call is made, no review is posted, and seen.txt is not updated.
 #
 # Usage:
-#   scripts/render-prompt.sh PR_NUMBER [OUTPUT_FILE]
+#   scripts/render-prompt.sh PR_NUMBER [OUTPUT_FILE] [--explain]
 #
 # Without OUTPUT_FILE, the prompt is written to stdout.
 set -euo pipefail
@@ -16,11 +16,27 @@ REVIEWER_SH="$SCRIPT_DIR/reviewer/reviewer.sh"
 . "$SCRIPT_DIR/lib/ops.sh"
 export OPS_LOG_PREFIX="render-prompt"
 
-pr_number="${1:-}"
-output_file="${2:-}"
+pr_number=""
+output_file=""
+explain=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --explain) explain=1 ;;
+    *)
+      if [ -z "$pr_number" ]; then
+        pr_number="$arg"
+      elif [ -z "$output_file" ]; then
+        output_file="$arg"
+      else
+        ops_die "Unexpected argument: $arg"
+      fi
+      ;;
+  esac
+done
 
 if [ -z "$pr_number" ]; then
-  ops_die "Usage: scripts/render-prompt.sh PR_NUMBER [OUTPUT_FILE]"
+  ops_die "Usage: scripts/render-prompt.sh PR_NUMBER [OUTPUT_FILE] [--explain]"
 fi
 
 ops_validate_uint PR_NUMBER "$pr_number"
@@ -40,6 +56,17 @@ for cmd in gh jq node tar flock; do
   ops_require_command "$cmd" "Run scripts/setup-vm.sh first."
 done
 
+if [ -n "$explain" ] && [ -z "$output_file" ]; then
+  output_file="/tmp/goobreview-prompt-${pr_number}.md"
+fi
+
+CONFIG_DIR="$REPO_ROOT/config"
+PROMPT_PAYLOAD_FILE="${REVIEWER_PROMPT_PAYLOAD_FILE:-$CONFIG_DIR/prompt-payload.json}"
+if [ ! -f "$PROMPT_PAYLOAD_FILE" ] && [ -f "$CONFIG_DIR/prompt-payload.example.json" ]; then
+  PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.example.json"
+fi
+ops_require_file "$PROMPT_PAYLOAD_FILE" "Run scripts/configure.sh first."
+
 export REVIEWER_RENDER_PROMPT_ONLY=1
 export REVIEWER_MAX_PRS=1
 export REVIEWER_ONLY_PR="$pr_number"
@@ -48,6 +75,16 @@ if [ -n "$output_file" ]; then
 fi
 
 "$REVIEWER_SH"
+
+if [ -n "$explain" ]; then
+  echo
+  echo "Included prompt segments from $PROMPT_PAYLOAD_FILE:"
+  jq -r '
+    .segments
+    | to_entries[]
+    | (if (.value.enabled == true) then "[x] " else "[ ] " end) + .key
+  ' "$PROMPT_PAYLOAD_FILE"
+fi
 
 if [ -n "$output_file" ]; then
   ops_log "Wrote prompt text for $REVIEWER_REPO PR #$pr_number to $output_file"

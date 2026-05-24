@@ -29,6 +29,95 @@ maybe_edit() {
   fi
 }
 
+apply_prompt_payload_profile() {
+  local file="$1"
+  local profile="$2"
+  local tmp
+
+  tmp=$(mktemp)
+  case "$profile" in
+    minimal)
+      jq '
+        .profile = "minimal"
+        | .segments.personality.enabled = true
+        | .segments.pr_metadata.enabled = false
+        | .segments.ci_status.enabled = false
+        | .segments.changed_paths.enabled = false
+        | .segments.relevant_guidance.enabled = false
+        | .segments.source_snapshot_hint.enabled = false
+        | .segments.all_check_summary.enabled = false
+        | .segments.full_file_tree.enabled = false
+        | .segments.selected_file_contents.enabled = false
+        | .segments.diff.enabled = true
+        | .segments.response_format.enabled = true
+      ' "$file" >"$tmp"
+      ;;
+    lean)
+      jq '
+        .profile = "lean"
+        | .segments.personality.enabled = true
+        | .segments.pr_metadata.enabled = true
+        | .segments.pr_metadata.include_author_body = false
+        | .segments.ci_status.enabled = true
+        | .segments.ci_status.mode = "one_line"
+        | .segments.changed_paths.enabled = true
+        | .segments.relevant_guidance.enabled = true
+        | .segments.relevant_guidance.mode = "paths_only"
+        | .segments.source_snapshot_hint.enabled = true
+        | .segments.all_check_summary.enabled = false
+        | .segments.full_file_tree.enabled = false
+        | .segments.selected_file_contents.enabled = false
+        | .segments.diff.enabled = true
+        | .segments.response_format.enabled = true
+      ' "$file" >"$tmp"
+      ;;
+    guided)
+      jq '
+        .profile = "guided"
+        | .segments.personality.enabled = true
+        | .segments.pr_metadata.enabled = true
+        | .segments.pr_metadata.include_author_body = false
+        | .segments.ci_status.enabled = true
+        | .segments.ci_status.mode = "one_line"
+        | .segments.changed_paths.enabled = true
+        | .segments.relevant_guidance.enabled = true
+        | .segments.relevant_guidance.mode = "full_content"
+        | .segments.source_snapshot_hint.enabled = true
+        | .segments.all_check_summary.enabled = false
+        | .segments.full_file_tree.enabled = false
+        | .segments.selected_file_contents.enabled = false
+        | .segments.diff.enabled = true
+        | .segments.response_format.enabled = true
+      ' "$file" >"$tmp"
+      ;;
+    full)
+      jq '
+        .profile = "full"
+        | .segments.personality.enabled = true
+        | .segments.pr_metadata.enabled = true
+        | .segments.pr_metadata.include_author_body = true
+        | .segments.ci_status.enabled = true
+        | .segments.ci_status.mode = "one_line"
+        | .segments.changed_paths.enabled = true
+        | .segments.relevant_guidance.enabled = true
+        | .segments.relevant_guidance.mode = "full_content"
+        | .segments.source_snapshot_hint.enabled = true
+        | .segments.all_check_summary.enabled = true
+        | .segments.full_file_tree.enabled = true
+        | .segments.selected_file_contents.enabled = true
+        | .segments.diff.enabled = true
+        | .segments.response_format.enabled = true
+      ' "$file" >"$tmp"
+      ;;
+    *)
+      rm -f "$tmp"
+      return 1
+      ;;
+  esac
+
+  mv "$tmp" "$file"
+}
+
 env_get() { ops_env_get "$ENV_FILE" "$@"; }
 env_set() { ops_env_set "$ENV_FILE" "$@"; }
 
@@ -39,6 +128,7 @@ env_set() { ops_env_set "$ENV_FILE" "$@"; }
 # first dry run (`$REVIEWER_STATE/gemini-runtime`).
 # Both auth and trust state live under ~/.gemini, so missing dir = unauthed.
 ops_require_command node "Run scripts/setup-vm.sh first."
+ops_require_command jq "Run scripts/setup-vm.sh first."
 ops_require_command gemini "Run scripts/setup-vm.sh first, then authenticate Gemini."
 ops_require_executable "$APP_TOKEN_SH" "This checkout looks incomplete."
 ops_require_file "$CONFIG_DIR/reviewer.env.example" "This checkout looks incomplete."
@@ -180,7 +270,35 @@ if copy_if_missing "$CONFIG_DIR/$name" "$example"; then
   maybe_edit "$CONFIG_DIR/$name"
 fi
 
-# --- Step 5: optional label creation ---------------------------------------
+# --- Step 5: prompt payload -------------------------------------------------
+name="prompt-payload.json"
+base="${name%.*}"
+ext="${name##*.}"
+example="$CONFIG_DIR/${base}.example.${ext}"
+if copy_if_missing "$CONFIG_DIR/$name" "$example"; then
+  cat <<EOF
+
+Prompt payload profiles:
+  1) lean     - compact metadata, CI one-liner, changed paths, guidance paths, diff
+  2) minimal  - personality, diff, response format only
+  3) guided   - lean plus full relevant guidance docs
+  4) full     - MOG-style verbose payload, including full tree and selected files
+  5) custom   - open prompt-payload.json and edit every segment manually
+
+EOF
+  pick=$(ask 'Pick a prompt payload profile' '1')
+  case "$pick" in
+    1|lean) apply_prompt_payload_profile "$CONFIG_DIR/$name" lean ;;
+    2|minimal) apply_prompt_payload_profile "$CONFIG_DIR/$name" minimal ;;
+    3|guided) apply_prompt_payload_profile "$CONFIG_DIR/$name" guided ;;
+    4|full) apply_prompt_payload_profile "$CONFIG_DIR/$name" full ;;
+    5|custom) ;;
+    *) log "Invalid profile choice; leaving prompt-payload.json as copied." ;;
+  esac
+  maybe_edit "$CONFIG_DIR/$name"
+fi
+
+# --- Step 6: optional label creation ---------------------------------------
 if confirm "Create the helper labels (agent-reviewed, agent-requested-changes, needs-human-decision) on $current_repo now?"; then
   ops_require_command gh "GitHub CLI is needed for label creation; setup-vm.sh installs it."
   if token=$("$APP_TOKEN_SH" 2>/dev/null); then
