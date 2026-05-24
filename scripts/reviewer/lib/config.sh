@@ -37,6 +37,8 @@ validate_bool_env() {
 }
 
 validate_reviewer_config() {
+  require jq
+
   if [ -z "$REPO" ]; then
     log "missing REVIEWER_REPO; set it to owner/repo"
     exit 1
@@ -50,6 +52,14 @@ validate_reviewer_config() {
     log "REVIEWER_PERSONALITY_FILE points at '$PERSONALITY_FILE' which does not exist."
     exit 1
   fi
+  if [ -z "${PROMPT_PAYLOAD_FILE:-}" ] || [ ! -f "$PROMPT_PAYLOAD_FILE" ]; then
+    log "missing prompt payload config: ${PROMPT_PAYLOAD_FILE:-unset}"
+    exit 1
+  fi
+  if ! jq -e '.segments | type == "object"' "$PROMPT_PAYLOAD_FILE" >/dev/null 2>&1; then
+    log "invalid prompt payload config in $PROMPT_PAYLOAD_FILE"
+    exit 1
+  fi
 
   validate_uint_env REVIEWER_MAX_PRS "$MAX_PRS"
   validate_uint_env REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF "$GEMINI_QUOTA_DEFAULT_BACKOFF"
@@ -59,7 +69,6 @@ validate_reviewer_config() {
 
   require gh
   require flock
-  require jq
   require node
   require tar
   if [ -z "${RENDER_PROMPT_ONLY:-}" ]; then

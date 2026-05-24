@@ -208,12 +208,14 @@ test_ci_states() {
 }
 
 test_prompt_assembly() {
-  local prompt_file
+  local prompt_file worktree_dir
 
   prompt_file="$TMP_ROOT/prompt.md"
+  worktree_dir="$TMP_ROOT/worktree"
 
   PERSONALITY_FILE="$TMP_ROOT/personality.md"
   PROMPT_FILE="$TMP_ROOT/engine.md"
+  PROMPT_PAYLOAD_FILE="$TMP_ROOT/prompt-payload.json"
   printf '## Role\nBe sharp.\n' > "$PERSONALITY_FILE"
   {
     printf '%s\n' '# GitHub Review Format'
@@ -222,35 +224,84 @@ test_prompt_assembly() {
     printf '%s\n' 'Use COMMENT when the review is informational.'
     printf '%s\n' "Use file references such as \`path/to/file.ext:123\`."
   } > "$PROMPT_FILE"
+  cat > "$PROMPT_PAYLOAD_FILE" <<'JSON'
+{
+  "segments": {
+    "personality": {"enabled": true},
+    "pr_metadata": {"enabled": true, "include_author_body": false},
+    "ci_status": {"enabled": true, "mode": "one_line"},
+    "changed_paths": {"enabled": true},
+    "relevant_guidance": {
+      "enabled": true,
+      "mode": "paths_only",
+      "rules": [
+        {
+          "when_changed_path_matches": ["client/**"],
+          "guidance_paths": ["client/GUIDELINES.md"]
+        }
+      ]
+    },
+    "source_snapshot_hint": {"enabled": true},
+    "all_check_summary": {"enabled": false},
+    "full_file_tree": {"enabled": false},
+    "selected_file_contents": {"enabled": false},
+    "diff": {"enabled": true},
+    "response_format": {"enabled": true}
+  }
+}
+JSON
+  mkdir -p "$worktree_dir/client"
+  printf 'Client guidance.\n' > "$worktree_dir/client/GUIDELINES.md"
 
   REPO="example/repo"
 
   gh() {
     if [ "${1:-}" = "pr" ] && [ "${2:-}" = "diff" ]; then
+      if [ "${6:-}" = "--name-only" ]; then
+        printf 'client/src/auth.py\n'
+        return 0
+      fi
       printf 'diff --git a/src/auth.py b/src/auth.py\n+++ b/src/auth.py\n@@ -1,0 +1,1 @@\n+def get_user_from_request(request): pass\n'
+      return 0
+    fi
+    if [ "${1:-}" = "pr" ] && [ "${2:-}" = "view" ]; then
+      printf '%s\n' \
+        'Title: Test auth change' \
+        'Author: alice' \
+        'URL: https://github.com/example/repo/pull/999' \
+        'Base: main' \
+        'Head: feature/auth' \
+        'Head SHA: abc123'
       return 0
     fi
 
     return 1
   }
 
-  build_review_prompt 999 "$prompt_file"
+  build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"
 
   assert_order "prompt uses compressed canonical section order" "$prompt_file" \
     "## Role" \
+    "PR Metadata" \
+    "CI Status" \
+    "Changed Paths" \
+    "Relevant Guidance" \
+    "Read-Only Source Snapshot" \
     "diff --git a/src/auth.py b/src/auth.py" \
     "# GitHub Review Format"
+  assert_contains "prompt includes PR metadata" "Title: Test auth change" "$prompt_file"
+  assert_contains "prompt includes CI one-liner" "CI: required GitHub Actions checks passed" "$prompt_file"
+  assert_contains "prompt includes changed paths" "client/src/auth.py" "$prompt_file"
+  assert_contains "prompt includes relevant guidance path" "client/GUIDELINES.md" "$prompt_file"
+  assert_contains "prompt includes source snapshot hint" "read-only PR-head source tree" "$prompt_file"
   assert_contains "prompt includes PR diff" "diff --git a/src/auth.py b/src/auth.py" "$prompt_file"
   assert_contains "prompt includes GitHub formatting rules last" "First line: APPROVE, REQUEST_CHANGES, or COMMENT." "$prompt_file"
   assert_contains "prompt includes request-changes policy" "Use REQUEST_CHANGES only for concrete issues that should block merge." "$prompt_file"
   assert_contains "prompt includes comment policy" "Use COMMENT when the review is informational." "$prompt_file"
   assert_contains "prompt includes GitHub file references" "Use file references such as \`path/to/file.ext:123\`." "$prompt_file"
-  assert_not_contains "prompt omits CI gate" "CI Gate" "$prompt_file"
-  assert_not_contains "prompt omits file tree" "File Tree" "$prompt_file"
-  assert_not_contains "prompt omits project docs" "Project Docs" "$prompt_file"
-  assert_not_contains "prompt omits selected context" "Selected Context" "$prompt_file"
-  assert_not_contains "prompt omits PR metadata JSON" "metadata (JSON)" "$prompt_file"
-  assert_not_contains "prompt omits all-check summary" "all-check summary" "$prompt_file"
+  assert_not_contains "prompt omits full file tree" "Full PR-Head File Tree" "$prompt_file"
+  assert_not_contains "prompt omits selected file contents" "Selected PR-Head File Contents" "$prompt_file"
+  assert_not_contains "prompt omits all-check summary" "All Check Summary" "$prompt_file"
 }
 
 test_gemini_invocation_isolates_review_context() {

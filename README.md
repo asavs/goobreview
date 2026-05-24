@@ -34,7 +34,7 @@ The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `C
 - Polls open, non-draft pull requests.
 - Skips PRs authored by the authenticated reviewer account.
 - Gates reviews on configured GitHub check-run names.
-- Sends personality text, the diff, and GitHub review formatting rules to Gemini CLI.
+- Sends configurable prompt segments to Gemini CLI: personality, compact PR metadata, CI status, changed paths, relevant guidance, diff, and output format by default.
 - Runs Gemini from a daemon-owned runtime directory with the cached PR-head source snapshot attached as read-only context.
 - Can render the exact Gemini prompt text for a PR without posting or calling Gemini.
 - Posts one consolidated GitHub review.
@@ -72,6 +72,8 @@ config/                              Per-deployment files. *.example.* ships;
                                      linus.md, etc.). Pick one via
                                      REVIEWER_PERSONALITY_FILE in reviewer.env.
                                      The main thing you customize.
+  prompt-payload.example.json        Prompt input manifest. Each segment has
+                                     an enabled flag, description, and example.
   required-checks.example.json       GitHub check-run names that gate review posting.
   reviewer.env.example               Runtime env: target repo, App credentials,
                                      state dir, Gemini model.
@@ -116,10 +118,11 @@ deploy/systemd/
 
 ## Customizing The Reviewer
 
-Two ways to shape what your reviewer does, in order of impact:
+Three ways to shape what your reviewer does, in order of impact:
 
 1. **`config/personalities/<name>.md`** - role, voice, focus areas. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`.
-2. **`config/required-checks.json`** - exact GitHub check-run names that must pass before Gemini is called.
+2. **`config/prompt-payload.json`** - which prompt input streams Gemini receives: compact PR metadata, CI one-liner, changed paths, relevant guidance, full file tree, selected file contents, diff, and response format.
+3. **`config/required-checks.json`** - exact GitHub check-run names that must pass before Gemini is called.
 
 `scripts/configure.sh` walks you through copying the `.example` files and editing them. See [docs/daemon-runbook.md](docs/daemon-runbook.md#configuration-reference) for the full reference.
 

@@ -50,6 +50,8 @@ scripts/render-prompt.sh 123 /tmp/goobreview-prompt.md
 Omit the output path to print the prompt to stdout. The PR must pass the
 configured required-check gate, because failing or pending CI means the
 daemon would not send a prompt to Gemini for that head commit.
+Add `--explain` to print the enabled prompt payload segments; when no
+output path is provided, the prompt is written to `/tmp/goobreview-prompt-<PR>.md`.
 
 ## Cron
 
@@ -132,7 +134,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
 6. Applies the required-check gate.
 7. Downloads a PR-head source snapshot to `REVIEWER_STATE/worktrees/<repo>/current`.
-8. Builds a prompt from personality text, the diff, and the GitHub review formatting rule.
+8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata, CI one-liner, changed paths, relevant guidance, diff, and the GitHub review formatting rule).
 9. Runs Gemini CLI headlessly from `REVIEWER_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, and MCP servers disabled for the review invocation.
 10. Parses the GitHub review event line.
 11. Posts a top-level GitHub review with `gh pr review`.
@@ -171,7 +173,7 @@ scripts/reviewer/merge-gate.sh 123
 
 ## Configuration Reference
 
-The reviewer reads two gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` walks you through them interactively; this section is the reference for what each one does.
+The reviewer reads three gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` walks you through them interactively; this section is the reference for what each one does.
 
 When a file is missing, the daemon transparently falls back to the
 committed `.example` version — so a fresh checkout works for a dry run
@@ -190,7 +192,8 @@ via `REVIEWER_PERSONALITY_FILE` in `reviewer.env` (defaults to
 `config/personalities/control.md`). The selected file is prepended to
 the diff on every review. The engine prompt
 (`scripts/reviewer/review-prompt.md`) only defines the minimal GitHub
-review output format.
+review output format. `config/prompt-payload.json` decides which
+context segments are sent alongside that personality and format.
 
 Available out of the box:
 
@@ -206,6 +209,43 @@ different personality, override the env var inline:
 
 ```bash
 REVIEWER_PERSONALITY_FILE=config/personalities/linus.md scripts/dry-run.sh 42
+```
+
+### `prompt-payload.json`
+
+Prompt input manifest. Every potential Gemini input stream has:
+
+- `enabled`: whether the segment is included.
+- `description`: what the segment means.
+- `example`: a small sample so humans can understand what Gemini sees.
+
+The setup helper offers four presets:
+
+- `minimal`: personality, diff, response format.
+- `lean`: compact PR metadata, CI one-liner, changed paths, relevant guidance paths, read-only source snapshot hint, diff, response format.
+- `guided`: lean plus full relevant guidance docs selected from changed paths.
+- `full`: verbose/MOG-style payload, including author body, all-check summary, full file tree, and selected file contents.
+
+The default example is `lean`. It keeps review attention on the diff
+while still making adjacent source available through Gemini's read-only
+source snapshot tools.
+
+Important segment details:
+
+- `pr_metadata.include_author_body` is `false` by default. If enabled,
+  the PR body is labeled as untrusted author-provided text.
+- `ci_status` is a one-line pass statement by default. Pending or
+  failing required checks stop review before Gemini is called.
+- `relevant_guidance.rules` maps changed path patterns to local docs.
+  Use `paths_only` for a lean prompt, or `full_content` to paste the
+  matching docs.
+- `full_file_tree` and `selected_file_contents` are off by default and
+  exist for users who want a verbose repo-aware reviewer.
+
+Render and inspect the exact payload before enabling cron:
+
+```bash
+scripts/render-prompt.sh 123 --explain
 ```
 
 ### `required-checks.json`

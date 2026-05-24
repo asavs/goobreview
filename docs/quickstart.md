@@ -70,14 +70,17 @@ scripts/configure.sh  # prompts for target repo; auto-discovers installation ID
 
 `configure.sh`:
 
-- Copies each gitignored config file (`reviewer.env`, `required-checks.json`) from its `.example` sibling.
+- Copies each gitignored config file (`reviewer.env`, `required-checks.json`, `prompt-payload.json`) from its `.example` sibling.
 - Prompts for `REVIEWER_REPO` (the App ID is already filled in after `scripts/register-app.sh`; the by-hand path prompts for it).
 - Auto-discovers the installation ID by minting an App token and looking up the install on the target repo.
 - Lists the personalities in `config/personalities/` and writes your pick to `REVIEWER_PERSONALITY_FILE` in `reviewer.env`.
+- Lets you pick a prompt payload profile (`lean`, `minimal`, `guided`, `full`, or custom). The generated `config/prompt-payload.json` shows every possible prompt segment with an enabled flag, description, and example.
 - Offers to open each config file in `$EDITOR`.
 - Offers to create the helper labels on the target repo.
 
 The most consequential choice is **which personality**: it defines the reviewer's role, voice, and focus areas. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.
+
+The second major choice is **prompt payload**. `lean` keeps reviews centered on the PR by sending compact metadata, a CI pass line, changed paths, relevant guidance paths, the diff, and the response format. `full` turns on the verbose streams, including author body, all-check summary, full file tree, and selected file contents.
 
 ## 5. Dry Run
 
@@ -93,6 +96,12 @@ To dry-run a specific PR:
 
 ```bash
 scripts/dry-run.sh 123
+```
+
+To preview exactly what Gemini would receive without calling Gemini:
+
+```bash
+scripts/render-prompt.sh 123 --explain
 ```
 
 Remove `REVIEWER_DRY_RUN=1` (i.e., run `scripts/reviewer/reviewer.sh` directly with your env sourced) when you intentionally want to post a real review.

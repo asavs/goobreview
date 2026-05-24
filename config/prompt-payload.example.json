@@ -1,0 +1,86 @@
+{
+  "profile": "lean",
+  "segments": {
+    "personality": {
+      "enabled": true,
+      "description": "Reviewer role, voice, and focus areas from REVIEWER_PERSONALITY_FILE.",
+      "example": "Contents of config/personalities/control.md or config/personalities/linus.md."
+    },
+    "pr_metadata": {
+      "enabled": true,
+      "description": "Compact GitHub PR metadata. The author body is untrusted and is off by default because it can repeat the diff or overstate test evidence.",
+      "include_author_body": false,
+      "example": "Title: Fix SpacetimeDB WebSocket protocol on HTTPS pages\nAuthor: asavschaeffer\nURL: https://github.com/owner/repo/pull/97"
+    },
+    "ci_status": {
+      "enabled": true,
+      "description": "One-line status after the required-check gate has passed. Failing or pending required checks block review before Gemini is called.",
+      "mode": "one_line",
+      "example": "CI: required GitHub Actions checks passed for this PR head."
+    },
+    "changed_paths": {
+      "enabled": true,
+      "description": "Repository paths changed by the PR.",
+      "example": "client/src/App.tsx\nclient/src/environment.ts\nclient/src/environment.test.ts"
+    },
+    "relevant_guidance": {
+      "enabled": true,
+      "description": "Local project guidance selected from changed paths. Use paths_only to keep the prompt lean, or full_content to paste matching docs.",
+      "mode": "paths_only",
+      "max_lines_per_file": 220,
+      "rules": [
+        {
+          "when_changed_path_matches": ["client/**"],
+          "guidance_paths": ["client/GUIDELINES.md"]
+        },
+        {
+          "when_changed_path_matches": ["server/**"],
+          "guidance_paths": ["server/GUIDELINES.md"]
+        },
+        {
+          "when_changed_path_matches": [".github/workflows/**", "deploy/**", "scripts/**"],
+          "guidance_paths": ["docs/dev-pipeline.md", "docs/deployment-security-checklist.md"]
+        }
+      ],
+      "example": "Relevant local guidance:\n- client/GUIDELINES.md"
+    },
+    "source_snapshot_hint": {
+      "enabled": true,
+      "description": "Short reminder that Gemini has read-only tool access to the PR-head source snapshot.",
+      "example": "You may inspect the read-only PR-head source tree when adjacent files are needed to verify a concrete issue raised by the diff."
+    },
+    "all_check_summary": {
+      "enabled": false,
+      "description": "Verbose GitHub check summary. Usually unnecessary because required checks gate Gemini before review.",
+      "example": "Build client bundle\tpass\t31s"
+    },
+    "full_file_tree": {
+      "enabled": false,
+      "description": "All repository paths at the PR head SHA, generated from the read-only source snapshot.",
+      "example": "AGENTS.md\nclient/src/App.tsx\nserver/spacetimedb/src/lib.rs"
+    },
+    "selected_file_contents": {
+      "enabled": false,
+      "description": "Configured files copied from the PR-head source snapshot. This reproduces the older MOG-style context payload when enabled.",
+      "max_lines_per_file": 180,
+      "paths": [
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "README.md",
+        "client/package.json",
+        ".github/workflows/ci.yml"
+      ],
+      "example": "First N lines of each configured file, fetched from the PR head."
+    },
+    "diff": {
+      "enabled": true,
+      "description": "The PR diff. This should almost always stay enabled.",
+      "example": "diff --git a/client/src/environment.ts b/client/src/environment.ts"
+    },
+    "response_format": {
+      "enabled": true,
+      "description": "Machine-readable review event and human-readable review body contract.",
+      "example": "APPROVE / REQUEST_CHANGES / COMMENT output contract."
+    }
+  }
+}
