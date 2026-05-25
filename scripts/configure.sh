@@ -57,7 +57,7 @@ apply_prompt_payload_profile() {
         .profile = "lean"
         | .segments.personality.enabled = true
         | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_author_body = false
+        | .segments.pr_metadata.include_description = false
         | .segments.ci_status.enabled = true
         | .segments.ci_status.mode = "one_line"
         | .segments.changed_paths.enabled = true
@@ -76,7 +76,7 @@ apply_prompt_payload_profile() {
         .profile = "guided"
         | .segments.personality.enabled = true
         | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_author_body = false
+        | .segments.pr_metadata.include_description = false
         | .segments.ci_status.enabled = true
         | .segments.ci_status.mode = "one_line"
         | .segments.changed_paths.enabled = true
@@ -95,7 +95,7 @@ apply_prompt_payload_profile() {
         .profile = "full"
         | .segments.personality.enabled = true
         | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_author_body = true
+        | .segments.pr_metadata.include_description = true
         | .segments.ci_status.enabled = true
         | .segments.ci_status.mode = "one_line"
         | .segments.changed_paths.enabled = true
@@ -315,7 +315,7 @@ cat <<EOF
 
   # Dry run (no review posted)
   scripts/dry-run.sh           # picks the oldest unseen PR
-  scripts/dry-run.sh 123       # or pick a specific PR number
+  scripts/dry-run.sh 123       # writes $REVIEWER_STATE/dry-pr-123.txt
 
   # When the dry run looks good, enable the scheduler:
   scripts/enable-cron.sh       # cron, fires every minute

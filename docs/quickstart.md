@@ -90,13 +90,21 @@ Still on the VM:
 scripts/dry-run.sh
 ```
 
-This runs the reviewer once against your target repo with `REVIEWER_DRY_RUN=1` so nothing is posted, then tails the log. Use a target repo with at least one open non-draft PR for a meaningful test.
+This runs the reviewer once against your target repo with `REVIEWER_DRY_RUN=1` so nothing is posted. It makes a fresh Gemini call and writes a dry-run artifact containing the exact prompt payload plus Gemini's full response.
 
 To dry-run a specific PR:
 
 ```bash
 scripts/dry-run.sh 123
 ```
+
+For a specific PR, the artifact is written to:
+
+```text
+$REVIEWER_STATE/dry-pr-123.txt
+```
+
+Dry runs can target draft PRs and previously reviewed PR heads. They also bypass the required-CI gate by default so you can test prompt behavior before CI has finished. Set `REVIEWER_DRY_RUN_BYPASS_CI=0` if you want dry runs to match production CI gating.
 
 To preview exactly what Gemini would receive without calling Gemini:
 

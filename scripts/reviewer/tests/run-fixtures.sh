@@ -228,7 +228,16 @@ test_prompt_assembly() {
 {
   "segments": {
     "personality": {"enabled": true},
-    "pr_metadata": {"enabled": true, "include_author_body": false},
+    "pr_metadata": {
+      "enabled": true,
+      "include_title": true,
+      "include_author": true,
+      "include_url": true,
+      "include_base_branch": true,
+      "include_head_branch": true,
+      "include_head_sha": true,
+      "include_description": false
+    },
     "ci_status": {"enabled": true, "mode": "one_line"},
     "changed_paths": {"enabled": true},
     "relevant_guidance": {
@@ -265,13 +274,7 @@ JSON
       return 0
     fi
     if [ "${1:-}" = "pr" ] && [ "${2:-}" = "view" ]; then
-      printf '%s\n' \
-        'Title: Test auth change' \
-        'Author: alice' \
-        'URL: https://github.com/example/repo/pull/999' \
-        'Base: main' \
-        'Head: feature/auth' \
-        'Head SHA: abc123'
+      printf '%s\n' '{"title":"Test auth change","body":"Author body","author":{"login":"alice"},"url":"https://github.com/example/repo/pull/999","baseRefName":"main","headRefName":"feature/auth","headRefOid":"abc123"}'
       return 0
     fi
 

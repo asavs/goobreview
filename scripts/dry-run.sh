@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Dry-run the reviewer once against the configured target repo. No reviews
-# are posted; everything else runs (token mint, PR-head snapshot, prompt
-# assembly, Gemini call, verdict parse) so you can inspect the result in the log.
+# Dry-run the reviewer once against the configured target repo. No reviews are
+# posted. A fresh artifact is written for each run containing the exact Gemini
+# prompt payload and Gemini's full response.
 #
 # Usage:  scripts/dry-run.sh [PR_NUMBER]
 set -euo pipefail
@@ -35,12 +35,27 @@ done
 
 export REVIEWER_DRY_RUN=1
 export REVIEWER_MAX_PRS=1
+export REVIEWER_DRY_RUN_BYPASS_CI="${REVIEWER_DRY_RUN_BYPASS_CI:-1}"
+export REVIEWER_IGNORE_GEMINI_BACKOFF="${REVIEWER_IGNORE_GEMINI_BACKOFF:-1}"
+
+LOG_FILE="${REVIEWER_STATE:-/var/lib/goobreview/example}/log.txt"
+mkdir -p "$(dirname "$LOG_FILE")"
+log_start_line=0
+if [ -f "$LOG_FILE" ]; then
+  log_start_line=$(wc -l < "$LOG_FILE" | tr -d ' ')
+fi
+
 if [ -n "${1:-}" ]; then
   ops_validate_uint PR_NUMBER "$1"
   export REVIEWER_ONLY_PR="$1"
+  export REVIEWER_DRY_RUN_OUT="${REVIEWER_DRY_RUN_OUT:-${REVIEWER_STATE:-/var/lib/goobreview/example}/dry-pr-${REVIEWER_ONLY_PR}.txt}"
   echo "[dry-run] Reviewing $REVIEWER_REPO PR #$REVIEWER_ONLY_PR (no review will be posted)..."
+  echo "[dry-run] Writing prompt + Gemini response to $REVIEWER_DRY_RUN_OUT"
 else
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  export REVIEWER_DRY_RUN_OUT="${REVIEWER_DRY_RUN_OUT:-${REVIEWER_STATE:-/var/lib/goobreview/example}/dry-run-${stamp}.txt}"
   echo "[dry-run] Reviewing the oldest unseen PR in $REVIEWER_REPO (no review will be posted)..."
+  echo "[dry-run] Writing prompt + Gemini response to $REVIEWER_DRY_RUN_OUT"
 fi
 
 set +e
@@ -48,13 +63,21 @@ set +e
 reviewer_status=$?
 set -e
 
-LOG_FILE="${REVIEWER_STATE:-/var/lib/goobreview/example}/log.txt"
 if [ -f "$LOG_FILE" ]; then
   echo
-  echo "--- tail -n 80 $LOG_FILE ---"
-  tail -n 80 "$LOG_FILE"
+  echo "--- new log lines from $LOG_FILE ---"
+  tail -n +"$((log_start_line + 1))" "$LOG_FILE"
 else
   echo "Log file not found: $LOG_FILE" >&2
+fi
+
+if [ -f "${REVIEWER_DRY_RUN_OUT:-}" ]; then
+  echo
+  echo "Dry-run artifact:"
+  echo "  $REVIEWER_DRY_RUN_OUT"
+else
+  echo
+  echo "Dry-run artifact was not written. Check the new log lines above for the reason." >&2
 fi
 
 exit "$reviewer_status"
