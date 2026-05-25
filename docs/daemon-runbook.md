@@ -22,6 +22,7 @@ sync.log                Checkout sync log.
 app_token.json          Cached App installation token + slug (refreshed when <5 min remain).
 gemini-settings.json    Gemini CLI settings written before each review call (tools, context, MCP policy).
 app-key.pem             GitHub App private key (you provide; mode 0600).
+dry-pr-<number>.txt     Dry-run artifact with full Gemini prompt payload and response.
 ```
 
 ## One-Off Run
@@ -34,11 +35,22 @@ REVIEWER_ENV_FILE=/opt/goobreview/example/config/reviewer.env scripts/reviewer/r
 Dry run:
 
 ```bash
-set -a
-. config/reviewer.env
-set +a
-REVIEWER_DRY_RUN=1 REVIEWER_MAX_PRS=1 scripts/reviewer/reviewer.sh
+scripts/dry-run.sh 123
 ```
+
+For a numbered PR, the dry run writes
+`$REVIEWER_STATE/dry-pr-123.txt`. The artifact includes:
+
+- run metadata;
+- the exact Gemini prompt payload;
+- Gemini's full response, or stderr if Gemini failed.
+
+Dry runs do not post reviews, do not mark PRs reviewed, can target draft
+PRs by number, and bypass the required-CI gate by default so prompt
+configuration can be tested before CI is terminal. Set
+`REVIEWER_DRY_RUN_BYPASS_CI=0` to keep production CI gating during a dry
+run. Set `REVIEWER_DRY_RUN_OUT=/path/to/file.txt` to choose a different
+artifact path.
 
 Render the exact Gemini prompt text for one PR without calling Gemini
 or posting a review:
@@ -232,8 +244,11 @@ source snapshot tools.
 
 Important segment details:
 
-- `pr_metadata.include_author_body` is `false` by default. If enabled,
-  the PR body is labeled as untrusted author-provided text.
+- PR metadata fields are independently configurable:
+  `include_title`, `include_author`, `include_url`,
+  `include_base_branch`, `include_head_branch`, `include_head_sha`,
+  and `include_description`. The description is `false` by default; if
+  enabled, it is labeled as untrusted author-provided text.
 - `ci_status` is a one-line pass statement by default. Pending or
   failing required checks stop review before Gemini is called.
 - `relevant_guidance.rules` maps changed path patterns to local docs.
