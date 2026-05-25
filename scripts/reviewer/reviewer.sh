@@ -244,16 +244,17 @@ EOF
     continue
   fi
   cat "$gemini_err_tmp" >> "$LOG_FILE"
-  rm -f "$prompt_tmp" "$gemini_err_tmp"
 
   if [ -z "${review// }" ]; then
     write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review"
+    rm -f "$prompt_tmp" "$gemini_err_tmp"
     log "gemini returned empty for PR #$num, will retry next tick"
     continue
   fi
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
     write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review"
+    rm -f "$prompt_tmp" "$gemini_err_tmp"
     verdict_line=$(printf '%s' "$review" | sed -n '1p')
     log "PR #$num: gemini did not emit a valid first-line GitHub review event (got: $verdict_line), will retry next tick"
     continue
@@ -281,10 +282,13 @@ EOF
 
   if [ -n "$DRY_RUN" ]; then
     write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review"
+    rm -f "$prompt_tmp" "$gemini_err_tmp"
     log "Dry run: would post $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
     continue
   fi
+
+  rm -f "$prompt_tmp" "$gemini_err_tmp"
 
   if post_review "$num" "$event" "$body"; then
     apply_review_labels "$num" "$event" || log "PR #$num: failed to apply review labels"
