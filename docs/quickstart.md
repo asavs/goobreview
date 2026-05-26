@@ -6,6 +6,14 @@ End-to-end setup from a fresh fork to a posting reviewer in about 10 minutes. As
 
 Click the **Open in Cloud Shell** button on the [project README](../README.md) (or run `git clone https://github.com/asavschaeffer/goobreview.git` in any Cloud Shell session). Cloud Shell is a browser terminal with `gcloud` pre-authenticated to your Google account.
 
+At any point, run:
+
+```bash
+bash scripts/status.sh
+```
+
+It summarizes local config, dry-run/scheduler state, and the active GCloud project/billing readiness so you can see which setup step is next.
+
 If you can't use Cloud Shell, see the [Manual VM Setup](#manual-vm-setup) appendix at the end of this document.
 
 ## 2. Provision The VM
@@ -122,7 +130,7 @@ Once the dry run looks good:
 scripts/enable-cron.sh
 ```
 
-Installs a one-line crontab entry that runs `run-once.sh` every minute. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
+Installs a one-line crontab entry that runs `run-once.sh` every minute. It refuses to launch until at least one dry-run artifact exists in `$REVIEWER_STATE`; set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN=1` only when you intentionally want to bypass that guard. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
 
 Prefer systemd? See [docs/daemon-runbook.md#systemd-timer](daemon-runbook.md#systemd-timer).
 

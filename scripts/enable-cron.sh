@@ -35,6 +35,12 @@ MARKER="# GoobReview reviewer (managed by scripts/enable-cron.sh)"
 LINE="* * * * * cd $(ops_shell_quote "$REPO_ROOT") && REVIEWER_ENV_FILE=$(ops_shell_quote "$ENV_FILE") /usr/bin/bash $(ops_shell_quote "$RUN_ONCE") >> $(ops_shell_quote "$CRON_LOG") 2>&1"
 PATH_LINE="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+dry_run_count=$(find "$STATE_DIR" -maxdepth 1 -type f \( -name 'dry-run-*.txt' -o -name 'dry-pr-*.txt' \) \
+  2>/dev/null | wc -l | tr -d ' ')
+if [ "$dry_run_count" -eq 0 ] && [ "${REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN:-0}" != "1" ]; then
+  ops_die "No dry-run artifacts found in $STATE_DIR. Run scripts/dry-run.sh first, inspect the result, then re-run enable-cron.sh. To override intentionally, set REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN=1."
+fi
+
 current="$(crontab -l 2>/dev/null || true)"
 
 if printf '%s\n' "$current" | grep -Fq "$MARKER"; then

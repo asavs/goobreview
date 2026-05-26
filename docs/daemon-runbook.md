@@ -76,6 +76,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 `run-once.sh` loads `config/reviewer.env`, syncs the template checkout, then runs one reviewer tick.
 
+`scripts/enable-cron.sh` refuses to install the cron entry until it finds at least one dry-run artifact (`dry-run-*.txt` or `dry-pr-*.txt`) in `$REVIEWER_STATE`. To bypass that deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN=1`.
+
 ## Systemd Timer
 
 A systemd timer is the recommended durable scheduler when you control the VM. Cron is fine for quick setup, but systemd gives better status, logs, restart behavior, and auditable unit files.
