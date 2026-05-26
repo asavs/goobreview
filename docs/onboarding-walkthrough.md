@@ -377,10 +377,10 @@ machines, default human-readable with "next step" recommendation).
 A composite `scripts/status.sh` is just `cat`ing all five summaries — that's
 the "what phase am I in?" command.
 
-**Started implementation:** `scripts/preflight/gcloud.sh` now prototypes the
-first sensor with human-readable output and `--report` key/value output.
-`scripts/status.sh` provides the first composite status surface by combining
-local config/runtime checks with that GCloud preflight.
+**Started implementation:** all five `scripts/preflight/*.sh` sensors now
+prototype the sensor shape with human-readable output and `--report` key/value
+output. `scripts/status.sh` provides the first composite status surface by
+composing those sensors.
 
 **Orchestrator (Gemini, or a human reading sensor output)** — reads structured
 state, decides what to do, asks the user only for:
