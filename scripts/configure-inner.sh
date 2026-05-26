@@ -198,9 +198,9 @@ ops_require_file "$CONFIG_DIR/prompt-payload.example.json" "This checkout looks 
 
 if [ ! -d "$HOME/.gemini" ]; then
   if [ "$allow_missing_gemini" -eq 1 ]; then
-    ops_warn "~/.gemini not found; dry runs will fail until Gemini is authenticated."
+    ops_warn "$HOME/.gemini not found; dry runs will fail until Gemini is authenticated."
   else
-    ops_die "~/.gemini not found. Run 'gemini' once, sign in, trust this folder, then /quit. Use --allow-missing-gemini to configure anyway."
+    ops_die "$HOME/.gemini not found. Run 'gemini' once, sign in, trust this folder, then /quit. Use --allow-missing-gemini to configure anyway."
   fi
 fi
 
@@ -257,7 +257,7 @@ case "$personality" in
 esac
 ops_require_file "$personality_path" "Pass --personality config/personalities/<name>.md."
 case "$personality" in
-  "$REPO_ROOT"/*) personality="${personality#$REPO_ROOT/}" ;;
+  "$REPO_ROOT"/*) personality="${personality#"$REPO_ROOT"/}" ;;
 esac
 ops_env_set "$ENV_FILE" REVIEWER_PERSONALITY_FILE "$personality"
 
