@@ -76,6 +76,9 @@ gemini                # Google OAuth - sign in, trust this folder, then /quit
 scripts/configure.sh  # prompts for target repo; auto-discovers installation ID
 ```
 
+`configure.sh` is the interactive wrapper. It prompts for human choices, then
+delegates deterministic writes and validation to `scripts/configure-inner.sh`.
+
 `configure.sh`:
 
 - Copies each gitignored config file (`reviewer.env`, `required-checks.json`, `prompt-payload.json`) from its `.example` sibling.
@@ -85,6 +88,20 @@ scripts/configure.sh  # prompts for target repo; auto-discovers installation ID
 - Lets you pick a prompt payload profile (`lean`, `minimal`, `guided`, `full`, or custom). The generated `config/prompt-payload.json` shows every possible prompt segment with an enabled flag, description, and example.
 - Offers to open each config file in `$EDITOR`.
 - Offers to create the helper labels on the target repo.
+
+For agent-driven or scripted setup, call the non-interactive core directly:
+
+```bash
+scripts/configure-inner.sh \
+  --repo OWNER/REPO \
+  --app-id APP_ID \
+  --key-path /var/lib/goobreview/example/app-key.pem \
+  --personality config/personalities/control.md \
+  --payload-profile lean
+```
+
+Add `--create-labels` only when you want the helper labels created. Add
+`--installation-id ID` if you already know it; otherwise the script discovers it.
 
 The most consequential choice is **which personality**: it defines the reviewer's role, voice, and focus areas. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.
 

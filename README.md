@@ -54,6 +54,7 @@ clean.
 
 The agent should follow:
 
+- [GEMINI.md](GEMINI.md)
 - [docs/quickstart.md](docs/quickstart.md)
 - [docs/cloud-shell-tutorial.md](docs/cloud-shell-tutorial.md)
 - [docs/github-app-setup.md](docs/github-app-setup.md) (manual registration only)

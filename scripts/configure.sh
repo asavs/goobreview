@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# Interactive on-VM setup for GoobReview's per-deployment config and
-# GitHub App credentials (App ID, installation ID, private key).
+# Interactive on-VM setup wrapper for GoobReview.
 #
-# Run after setup-vm.sh has prepared the VM and after `gemini` has been
-# authenticated interactively. The App itself must be registered and
-# installed on the target repo first — see docs/github-app-setup.md.
+# This script prompts humans for setup choices, then delegates all deterministic
+# writes/validation to scripts/configure-inner.sh. Agents can call the inner
+# script directly with flags.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_DIR="$REPO_ROOT/config"
-ENV_FILE="$CONFIG_DIR/reviewer.env"
+ENV_FILE="${REVIEWER_ENV_FILE:-$CONFIG_DIR/reviewer.env}"
 EDITOR_CMD="${EDITOR:-nano}"
-APP_TOKEN_SH="$SCRIPT_DIR/reviewer/get-installation-token.sh"
+INNER_SH="$SCRIPT_DIR/configure-inner.sh"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
 export OPS_LOG_PREFIX="configure"
@@ -20,7 +19,6 @@ export OPS_LOG_PREFIX="configure"
 log() { ops_log "$*"; }
 ask() { ops_prompt "$@"; }
 confirm() { ops_confirm "$@"; }
-copy_if_missing() { ops_copy_if_missing "$@"; }
 
 maybe_edit() {
   local file="$1"
@@ -57,139 +55,36 @@ personality_summary() {
   esac
 }
 
-apply_prompt_payload_profile() {
-  local file="$1"
-  local profile="$2"
-  local tmp
-
-  tmp=$(mktemp)
-  case "$profile" in
-    minimal)
-      jq '
-        .profile = "minimal"
-        | .segments.personality.enabled = true
-        | .segments.pr_metadata.enabled = false
-        | .segments.ci_status.enabled = false
-        | .segments.changed_paths.enabled = false
-        | .segments.relevant_guidance.enabled = false
-        | .segments.source_snapshot_hint.enabled = false
-        | .segments.all_check_summary.enabled = false
-        | .segments.full_file_tree.enabled = false
-        | .segments.selected_file_contents.enabled = false
-        | .segments.diff.enabled = true
-        | .segments.response_format.enabled = true
-      ' "$file" >"$tmp"
-      ;;
-    lean)
-      jq '
-        .profile = "lean"
-        | .segments.personality.enabled = true
-        | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_description = false
-        | .segments.ci_status.enabled = true
-        | .segments.ci_status.mode = "one_line"
-        | .segments.changed_paths.enabled = true
-        | .segments.relevant_guidance.enabled = true
-        | .segments.relevant_guidance.mode = "paths_only"
-        | .segments.source_snapshot_hint.enabled = true
-        | .segments.all_check_summary.enabled = false
-        | .segments.full_file_tree.enabled = false
-        | .segments.selected_file_contents.enabled = false
-        | .segments.diff.enabled = true
-        | .segments.response_format.enabled = true
-      ' "$file" >"$tmp"
-      ;;
-    guided)
-      jq '
-        .profile = "guided"
-        | .segments.personality.enabled = true
-        | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_description = false
-        | .segments.ci_status.enabled = true
-        | .segments.ci_status.mode = "one_line"
-        | .segments.changed_paths.enabled = true
-        | .segments.relevant_guidance.enabled = true
-        | .segments.relevant_guidance.mode = "full_content"
-        | .segments.source_snapshot_hint.enabled = true
-        | .segments.all_check_summary.enabled = false
-        | .segments.full_file_tree.enabled = false
-        | .segments.selected_file_contents.enabled = false
-        | .segments.diff.enabled = true
-        | .segments.response_format.enabled = true
-      ' "$file" >"$tmp"
-      ;;
-    full)
-      jq '
-        .profile = "full"
-        | .segments.personality.enabled = true
-        | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_description = true
-        | .segments.ci_status.enabled = true
-        | .segments.ci_status.mode = "one_line"
-        | .segments.changed_paths.enabled = true
-        | .segments.relevant_guidance.enabled = true
-        | .segments.relevant_guidance.mode = "full_content"
-        | .segments.source_snapshot_hint.enabled = true
-        | .segments.all_check_summary.enabled = true
-        | .segments.full_file_tree.enabled = true
-        | .segments.selected_file_contents.enabled = true
-        | .segments.diff.enabled = true
-        | .segments.response_format.enabled = true
-      ' "$file" >"$tmp"
-      ;;
-    *)
-      rm -f "$tmp"
-      return 1
-      ;;
-  esac
-
-  mv "$tmp" "$file"
-}
-
-env_get() { ops_env_get "$ENV_FILE" "$@"; }
-env_set() { ops_env_set "$ENV_FILE" "$@"; }
-
-# --- Preflight: Gemini auth -----------------------------------------------
-# The reviewer shells out to `gemini` headlessly, which requires that the
-# current user has authenticated and trusted the checkout folder at least once.
-# Gemini may also ask to trust the daemon-owned runtime path during the
-# first dry run (`$REVIEWER_STATE/gemini-runtime`).
-# Both auth and trust state live under ~/.gemini, so missing dir = unauthed.
+ops_require_file "$INNER_SH" "This checkout looks incomplete."
+ops_require_file "$CONFIG_DIR/reviewer.env.example" "This checkout looks incomplete."
 ops_require_command node "Run scripts/setup-vm.sh first."
 ops_require_command jq "Run scripts/setup-vm.sh first."
 ops_require_command gemini "Run scripts/setup-vm.sh first, then authenticate Gemini."
-ops_require_executable "$APP_TOKEN_SH" "This checkout looks incomplete."
-ops_require_file "$CONFIG_DIR/reviewer.env.example" "This checkout looks incomplete."
+
+allow_missing_gemini=0
 if [ ! -d "$HOME/.gemini" ]; then
-  log "Warning: ~/.gemini not found — Gemini CLI does not look authenticated for $(whoami)."
+  log "Warning: ~/.gemini not found - Gemini CLI does not look authenticated for $(whoami)."
   log "Without auth, dry runs and the reviewer daemon will fail. To authenticate:"
   log "  gemini                # sign in to Google in the browser, trust this folder, then /quit"
   if ! confirm "Continue configuring anyway?"; then
     exit 1
   fi
+  allow_missing_gemini=1
 fi
 
-# --- Step 1: reviewer.env --------------------------------------------------
-copy_if_missing "$ENV_FILE" "$CONFIG_DIR/reviewer.env.example" || exit 1
+ops_copy_if_missing "$ENV_FILE" "$CONFIG_DIR/reviewer.env.example" || exit 1
 
-current_repo=$(env_get REVIEWER_REPO)
-if [ -z "$current_repo" ] || [ "$current_repo" = "owner/repo" ]; then
-  current_repo=$(ask 'Target GitHub repository (owner/repo)' "")
-  if [ -z "$current_repo" ]; then
-    log "REVIEWER_REPO is required; aborting."
-    exit 1
-  fi
-  ops_validate_owner_repo "$current_repo" REVIEWER_REPO
-  env_set REVIEWER_REPO "$current_repo"
-else
-  ops_validate_owner_repo "$current_repo" REVIEWER_REPO
+current_repo="$(ops_env_get "$ENV_FILE" REVIEWER_REPO)"
+if [ "$current_repo" = "owner/repo" ]; then
+  current_repo=""
 fi
+repo="$(ask 'Target GitHub repository (owner/repo)' "$current_repo")"
+ops_require_nonempty "REVIEWER_REPO" "$repo"
+ops_validate_owner_repo "$repo" REVIEWER_REPO
 
-# Source for REVIEWER_STATE etc.
 ops_source_env "$ENV_FILE"
 ops_require_nonempty "REVIEWER_STATE" "${REVIEWER_STATE:-}" "Set it in $ENV_FILE."
 
-# --- Step 2: GitHub App credentials ----------------------------------------
 cat <<EOF
 
 GoobReview authenticates as a GitHub App so its reviews come from a
@@ -198,23 +93,18 @@ PRs. If you haven't registered an App yet, see docs/github-app-setup.md
 and come back when you have:
   - The App ID (numeric)
   - The downloaded private key (.pem)
-  - The App installed on $current_repo
+  - The App installed on $repo
 
 EOF
 
-current_app_id=$(env_get REVIEWER_APP_ID)
-new_app_id=$(ask 'App ID (numeric)' "$current_app_id")
-if [ -z "$new_app_id" ]; then
-  log "App ID required; aborting."
-  exit 1
-fi
-ops_validate_uint REVIEWER_APP_ID "$new_app_id"
-env_set REVIEWER_APP_ID "$new_app_id"
-export REVIEWER_APP_ID="$new_app_id"
+current_app_id="$(ops_env_get "$ENV_FILE" REVIEWER_APP_ID)"
+app_id="$(ask 'App ID (numeric)' "$current_app_id")"
+ops_require_nonempty "REVIEWER_APP_ID" "$app_id"
+ops_validate_uint REVIEWER_APP_ID "$app_id"
 
-current_key_path=$(env_get REVIEWER_APP_PRIVATE_KEY_PATH)
+current_key_path="$(ops_env_get "$ENV_FILE" REVIEWER_APP_PRIVATE_KEY_PATH)"
 [ -n "$current_key_path" ] || current_key_path="$REVIEWER_STATE/app-key.pem"
-key_path=$(ask "Private key path (or 'paste' to paste contents now)" "$current_key_path")
+key_path="$(ask "Private key path (or 'paste' to paste contents now)" "$current_key_path")"
 if [ "$key_path" = "paste" ]; then
   key_path="$REVIEWER_STATE/app-key.pem"
   mkdir -p "$REVIEWER_STATE"
@@ -223,39 +113,10 @@ if [ "$key_path" = "paste" ]; then
   chmod 600 "$key_path"
   log "Wrote $key_path (0600)."
 fi
-if [ ! -f "$key_path" ]; then
-  log "Key file $key_path does not exist. scp it to the VM, then re-run."
-  exit 1
-fi
-if [ ! -s "$key_path" ]; then
-  log "Key file $key_path is empty; aborting."
-  exit 1
-fi
-chmod 600 "$key_path"
-env_set REVIEWER_APP_PRIVATE_KEY_PATH "$key_path"
-export REVIEWER_APP_PRIVATE_KEY_PATH="$key_path"
 
-log "Looking up installation ID for $current_repo..."
-if installation_id=$("$APP_TOKEN_SH" discover "$current_repo" 2>&1); then
-  log "Found installation ID: $installation_id"
-  env_set REVIEWER_APP_INSTALLATION_ID "$installation_id"
-else
-  log "Auto-discover failed: $installation_id"
-  log "Make sure the App is installed on $current_repo, then either re-run this script"
-  log "or set REVIEWER_APP_INSTALLATION_ID manually in $ENV_FILE."
-  manual_id=$(ask 'Installation ID (or leave blank to fix later)' "")
-  if [ -n "$manual_id" ]; then
-    env_set REVIEWER_APP_INSTALLATION_ID "$manual_id"
-  fi
-fi
+current_installation_id="$(ops_env_get "$ENV_FILE" REVIEWER_APP_INSTALLATION_ID)"
+installation_id="$(ask 'Installation ID (blank to auto-discover)' "$current_installation_id")"
 
-if confirm "Open reviewer.env in $EDITOR_CMD to review other settings?"; then
-  "$EDITOR_CMD" "$ENV_FILE"
-fi
-
-# --- Step 3: personality ---------------------------------------------------
-# Pick a gallery entry and write its path into REVIEWER_PERSONALITY_FILE.
-# To add a new personality, drop a .md file in config/personalities/.
 PERSONALITY_GALLERY="$CONFIG_DIR/personalities"
 gallery=()
 if [ -d "$PERSONALITY_GALLERY" ]; then
@@ -263,12 +124,12 @@ if [ -d "$PERSONALITY_GALLERY" ]; then
     gallery+=("$f")
   done < <(find "$PERSONALITY_GALLERY" -maxdepth 1 -type f -name '*.md' | sort)
 fi
-if [ ${#gallery[@]} -eq 0 ]; then
+if [ "${#gallery[@]}" -eq 0 ]; then
   log "No personalities found in $PERSONALITY_GALLERY; cannot continue."
   exit 1
 fi
 
-current_personality=$(env_get REVIEWER_PERSONALITY_FILE)
+current_personality="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
 default_idx=0
 chosen="${current_personality:-config/personalities/control.md}"
 log "Available personalities:"
@@ -281,64 +142,67 @@ for i in "${!gallery[@]}"; do
   fi
   log "  $i) [$marker] $(basename "${gallery[$i]}" .md) - $(personality_summary "${gallery[$i]}")"
 done
-pick=$(ask 'Pick a personality by number' "$default_idx")
+pick="$(ask 'Pick a personality by number' "$default_idx")"
 if [[ "$pick" =~ ^[0-9]+$ ]] && [ "$pick" -ge 0 ] && [ "$pick" -lt "${#gallery[@]}" ]; then
   chosen="${gallery[$pick]#$REPO_ROOT/}"
-  env_set REVIEWER_PERSONALITY_FILE "$chosen"
-  log "Set REVIEWER_PERSONALITY_FILE=$chosen"
-  log "Tune the reviewer's voice by editing $chosen, then re-run scripts/dry-run.sh."
 else
-  log "Invalid choice; leaving REVIEWER_PERSONALITY_FILE as-is."
+  log "Invalid choice; using existing/default personality: $chosen"
 fi
 
-# --- Step 4: required-check config -----------------------------------------
-name="required-checks.json"
-base="${name%.*}"
-ext="${name##*.}"
-example="$CONFIG_DIR/${base}.example.${ext}"
-if copy_if_missing "$CONFIG_DIR/$name" "$example"; then
-  maybe_edit "$CONFIG_DIR/$name"
-fi
-
-# --- Step 5: prompt payload -------------------------------------------------
-name="prompt-payload.json"
-base="${name%.*}"
-ext="${name##*.}"
-example="$CONFIG_DIR/${base}.example.${ext}"
-if copy_if_missing "$CONFIG_DIR/$name" "$example"; then
-  cat <<EOF
+cat <<EOF
 
 Prompt payload profiles:
   1) lean     - compact metadata, CI one-liner, changed paths, guidance paths, diff
   2) minimal  - personality, diff, response format only
   3) guided   - lean plus full relevant guidance docs
   4) full     - MOG-style verbose payload, including full tree and selected files
-  5) custom   - open prompt-payload.json and edit every segment manually
+  5) custom   - copy prompt-payload.json and edit every segment manually
 
 EOF
-  pick=$(ask 'Pick a prompt payload profile' '1')
-  case "$pick" in
-    1|lean) apply_prompt_payload_profile "$CONFIG_DIR/$name" lean ;;
-    2|minimal) apply_prompt_payload_profile "$CONFIG_DIR/$name" minimal ;;
-    3|guided) apply_prompt_payload_profile "$CONFIG_DIR/$name" guided ;;
-    4|full) apply_prompt_payload_profile "$CONFIG_DIR/$name" full ;;
-    5|custom) ;;
-    *) log "Invalid profile choice; leaving prompt-payload.json as copied." ;;
-  esac
-  maybe_edit "$CONFIG_DIR/$name"
+profile_pick="$(ask 'Pick a prompt payload profile' '1')"
+case "$profile_pick" in
+  1|lean) payload_profile="lean" ;;
+  2|minimal) payload_profile="minimal" ;;
+  3|guided) payload_profile="guided" ;;
+  4|full) payload_profile="full" ;;
+  5|custom) payload_profile="custom" ;;
+  *)
+    log "Invalid profile choice; using lean."
+    payload_profile="lean"
+    ;;
+esac
+
+create_labels=0
+if confirm "Create the helper labels (agent-reviewed, agent-requested-changes, needs-human-decision) on $repo now?"; then
+  create_labels=1
 fi
 
-# --- Step 6: optional label creation ---------------------------------------
-if confirm "Create the helper labels (agent-reviewed, agent-requested-changes, needs-human-decision) on $current_repo now?"; then
-  ops_require_command gh "GitHub CLI is needed for label creation; setup-vm.sh installs it."
-  if token=$("$APP_TOKEN_SH" 2>/dev/null); then
-    GH_TOKEN="$token" "$SCRIPT_DIR/reviewer/ensure-labels.sh" || \
-      log "ensure-labels.sh failed; you can re-run it later: GH_TOKEN=\$($APP_TOKEN_SH) scripts/reviewer/ensure-labels.sh"
-  else
-    log "Could not mint a token to create labels. Make sure the App is installed on $current_repo, then run:"
-    log "  GH_TOKEN=\$($APP_TOKEN_SH) scripts/reviewer/ensure-labels.sh"
-  fi
+inner_args=(
+  --env-file "$ENV_FILE"
+  --repo "$repo"
+  --app-id "$app_id"
+  --key-path "$key_path"
+  --personality "$chosen"
+  --payload-profile "$payload_profile"
+)
+if [ -n "$installation_id" ]; then
+  inner_args+=(--installation-id "$installation_id")
 fi
+if [ "$create_labels" -eq 1 ]; then
+  inner_args+=(--create-labels)
+fi
+if [ "$allow_missing_gemini" -eq 1 ]; then
+  inner_args+=(--allow-missing-gemini)
+fi
+
+bash "$INNER_SH" "${inner_args[@]}"
+
+if confirm "Open reviewer.env in $EDITOR_CMD to review other settings?"; then
+  "$EDITOR_CMD" "$ENV_FILE"
+fi
+
+maybe_edit "$CONFIG_DIR/required-checks.json"
+maybe_edit "$CONFIG_DIR/prompt-payload.json"
 
 log "Done. Next steps:"
 cat <<EOF
@@ -348,7 +212,7 @@ cat <<EOF
 
   # Dry run (no review posted)
   scripts/dry-run.sh           # picks the oldest unseen PR
-  scripts/dry-run.sh 123       # writes $REVIEWER_STATE/dry-pr-123.txt
+  scripts/dry-run.sh 123       # writes \$REVIEWER_STATE/dry-pr-123.txt
 
   # Tune before launch
   scripts/tune.sh             # edit active files, then optionally dry-run

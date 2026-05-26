@@ -333,8 +333,9 @@ section captures what that would look like and what blocks it.
 
 ### What needs to change in script structure
 
-Today every script is interactive-only — `ops_prompt` blocks on stdin. Gemini
-can't drive that well (heredocs and `expect` are fragile; it'll get them wrong).
+Historically every setup script was interactive-only — `ops_prompt` blocked on
+stdin. Gemini can't drive that well (heredocs and `expect` are fragile; it'll
+get them wrong).
 
 **The structural change is inner/outer:**
 
@@ -351,6 +352,10 @@ can't drive that well (heredocs and `expect` are fragile; it'll get them wrong).
   then calls the inner layer. Humans-without-Gemini still use this.
 
 Gemini drives the inner layer with flags. It never fights interactive prompts.
+
+**Started implementation:** `scripts/configure-inner.sh` is now the
+non-interactive configuration core. `scripts/configure.sh` is the human wrapper
+that prompts, handles PEM paste, and delegates to the inner layer.
 
 ### Sensors and orchestrators: the division of labor
 
@@ -406,34 +411,9 @@ state, decides what to do, asks the user only for:
 
 ### The `GEMINI.md` surface
 
-`gemini-cli` auto-loads `GEMINI.md` from the project root as context. That's
-where the agent-facing playbook lives:
-
-```markdown
-# GEMINI.md — agent playbook for setting up GoobReview
-
-You're helping a user set up GoobReview. The setup has 5 phases (see
-docs/onboarding-walkthrough.md). Your job is to drive it end to end.
-
-Start every conversation with:
-    bash scripts/status.sh
-
-That tells you which phase the user is in. Jump straight to that phase.
-
-## Phase 1 — Provision
-... commands with flags, what to ask the user, what to expect ...
-
-## Phase 2 — Register
-After register-app.sh starts the server, tell the user:
-  "Click Web Preview → port 8080. Create the App, download the .pem,
-   upload it back. I'll wait."
-Then poll for the key arriving on the VM. When it lands, paste the
-install URL and tell the user to click it.
-
-## What you must never do
-- Don't enable cron until a dry-run artifact exists.
-- Don't post a real review without showing the user the dry-run first.
-```
+`gemini-cli` auto-loads `GEMINI.md` from the project root as context. The
+agent-facing setup playbook now lives there and points at the real status,
+preflight, configure, tune, dry-run, and launch commands.
 
 If you want Claude Code or other agents to read the same playbook, symlink
 `AGENTS.md` → `GEMINI.md`.
@@ -452,8 +432,7 @@ Don't refactor scripts yet. Order of operations:
    `status.sh`.
 4. **Inner/outer split on `configure.sh` next** — it's the most painful
    interactive script and the one Gemini most needs to drive non-interactively.
-5. **Write `GEMINI.md` last** — only after the scripts it points at have
-   stable flag-driven shapes.
+5. **Write `GEMINI.md` last** — now started, with the current command surface.
 
 ### Open questions for the audit
 
