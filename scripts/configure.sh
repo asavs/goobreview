@@ -29,6 +29,34 @@ maybe_edit() {
   fi
 }
 
+personality_summary() {
+  local file="$1" name
+  name="$(basename "$file" .md)"
+  case "$name" in
+    control)
+      printf 'general-purpose review focus, neutral voice'
+      ;;
+    linus)
+      printf 'same review focus, blunt/profane when warranted'
+      ;;
+    *)
+      awk '
+        NF && $0 !~ /^#/ {
+          line=$0
+          sub(/^[[:space:]-]+/, "", line)
+          if (length(line) > 90) line=substr(line, 1, 87) "..."
+          print line
+          found=1
+          exit
+        }
+        END {
+          if (!found) print "custom personality"
+        }
+      ' "$file"
+      ;;
+  esac
+}
+
 apply_prompt_payload_profile() {
   local file="$1"
   local profile="$2"
@@ -242,6 +270,7 @@ fi
 
 current_personality=$(env_get REVIEWER_PERSONALITY_FILE)
 default_idx=0
+chosen="${current_personality:-config/personalities/control.md}"
 log "Available personalities:"
 for i in "${!gallery[@]}"; do
   rel="${gallery[$i]#$REPO_ROOT/}"
@@ -250,13 +279,14 @@ for i in "${!gallery[@]}"; do
     marker="*"
     default_idx="$i"
   fi
-  log "  $i) [$marker] $(basename "${gallery[$i]}" .md)"
+  log "  $i) [$marker] $(basename "${gallery[$i]}" .md) - $(personality_summary "${gallery[$i]}")"
 done
 pick=$(ask 'Pick a personality by number' "$default_idx")
 if [[ "$pick" =~ ^[0-9]+$ ]] && [ "$pick" -ge 0 ] && [ "$pick" -lt "${#gallery[@]}" ]; then
   chosen="${gallery[$pick]#$REPO_ROOT/}"
   env_set REVIEWER_PERSONALITY_FILE "$chosen"
   log "Set REVIEWER_PERSONALITY_FILE=$chosen"
+  log "Tune the reviewer's voice by editing $chosen, then re-run scripts/dry-run.sh."
 else
   log "Invalid choice; leaving REVIEWER_PERSONALITY_FILE as-is."
 fi
@@ -313,9 +343,19 @@ fi
 log "Done. Next steps:"
 cat <<EOF
 
+  # Check setup state any time
+  scripts/status.sh
+
   # Dry run (no review posted)
   scripts/dry-run.sh           # picks the oldest unseen PR
   scripts/dry-run.sh 123       # writes $REVIEWER_STATE/dry-pr-123.txt
+
+  # Tune before launch
+  scripts/tune.sh             # edit active files, then optionally dry-run
+  scripts/tune.sh 123         # tune against a specific PR
+  #   - edit $chosen for voice/focus, if you picked a personality above
+  #   - edit config/prompt-payload.json for prompt segments
+  #   - re-run scripts/dry-run.sh until the artifact looks right
 
   # When the dry run looks good, enable the scheduler:
   scripts/enable-cron.sh       # cron, fires every minute

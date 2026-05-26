@@ -122,6 +122,14 @@ scripts/render-prompt.sh 123 --explain
 
 Remove `REVIEWER_DRY_RUN=1` (i.e., run `scripts/reviewer/reviewer.sh` directly with your env sourced) when you intentionally want to post a real review.
 
+To iterate on voice or prompt shape, use the tuning wrapper:
+
+```bash
+scripts/tune.sh 123
+```
+
+It opens the active personality and prompt payload files, then offers to run another dry run.
+
 ## 6. Enable The Scheduler
 
 Once the dry run looks good:

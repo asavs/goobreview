@@ -392,6 +392,9 @@ To finish:
 
      (See docs/github-app-setup.md for the full walkthrough.)
 
+     You can check setup state any time with:
+       bash scripts/status.sh
+
   2. SSH in, trust Gemini, and run configure.sh:
        gcloud compute ssh $vm_name --zone=$zone
        cd /opt/goobreview/example

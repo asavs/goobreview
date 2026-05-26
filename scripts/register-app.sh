@@ -153,5 +153,9 @@ After installing, finish setup on the VM:
   cd /opt/goobreview/example
   gemini                # Google OAuth — sign in, trust this folder, /quit
   scripts/configure.sh  # App ID is pre-filled; auto-discovers installation ID
+
+Check setup state from either checkout:
+
+  bash scripts/status.sh
 ============================================================
 EOF

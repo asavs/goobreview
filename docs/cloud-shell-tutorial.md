@@ -2,6 +2,14 @@
 
 This walkthrough is the Cloud Shell version of [docs/quickstart.md](quickstart.md). It provisions a small Compute Engine VM, registers the GitHub App, and then sends you to the shared on-VM setup steps.
 
+At any point, run:
+
+```bash
+bash scripts/status.sh
+```
+
+It prints the current GCloud, VM, GitHub App, config, and runtime state with a recommended next action.
+
 ## 1. Run the bootstrap script
 
 ```bash
@@ -81,6 +89,6 @@ scripts/configure.sh
 
 Personality choice is the most consequential decision before your first dry run: it defines what kind of reviewer this is. `configure.sh` writes your pick into `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. See [docs/daemon-runbook.md#configuration-reference](daemon-runbook.md#configuration-reference) for the full config reference.
 
-## 4. Dry run, then enable the scheduler
+## 4. Dry run, tune, then enable the scheduler
 
 Follow [docs/quickstart.md](quickstart.md) starting from [Step 5: Dry Run](quickstart.md#5-dry-run), then [Step 6: Enable The Scheduler](quickstart.md#6-enable-the-scheduler).

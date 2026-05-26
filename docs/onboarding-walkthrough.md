@@ -214,8 +214,8 @@ cat /var/lib/goobreview/example/dry-pr-123.txt
 - `config/prompt-payload.json` reflects the prompt shape you want.
 
 **Friction notes:**
-- No dedicated "tune" command — the loop is a mix of `dry-run.sh`, editing
-  markdown files, and occasionally re-running `configure.sh`.
+- Dedicated `scripts/tune.sh` now wraps the loop of editing the active
+  personality/prompt payload and running another dry run.
 - No way to diff two dry-run artifacts to see "did my edit help?"
 - The split between "what the personality says" (markdown file) and "which
   personality is selected" (env var) means changing voice requires editing
