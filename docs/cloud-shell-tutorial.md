@@ -1,6 +1,15 @@
 # GoobReview: Cloud Shell Setup
 
-This walkthrough is the Cloud Shell version of [docs/quickstart.md](quickstart.md). It provisions a small Compute Engine VM, registers the GitHub App, and then sends you to the shared on-VM setup steps.
+This walkthrough is the Cloud Shell version of [docs/quickstart.md](quickstart.md). It provisions a small Compute Engine VM, registers the GitHub App, and then sends you through one dry-run review before anything is posted.
+
+You will need:
+
+- A Google account that can use Cloud Shell.
+- A GCP project with billing, or permission to create/link one. The default VM is intended to stay inside GCP's always-free Compute Engine tier, but Google still requires billing to enable Compute Engine.
+- Access to the GitHub account or organization where you want the reviewer App to live.
+- A target GitHub repository where you can install that App.
+
+The setup intentionally pauses for browser-only steps. When it does, finish the browser action, return to Cloud Shell, and keep going.
 
 At any point, run:
 
@@ -39,7 +48,19 @@ After you confirm, the script will:
 2. Wait for SSH to become reachable.
 3. Run `setup-vm.sh` on the VM, which installs the required tools, configures a 2 GB swap file, then clones the template into `/opt/goobreview/example`.
 
-When it finishes, it will print an SSH command and the remaining manual steps.
+When it finishes, you should have:
+
+- A running VM.
+- The GoobReview checkout at `/opt/goobreview/example` on that VM.
+- A Cloud Shell handoff file named `.goobreview-cloud-shell.env`, so the next command knows which VM to use.
+
+Quick check:
+
+```bash
+bash scripts/status.sh
+```
+
+The VM preflight should now say the VM exists. If SSH is still warming up, wait a minute and run the status command again.
 
 ## 2. Register the GitHub App
 
@@ -57,7 +78,7 @@ If you accepted a custom VM name or zone during bootstrap, keep using the no-arg
 bash scripts/register-app.sh YOUR_VM_NAME YOUR_ZONE
 ```
 
-This starts a tiny local server. The walkthrough is:
+This starts a tiny local server. Keep the terminal open while you use the browser page. The walkthrough is:
 
 1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port 8080**.
 2. In the new browser tab, click through to the **pre-filled GitHub form** (it already has the name, homepage, webhook setting, and the five permissions set). At the bottom click **Create GitHub App**.
@@ -65,6 +86,14 @@ This starts a tiny local server. The walkthrough is:
 4. Back on the Web Preview page, upload the `.pem` and paste the App ID. After it verifies, click **Install ... on a repo ->** and pick your target repo.
 
 When the script finishes, the private key is on the VM at `/var/lib/goobreview/example/app-key.pem` and the App ID is pre-filled in `reviewer.env`. The key only lives in Cloud Shell and on the VM &mdash; never on your local machine.
+
+Quick check:
+
+```bash
+bash scripts/status.sh
+```
+
+The GitHub App preflight should now show an App ID and VM key. It may still say the installation ID is missing; that is filled during the next configure step after you install the App on the target repo.
 
 Registering the App under an organization instead of your personal account? Pass the org name:
 
@@ -85,10 +114,49 @@ gemini                # Google OAuth - sign in, trust this folder, then /quit
 scripts/configure.sh
 ```
 
-`configure.sh` copies each gitignored config file (`reviewer.env`, `required-checks.json`, `prompt-payload.json`) from its `.example` sibling, prompts for the target repo, auto-discovers the installation ID, lets you pick a personality and prompt payload profile, and offers to open each file in `$EDITOR`.
+`configure.sh` prompts for the target repo, auto-discovers the App installation ID, lets you pick a personality and prompt payload profile, and offers to open the generated config files in `$EDITOR`.
 
-Personality choice is the most consequential decision before your first dry run: it defines what kind of reviewer this is. `configure.sh` writes your pick into `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. See [docs/daemon-runbook.md#configuration-reference](daemon-runbook.md#configuration-reference) for the full config reference.
+Personality choice is the most consequential decision before your first dry run: it defines what kind of reviewer this is. `control` is neutral and general-purpose. `linus` is intentionally blunt. You can change this later with `scripts/tune.sh`.
+
+Quick check on the VM:
+
+```bash
+scripts/status.sh
+```
+
+The config preflight should point you toward a dry run rather than more setup.
 
 ## 4. Dry run, tune, then enable the scheduler
 
-Follow [docs/quickstart.md](quickstart.md) starting from [Step 5: Dry Run](quickstart.md#5-dry-run), then [Step 6: Enable The Scheduler](quickstart.md#6-enable-the-scheduler).
+Still on the VM, run a dry review first:
+
+```bash
+scripts/dry-run.sh
+```
+
+Or target a specific PR:
+
+```bash
+scripts/dry-run.sh 123
+```
+
+Nothing is posted to GitHub. The script writes an artifact under `$REVIEWER_STATE` that contains the exact prompt and Gemini response. Read it before launching.
+
+To iterate on the voice or prompt shape:
+
+```bash
+scripts/tune.sh 123
+```
+
+When the dry-run artifact looks good, enable the scheduler:
+
+```bash
+scripts/enable-cron.sh
+```
+
+`enable-cron.sh` refuses to launch until a dry-run artifact exists. After it succeeds, watch:
+
+```bash
+tail -f /var/lib/goobreview/example/log.txt
+tail -f /var/lib/goobreview/example/cron.log
+```
