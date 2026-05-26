@@ -95,6 +95,8 @@ if command -v gcloud >/dev/null 2>&1; then
   if [ "$vm_exists" = "true" ] && command -v timeout >/dev/null 2>&1; then
     if timeout 15 gcloud compute ssh "$vm_name" --zone="$zone" --quiet --command='true' >/dev/null 2>&1; then
       ssh_reachable="true"
+      # The command runs on the VM; keep $cmd expansion remote-side.
+      # shellcheck disable=SC2016
       remote_probe="$(timeout 30 gcloud compute ssh "$vm_name" --zone="$zone" --quiet --command='
         set -eu
         if [ -d /opt/goobreview/example ]; then
