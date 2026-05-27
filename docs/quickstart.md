@@ -36,6 +36,16 @@ The default VM is an `e2-micro` in `us-central1`, which is on GCP's [always-free
 
 Cloud Shell has Gemini preinstalled. If the billing/project page is confusing, type `gemini` and ask it to walk you through that Google Cloud console step; then come back here and rerun the same bootstrap command.
 
+For scripted or Gemini-driven setup, use flags after confirming the values:
+
+```bash
+bash scripts/bootstrap-gcp.sh \
+  --project YOUR_PROJECT_ID \
+  --zone us-central1-a \
+  --vm-name goobreview-1 \
+  --yes
+```
+
 Takes about 3 minutes. When it finishes, it prints the remaining commands.
 
 ## 3. Register The GitHub App

@@ -19,6 +19,73 @@ STATE_FILE="$REPO_ROOT/.goobreview-cloud-shell.env"
 . "$SCRIPT_DIR/lib/ops.sh"
 export OPS_LOG_PREFIX="bootstrap-gcp"
 
+PROJECT_ARG=""
+ZONE_ARG=""
+VM_NAME_ARG=""
+BILLING_ACCOUNT_ARG=""
+ASSUME_YES=0
+
+usage() {
+  cat <<EOF
+Usage: bash scripts/bootstrap-gcp.sh [options]
+
+Provision the GoobReview VM and install VM-side dependencies.
+
+Options:
+  --project PROJECT_ID       GCP project to use or create.
+  --zone ZONE                Compute Engine zone. Default: $DEFAULT_ZONE.
+  --vm-name NAME             VM name. Default: $DEFAULT_VM_NAME.
+  --billing-account ACCOUNT  Billing account ID/name to use when linking billing.
+  --yes                      Accept script confirmations for non-interactive setup.
+  -h, --help                 Show this help.
+
+Examples:
+  bash scripts/bootstrap-gcp.sh
+  bash scripts/bootstrap-gcp.sh --project my-project --zone us-central1-a --vm-name goobreview-1 --yes
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --project)
+      PROJECT_ARG="${2:-}"
+      shift
+      ;;
+    --zone)
+      ZONE_ARG="${2:-}"
+      shift
+      ;;
+    --vm-name)
+      VM_NAME_ARG="${2:-}"
+      shift
+      ;;
+    --billing-account)
+      BILLING_ACCOUNT_ARG="${2:-}"
+      shift
+      ;;
+    --yes|-y)
+      ASSUME_YES=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      ops_die "Unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+bootstrap_confirm() {
+  local question="$1"
+  if [ "$ASSUME_YES" -eq 1 ]; then
+    printf '[bootstrap-gcp] %s yes (--yes)\n' "$question" >&2
+    return 0
+  fi
+  ops_confirm "$question"
+}
+
 detected_origin="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
 detected_owner_repo="$(ops_to_owner_repo "$detected_origin")"
 if [ -z "$detected_owner_repo" ]; then
@@ -103,6 +170,17 @@ select_billing_account() {
     return 1
   fi
 
+  if [ -n "$BILLING_ACCOUNT_ARG" ]; then
+    while IFS=$'\t' read -r name display; do
+      if [ "$BILLING_ACCOUNT_ARG" = "$name" ] || [ "$BILLING_ACCOUNT_ARG" = "${name#billingAccounts/}" ]; then
+        printf '[bootstrap-gcp] Using billing account: %s (%s)\n' "${display:-$name}" "$name" >&2
+        printf '%s' "$name"
+        return 0
+      fi
+    done <<< "$billing_raw"
+    ops_die "Billing account '$BILLING_ACCOUNT_ARG' was not found or is not open."
+  fi
+
   count=$(printf '%s\n' "$billing_raw" | wc -l)
   if [ "$count" -eq 1 ]; then
     IFS=$'\t' read -r name display <<< "$billing_raw"
@@ -119,6 +197,10 @@ select_billing_account() {
     displays+=("${display:-$name}")
     i=$((i + 1))
   done <<< "$billing_raw"
+
+  if [ "$ASSUME_YES" -eq 1 ]; then
+    ops_die "Multiple billing accounts found. Re-run with --billing-account ACCOUNT."
+  fi
 
   choice=$(ops_prompt 'Pick number' '1')
   if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "$count" ]; then
@@ -192,7 +274,7 @@ link_project_billing_interactive() {
   local project_id="$1"
   local billing_raw billing_account
 
-  if ! ops_confirm "Link project '$project_id' to a Cloud Billing account now?"; then
+  if ! bootstrap_confirm "Link project '$project_id' to a Cloud Billing account now?"; then
     return 1
   fi
 
@@ -211,7 +293,7 @@ ensure_project_ready() {
     cat >&2 <<EOF
 [bootstrap-gcp] Project '$project_id' does not exist or you cannot access it.
 EOF
-    if ops_confirm "Create project '$project_id' + link billing now?"; then
+    if bootstrap_confirm "Create project '$project_id' + link billing now?"; then
       create_project_with_billing "$project_id" || return 1
       return 0
     else
@@ -236,12 +318,16 @@ EOF
 create_project_interactive() {
   local project_id default_id
 
-  if ! ops_confirm 'Create a new GCP project + link a billing account now?'; then
+  if ! bootstrap_confirm 'Create a new GCP project + link a billing account now?'; then
     return 1
   fi
 
   default_id="goobreview-${RANDOM}${RANDOM}"
-  project_id=$(ops_prompt 'New project ID (6-30 lowercase chars/digits/hyphens, globally unique)' "$default_id")
+  if [ -n "$PROJECT_ARG" ]; then
+    project_id="$PROJECT_ARG"
+  else
+    project_id=$(ops_prompt 'New project ID (6-30 lowercase chars/digits/hyphens, globally unique)' "$default_id")
+  fi
   if [ -z "$project_id" ]; then
     printf '[bootstrap-gcp] Project ID is required.\n' >&2
     return 1
@@ -251,7 +337,7 @@ create_project_interactive() {
   printf '%s' "$project_id"
 }
 
-current_project="$(gcloud config get-value project 2>/dev/null || true)"
+current_project="${PROJECT_ARG:-$(gcloud config get-value project 2>/dev/null || true)}"
 case "$current_project" in
   ''|'(unset)'|cloudshell-*)
     cat >&2 <<EOF
@@ -264,7 +350,16 @@ The default VM (e2-micro in us-central1) is on GCP's always-free tier,
 so you won't be charged for the default setup.
 
 EOF
-    if new_project=$(create_project_interactive); then
+    if [ -n "$PROJECT_ARG" ] && [ "$ASSUME_YES" -eq 1 ]; then
+      if create_project_with_billing "$PROJECT_ARG"; then
+        new_project="$PROJECT_ARG"
+      else
+        new_project=""
+      fi
+    elif new_project=$(create_project_interactive); then
+      :
+    fi
+    if [ -n "${new_project:-}" ]; then
       current_project="$new_project"
       printf '\n[bootstrap-gcp] Continuing with project %s.\n\n' "$current_project" >&2
     else
@@ -289,7 +384,11 @@ EOF
     ;;
 esac
 
-project="$(ops_prompt 'GCP project ID' "$current_project")"
+if [ -n "$PROJECT_ARG" ]; then
+  project="$PROJECT_ARG"
+else
+  project="$(ops_prompt 'GCP project ID' "$current_project")"
+fi
 ops_require_nonempty "Project ID" "$project"
 
 if ! ensure_project_ready "$project"; then
@@ -302,8 +401,16 @@ EOF
   exit 1
 fi
 
-zone="$(ops_prompt 'Zone' "$DEFAULT_ZONE")"
-vm_name="$(ops_prompt 'VM name' "$DEFAULT_VM_NAME")"
+if [ -n "$ZONE_ARG" ]; then
+  zone="$ZONE_ARG"
+else
+  zone="$(ops_prompt 'Zone' "$DEFAULT_ZONE")"
+fi
+if [ -n "$VM_NAME_ARG" ]; then
+  vm_name="$VM_NAME_ARG"
+else
+  vm_name="$(ops_prompt 'VM name' "$DEFAULT_VM_NAME")"
+fi
 ops_require_nonempty "Zone" "$zone"
 ops_require_nonempty "VM name" "$vm_name"
 
@@ -319,7 +426,7 @@ About to create:
   Source repo:   $REPO_URL
 
 EOF
-ops_confirm "Proceed?" || { echo "Aborted."; exit 1; }
+bootstrap_confirm "Proceed?" || { echo "Aborted."; exit 1; }
 
 gcloud config set project "$project" >/dev/null
 

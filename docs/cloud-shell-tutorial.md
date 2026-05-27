@@ -40,6 +40,17 @@ You'll be asked for three things (defaults shown in brackets):
 - **Zone** - defaults to `us-central1-a`
 - **VM name** - defaults to `goobreview-1`
 
+If you are using Gemini to drive the setup, it should use the flag-driven form
+after confirming the values with you:
+
+```bash
+bash scripts/bootstrap-gcp.sh \
+  --project YOUR_PROJECT_ID \
+  --zone us-central1-a \
+  --vm-name goobreview-1 \
+  --yes
+```
+
 A billing account is required to enable Compute Engine, but the default GoobReview VM is an `e2-micro` in `us-central1`, which runs within GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) (1 instance + 30 GB standard disk per month). You won't be charged unless you bump to a larger machine, run multiple VMs, or move to a non-free region. New Google Cloud accounts also get $300 in 90-day credits.
 
 After you confirm, the script will:

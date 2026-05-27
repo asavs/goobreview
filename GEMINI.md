@@ -38,15 +38,21 @@ bash scripts/preflight/gcloud.sh
 bash scripts/preflight/vm.sh
 ```
 
-If the VM is missing and the user agrees to create it:
+If the VM is missing, ask the user for project, zone, and VM name, then confirm
+before creating anything. For agent-driven setup, use the flag path:
 
 ```bash
-bash scripts/bootstrap-gcp.sh
+bash scripts/bootstrap-gcp.sh \
+  --project PROJECT_ID \
+  --zone us-central1-a \
+  --vm-name goobreview-1 \
+  --yes
 ```
 
-Let `bootstrap-gcp.sh` handle project/billing repair and VM creation. If it
-prints a browser billing/project task, explain the next click and wait for the
-user to return.
+If there are multiple billing accounts, re-run with
+`--billing-account ACCOUNT`. Let `bootstrap-gcp.sh` handle project/billing
+repair and VM creation. If it prints a browser billing/project task, explain
+the next click and wait for the user to return.
 
 ## Phase 2 - Register
 

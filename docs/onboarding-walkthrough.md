@@ -36,6 +36,11 @@ cd goobreview
 bash scripts/bootstrap-gcp.sh
 ```
 
+Agent-driven:
+```bash
+bash scripts/bootstrap-gcp.sh --project PROJECT_ID --zone us-central1-a --vm-name goobreview-1 --yes
+```
+
 **What happens inside `bootstrap-gcp.sh`:**
 1. Reads `gcloud config get-value project`; if unset or a Cloud Shell ephemeral
    project, offers to create a new GCP project + link billing inline.
