@@ -264,6 +264,7 @@ JSON
 
   REPO="example/repo"
 
+  # shellcheck disable=SC2317 # Mocked gh is invoked indirectly by build_review_prompt.
   gh() {
     if [ "${1:-}" = "pr" ] && [ "${2:-}" = "diff" ]; then
       if [ "${6:-}" = "--name-only" ]; then
@@ -338,6 +339,7 @@ JSON
   mkdir -p "$worktree_dir"
   REPO="example/repo"
 
+  # shellcheck disable=SC2317 # Mocked gh is invoked indirectly by build_review_prompt.
   gh() {
     if [ "${1:-}" = "pr" ] && [ "${2:-}" = "diff" ]; then
       return 1
