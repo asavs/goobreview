@@ -307,6 +307,72 @@ JSON
   assert_not_contains "prompt omits all-check summary" "All Check Summary" "$prompt_file"
 }
 
+test_prompt_failure_propagates() {
+  local prompt_file worktree_dir
+
+  prompt_file="$TMP_ROOT/prompt-failure.md"
+  worktree_dir="$TMP_ROOT/worktree-failure"
+
+  PERSONALITY_FILE="$TMP_ROOT/personality-failure.md"
+  PROMPT_FILE="$TMP_ROOT/engine-failure.md"
+  PROMPT_PAYLOAD_FILE="$TMP_ROOT/prompt-payload-failure.json"
+  printf '## Role\nBe sharp.\n' > "$PERSONALITY_FILE"
+  printf 'First line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+  cat > "$PROMPT_PAYLOAD_FILE" <<'JSON'
+{
+  "segments": {
+    "personality": {"enabled": true},
+    "pr_metadata": {"enabled": false},
+    "ci_status": {"enabled": false},
+    "changed_paths": {"enabled": true},
+    "relevant_guidance": {"enabled": false},
+    "source_snapshot_hint": {"enabled": false},
+    "all_check_summary": {"enabled": false},
+    "full_file_tree": {"enabled": false},
+    "selected_file_contents": {"enabled": false},
+    "diff": {"enabled": true},
+    "response_format": {"enabled": true}
+  }
+}
+JSON
+  mkdir -p "$worktree_dir"
+  REPO="example/repo"
+
+  gh() {
+    if [ "${1:-}" = "pr" ] && [ "${2:-}" = "diff" ]; then
+      return 1
+    fi
+    return 1
+  }
+
+  if build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"; then
+    fail "prompt build failure is propagated"
+  fi
+  pass "prompt build failure is propagated"
+}
+
+test_invalid_verdict_state() {
+  local artifact count
+
+  STATE_DIR="$TMP_ROOT/invalid-state"
+  mkdir -p "$STATE_DIR"
+
+  assert_eq "missing invalid verdict count is zero" "0" "$(invalid_verdict_attempt_count 17 abc123)"
+  count=$(record_invalid_verdict_attempt 17 abc123)
+  assert_eq "invalid verdict first attempt is recorded" "1" "$count"
+  count=$(record_invalid_verdict_attempt 17 abc123)
+  assert_eq "invalid verdict attempts increment per head" "2" "$count"
+  assert_eq "different head has separate invalid verdict count" "0" "$(invalid_verdict_attempt_count 17 def456)"
+
+  artifact=$(write_invalid_verdict_artifact 17 abc123 INVALID_VERDICT $'NOPE\nbody')
+  assert_contains "invalid artifact records PR" "PR: #17" "$artifact"
+  assert_contains "invalid artifact records head SHA" "Head SHA: abc123" "$artifact"
+  assert_contains "invalid artifact persists rejected output" "NOPE" "$artifact"
+
+  clear_invalid_verdict_attempts 17 abc123
+  assert_eq "invalid verdict attempts clear after valid output" "0" "$(invalid_verdict_attempt_count 17 abc123)"
+}
+
 test_gemini_invocation_isolates_review_context() {
   local prompt_file err_file output worktree_dir settings_path
 
@@ -349,6 +415,8 @@ test_gemini_invocation_isolates_review_context() {
 
 test_output_parser
 test_prompt_assembly
+test_prompt_failure_propagates
+test_invalid_verdict_state
 test_gemini_invocation_isolates_review_context
 test_ci_states
 

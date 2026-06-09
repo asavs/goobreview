@@ -19,6 +19,7 @@ GEMINI_QUOTA_DEFAULT_BACKOFF="${REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF:-3600}"
 GEMINI_QUOTA_BACKOFF_PADDING="${REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING:-300}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
+INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
@@ -116,11 +117,17 @@ fi
 BOT_LOGIN="${REVIEWER_APP_SLUG}[bot]"
 
 if [ -n "$ONLY_PR" ] && { [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; }; then
-  PRS=$(gh pr view "$ONLY_PR" --repo "$REPO" --json number,author,headRefOid \
-    --jq '[.number, .author.login, .headRefOid] | @tsv')
+  if ! PRS=$(gh pr view "$ONLY_PR" --repo "$REPO" --json number,author,headRefOid \
+    --jq '[.number, .author.login, .headRefOid] | @tsv' 2>>"$LOG_FILE"); then
+    log "Failed to fetch requested PR #$ONLY_PR, will retry next tick"
+    exit 0
+  fi
 else
-  PRS=$(gh pr list --repo "$REPO" --state open --json number,author,headRefOid,isDraft \
-    --jq '.[] | select(.isDraft == false) | [.number, .author.login, .headRefOid] | @tsv')
+  if ! PRS=$(gh pr list --repo "$REPO" --state open --json number,author,headRefOid,isDraft \
+    --jq '.[] | select(.isDraft == false) | [.number, .author.login, .headRefOid] | @tsv' 2>>"$LOG_FILE"); then
+    log "Failed to list open PRs, will retry next tick"
+    exit 0
+  fi
 fi
 
 review_actions=0
@@ -138,8 +145,17 @@ while IFS=$'\t' read -r num author head_sha; do
   fi
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
-    existing=$(gh api "repos/$REPO/pulls/$num/reviews" \
-      --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and .commit_id == \"$head_sha\")] | length")
+    if ! existing=$(gh api "repos/$REPO/pulls/$num/reviews" \
+      --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and .commit_id == \"$head_sha\")] | length" 2>>"$LOG_FILE"); then
+      log "PR #$num@$head_sha: failed to read existing reviews, will retry next tick"
+      continue
+    fi
+    case "$existing" in
+      ''|*[!0-9]*)
+        log "PR #$num@$head_sha: existing review query returned unexpected count '$existing', will retry next tick"
+        continue
+        ;;
+    esac
     if [ "$existing" -gt 0 ]; then
       log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, skipping"
       continue
@@ -208,6 +224,15 @@ EOF
 
   log "Reviewing PR #$num@$head_sha"
 
+  if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$INVALID_VERDICT_MAX_ATTEMPTS" -gt 0 ]; then
+    invalid_attempts=$(invalid_verdict_attempt_count "$num" "$head_sha")
+    if [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
+      invalid_artifact=$(invalid_verdict_artifact_path "$num" || true)
+      log "PR #$num@$head_sha: invalid Gemini output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=$INVALID_VERDICT_MAX_ATTEMPTS; skipping until the PR head changes (last artifact: ${invalid_artifact:-unavailable})"
+      continue
+    fi
+  fi
+
   prompt_tmp=$(mktemp "$STATE_DIR/prompt.$num.XXXXXX")
 
   if ! review_worktree=$(prepare_review_worktree "$head_sha"); then
@@ -216,7 +241,11 @@ EOF
     continue
   fi
 
-  build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree"
+  if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree"; then
+    rm -f "$prompt_tmp"
+    log "PR #$num@$head_sha: failed to build Gemini prompt, will retry next tick"
+    continue
+  fi
 
   if [ -n "$RENDER_PROMPT_ONLY" ]; then
     if [ -n "$PROMPT_OUT" ] && [ "$PROMPT_OUT" != "-" ]; then
@@ -246,18 +275,45 @@ EOF
   cat "$gemini_err_tmp" >> "$LOG_FILE"
 
   if [ -z "${review// }" ]; then
+    invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$review")
     write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review"
     rm -f "$prompt_tmp" "$gemini_err_tmp"
-    log "gemini returned empty for PR #$num, will retry next tick"
+    if [ -z "$DRY_RUN" ]; then
+      invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
+      if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
+        log "gemini returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
+      elif [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
+        log "gemini returned empty for PR #$num@$head_sha; wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+      else
+        log "gemini returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+      fi
+    else
+      log "gemini returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick"
+    fi
     continue
   fi
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
+    invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "INVALID_VERDICT" "$review")
     write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review"
     rm -f "$prompt_tmp" "$gemini_err_tmp"
     verdict_line=$(printf '%s' "$review" | sed -n '1p')
-    log "PR #$num: gemini did not emit a valid first-line GitHub review event (got: $verdict_line), will retry next tick"
+    if [ -z "$DRY_RUN" ]; then
+      invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
+      if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
+        log "PR #$num@$head_sha: gemini did not emit a valid first-line GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
+      elif [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
+        log "PR #$num@$head_sha: gemini did not emit a valid first-line GitHub review event (got: $verdict_line); wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+      else
+        log "PR #$num@$head_sha: gemini did not emit a valid first-line GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+      fi
+    else
+      log "PR #$num@$head_sha: gemini did not emit a valid first-line GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick"
+    fi
     continue
+  fi
+  if [ -z "$DRY_RUN" ]; then
+    clear_invalid_verdict_attempts "$num" "$head_sha"
   fi
 
   review_body=$(printf '%s' "$review" | review_body_after_verdict)
