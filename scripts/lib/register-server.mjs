@@ -14,6 +14,7 @@ const PORT = Number(process.env.GOOBREVIEW_REGISTER_PORT || 8080);
 const OUTPUT_DIR = process.env.GOOBREVIEW_REGISTER_OUTPUT;
 const MANIFEST_PATH = process.env.GOOBREVIEW_MANIFEST;
 const GH_OWNER_ORG = process.env.GOOBREVIEW_GH_ORG || '';
+const TARGET_REPO = process.env.GOOBREVIEW_TARGET_REPO || '';
 
 function die(msg) {
   console.error(`[register-server] ${msg}`);
@@ -23,8 +24,10 @@ function die(msg) {
 if (!OUTPUT_DIR) die('GOOBREVIEW_REGISTER_OUTPUT not set');
 if (!MANIFEST_PATH) die('GOOBREVIEW_MANIFEST not set');
 if (!fs.existsSync(MANIFEST_PATH)) die(`manifest file not found: ${MANIFEST_PATH}`);
+if (TARGET_REPO && !/^[^/]+\/[^/]+$/.test(TARGET_REPO)) die(`invalid GOOBREVIEW_TARGET_REPO: ${TARGET_REPO}`);
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
+let verifiedApp = null;
 
 function htmlEscape(s) {
   return String(s)
@@ -86,6 +89,7 @@ function renderForm() {
 
   <h2>2. Upload the key</h2>
   <p>Submit the downloaded <code>.pem</code> and the App ID below. They're forwarded to your VM by <code>register-app.sh</code> and never leave this Cloud Shell session.</p>
+  ${TARGET_REPO ? `<p class="muted">After the key is verified, this page will ask you to install the App on <code>${htmlEscape(TARGET_REPO)}</code> and will detect the installation ID automatically.</p>` : ''}
   <div class="upload">
     <form method="POST" action="/complete" enctype="multipart/form-data">
       <div class="field">
@@ -105,6 +109,32 @@ function renderForm() {
 
 function renderSuccess(summary) {
   const installUrl = `https://github.com/apps/${encodeURIComponent(summary.slug)}/installations/new`;
+  const repoHtml = TARGET_REPO ? `<code>${htmlEscape(TARGET_REPO)}</code>` : 'your target repo';
+  const pollingHtml = TARGET_REPO ? `
+  <p><strong>Final step:</strong> install the App on ${repoHtml}, then keep this tab open. The helper will detect the installation ID and exit.</p>
+  <p><a class="btn" href="${htmlEscape(installUrl)}" target="_blank" rel="noopener">Install ${htmlEscape(summary.name)} on ${repoHtml} &rarr;</a></p>
+  <p id="install-status" class="muted">Waiting for installation on ${repoHtml}...</p>
+  <script>
+    const statusEl = document.getElementById('install-status');
+    async function pollInstallation() {
+      try {
+        const resp = await fetch('/installation');
+        const data = await resp.json();
+        if (data.status === 'installed') {
+          statusEl.innerHTML = 'Installation detected. Installation ID <code>' + data.installation_id + '</code> was saved for configure.sh.';
+          return;
+        }
+        statusEl.textContent = data.message || 'Still waiting for installation...';
+      } catch (err) {
+        statusEl.textContent = 'Still waiting for installation...';
+      }
+      setTimeout(pollInstallation, 5000);
+    }
+    setTimeout(pollInstallation, 2000);
+  </script>` : `
+  <p><strong>One step left:</strong> install the App on your target repo.</p>
+  <p><a class="btn" href="${htmlEscape(installUrl)}" target="_blank" rel="noopener">Install ${htmlEscape(summary.name)} on a repo &rarr;</a></p>
+  <p class="muted">Pick "Only select repositories" and choose the repo GoobReview will review. After install, return to your terminal &mdash; the register script has already exited and printed the next command to run.</p>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -122,10 +152,7 @@ function renderSuccess(summary) {
 <body>
   <h1>App registered: ${htmlEscape(summary.name)}</h1>
   <p>App ID <code>${htmlEscape(summary.id)}</code>, slug <code>${htmlEscape(summary.slug)}</code>. The private key is on the VM.</p>
-
-  <p><strong>One step left:</strong> install the App on your target repo.</p>
-  <p><a class="btn" href="${htmlEscape(installUrl)}" target="_blank" rel="noopener">Install ${htmlEscape(summary.name)} on a repo &rarr;</a></p>
-  <p class="muted">Pick "Only select repositories" and choose the repo GoobReview will review. After install, return to your terminal &mdash; the register script has already exited and printed the next command to run.</p>
+  ${pollingHtml}
 </body>
 </html>`;
 }
@@ -183,6 +210,23 @@ async function fetchAppMeta(jwt) {
   return resp.json();
 }
 
+async function fetchRepoInstallation(jwt, repo) {
+  const resp = await fetch(`https://api.github.com/repos/${repo}/installation`, {
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'goobreview-register',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (resp.status === 404) return null;
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`GitHub installation lookup failed (${resp.status}): ${body.slice(0, 200)}`);
+  }
+  return resp.json();
+}
+
 async function parseMultipart(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -195,7 +239,7 @@ async function parseMultipart(req) {
   return request.formData();
 }
 
-function saveResult(meta, pemContent) {
+function saveResult(meta, pemContent, installation = null) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(OUTPUT_DIR, 'app-key.pem'), pemContent, { mode: 0o600 });
   const summary = {
@@ -205,6 +249,8 @@ function saveResult(meta, pemContent) {
     owner: meta.owner?.login || '',
     html_url: meta.html_url || '',
   };
+  if (TARGET_REPO) summary.repo = TARGET_REPO;
+  if (installation?.id) summary.installation_id = String(installation.id);
   fs.writeFileSync(path.join(OUTPUT_DIR, 'app.json'), JSON.stringify(summary, null, 2));
   return summary;
 }
@@ -218,6 +264,45 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && req.url === '/') {
       sendHtml(res, 200, renderForm());
+      return;
+    }
+
+    if (req.method === 'GET' && req.url === '/installation') {
+      if (!TARGET_REPO) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'disabled' }));
+        return;
+      }
+      if (!verifiedApp) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'pending', message: 'Upload and verify the App key first.' }));
+        return;
+      }
+
+      let installation;
+      try {
+        installation = await fetchRepoInstallation(verifiedApp.jwt, TARGET_REPO);
+      } catch (err) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'error', message: err.message }));
+        return;
+      }
+
+      if (!installation?.id) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          status: 'pending',
+          message: `Waiting for ${verifiedApp.summary.name} to be installed on ${TARGET_REPO}...`,
+        }));
+        return;
+      }
+
+      const summary = saveResult(verifiedApp.meta, verifiedApp.pemContent, installation);
+      verifiedApp.summary = summary;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'installed', installation_id: summary.installation_id }));
+      console.error(`[register-server] Installation ${summary.installation_id} detected for ${TARGET_REPO}.`);
+      setTimeout(() => server.close(() => process.exit(0)), 1500);
       return;
     }
 
@@ -258,10 +343,13 @@ const server = http.createServer(async (req, res) => {
       }
 
       const summary = saveResult(meta, pemContent);
+      verifiedApp = { meta, pemContent, jwt, summary };
       sendHtml(res, 200, renderSuccess(summary));
       console.error(`[register-server] App ${summary.name} (id=${summary.id}) verified; key written to ${OUTPUT_DIR}/app-key.pem`);
-      // Let the browser finish receiving the response before we exit.
-      setTimeout(() => server.close(() => process.exit(0)), 1500);
+      if (!TARGET_REPO) {
+        // Let the browser finish receiving the response before we exit.
+        setTimeout(() => server.close(() => process.exit(0)), 1500);
+      }
       return;
     }
 

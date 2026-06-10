@@ -56,16 +56,24 @@ Still in Cloud Shell:
 bash scripts/register-app.sh
 ```
 
+If you already know the target repository, pass it now. The helper will detect
+the GitHub App installation ID after you install the App and will pre-fill the
+repo plus installation ID on the VM:
+
+```bash
+bash scripts/register-app.sh --repo OWNER/REPO
+```
+
 The bootstrap step saved your selected VM name and zone in `.goobreview-cloud-shell.env`, so this command still works if you changed either default. From a fresh checkout, pass them explicitly:
 
 ```bash
-bash scripts/register-app.sh YOUR_VM_NAME YOUR_ZONE
+bash scripts/register-app.sh --repo OWNER/REPO YOUR_VM_NAME YOUR_ZONE
 ```
 
 It starts a tiny local server. Click Cloud Shell's **Web Preview** button -> **Preview on port 8080**. The page walks you through two steps:
 
 1. Click the link to GitHub's pre-filled App-creation form (name, homepage, webhook off, all five permissions already set). At the bottom of the GitHub form, click **Create GitHub App**. On the App's settings page that loads, click **Generate a private key** to download the `.pem` and note the **App ID** at the top.
-2. Back on the helper page, upload the `.pem` and paste the App ID. The helper signs a JWT to verify them, ships the key to the VM, pre-populates `REVIEWER_APP_ID` in `reviewer.env`, and shows an **Install ... on a repo ->** link. Click it and pick your target repo.
+2. Back on the helper page, upload the `.pem` and paste the App ID. The helper signs a JWT to verify them, ships the key to the VM, pre-populates `REVIEWER_APP_ID` in `reviewer.env`, and shows an **Install ... on a repo ->** link. Click it and pick your target repo. If you passed `--repo`, keep the helper page open; it detects the installation ID and writes `REVIEWER_REPO` plus `REVIEWER_APP_INSTALLATION_ID`.
 
 When the script finishes, the App's private key is at `/var/lib/goobreview/example/app-key.pem` on the VM and `REVIEWER_APP_ID` is filled in. The `.pem` lives only in Cloud Shell and on the VM &mdash; never on your local machine. See [docs/github-app-setup.md](github-app-setup.md) for the App identity, permissions, and the by-hand path.
 
@@ -92,8 +100,8 @@ delegates deterministic writes and validation to `scripts/configure-inner.sh`.
 `configure.sh`:
 
 - Copies each gitignored config file (`reviewer.env`, `required-checks.json`, `prompt-payload.json`) from its `.example` sibling.
-- Prompts for `REVIEWER_REPO` (the App ID is already filled in after `scripts/register-app.sh`; the by-hand path prompts for it).
-- Auto-discovers the installation ID by minting an App token and looking up the install on the target repo.
+- Prompts for `REVIEWER_REPO` when it was not already filled by `scripts/register-app.sh --repo`.
+- Auto-discovers the installation ID when it was not already filled by the registration helper.
 - Lists the personalities in `config/personalities/` and writes your pick to `REVIEWER_PERSONALITY_FILE` in `reviewer.env`.
 - Lets you pick a prompt payload profile (`lean`, `minimal`, `guided`, `full`, or custom). The generated `config/prompt-payload.json` shows every possible prompt segment with an enabled flag, description, and example.
 - Offers to open each config file in `$EDITOR`.
