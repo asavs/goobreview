@@ -228,6 +228,7 @@ build_review_prompt() {
   local num="$1"
   local output_prompt_file="$2"
   local ci_state="${3:-unknown}"
+  local head_sha="${4:-}"
   local worktree_dir="${5:-}"
   local changed_paths_file guidance_paths_file
 
