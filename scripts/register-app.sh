@@ -88,7 +88,7 @@ VM_KEY_PATH="${REVIEWER_APP_PRIVATE_KEY_PATH:-/var/lib/goobreview/example/app-ke
 VM_ENV_PATH="${REVIEWER_ENV_FILE:-/opt/goobreview/example/config/reviewer.env}"
 VM_EXAMPLE_ENV_PATH="/opt/goobreview/example/config/reviewer.env.example"
 
-ops_require_command node "In Cloud Shell, run 'sudo apt-get install -y nodejs' or use setup-vm.sh's install path."
+ops_require_command node "Install Node 20 or newer, or use scripts/setup-vm.sh's install path."
 ops_require_command gcloud "Run from Cloud Shell or install the gcloud CLI."
 ops_require_command jq "In Cloud Shell, run 'sudo apt-get install -y jq'."
 if [ -n "$port" ]; then
