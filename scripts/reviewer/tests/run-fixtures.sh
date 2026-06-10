@@ -20,6 +20,8 @@ LOG_FILE="$TMP_ROOT/test.log"
 # shellcheck disable=SC1091
 . "$LIB_DIR/gemini.sh"
 # shellcheck disable=SC1091
+. "$LIB_DIR/github-api.sh"
+# shellcheck disable=SC1091
 . "$LIB_DIR/output.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/prompt.sh"
@@ -264,17 +266,22 @@ JSON
 
   REPO="example/repo"
 
-  gh() {
-    if [ "${1:-}" = "pr" ] && [ "${2:-}" = "diff" ]; then
-      if [ "${6:-}" = "--name-only" ]; then
-        printf 'client/src/auth.py\n'
-        return 0
-      fi
+  github_api_get() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999" ] && [ "${2:-}" = "application/vnd.github.diff" ]; then
       printf 'diff --git a/src/auth.py b/src/auth.py\n+++ b/src/auth.py\n@@ -1,0 +1,1 @@\n+def get_user_from_request(request): pass\n'
       return 0
     fi
-    if [ "${1:-}" = "pr" ] && [ "${2:-}" = "view" ]; then
-      printf '%s\n' '{"title":"Test auth change","body":"Author body","author":{"login":"alice"},"url":"https://github.com/example/repo/pull/999","baseRefName":"main","headRefName":"feature/auth","headRefOid":"abc123"}'
+    if [ "${1:-}" = "repos/example/repo/pulls/999" ]; then
+      printf '%s\n' '{"title":"Test auth change","body":"Author body","user":{"login":"alice"},"html_url":"https://github.com/example/repo/pull/999","base":{"ref":"main"},"head":{"ref":"feature/auth","sha":"abc123"}}'
+      return 0
+    fi
+
+    return 1
+  }
+
+  github_api_paginate_array() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999/files" ]; then
+      printf '%s\n' '{"filename":"client/src/auth.py"}'
       return 0
     fi
 

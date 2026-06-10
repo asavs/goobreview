@@ -39,26 +39,26 @@ append_pr_metadata() {
   local num="$1"
   local metadata
 
-  metadata=$(gh pr view "$num" --repo "$REPO" --json title,body,author,url,baseRefName,headRefName,headRefOid)
+  metadata=$(github_api_get "repos/$REPO/pulls/$num")
 
   prompt_section "PR Metadata"
   if [ "$(prompt_segment_bool pr_metadata include_title true)" = "true" ]; then
     printf 'Title: %s\n' "$(printf '%s' "$metadata" | jq -r '.title // ""')"
   fi
   if [ "$(prompt_segment_bool pr_metadata include_author true)" = "true" ]; then
-    printf 'Author: %s\n' "$(printf '%s' "$metadata" | jq -r '.author.login // ""')"
+    printf 'Author: %s\n' "$(printf '%s' "$metadata" | jq -r '.user.login // ""')"
   fi
   if [ "$(prompt_segment_bool pr_metadata include_url true)" = "true" ]; then
-    printf 'URL: %s\n' "$(printf '%s' "$metadata" | jq -r '.url // ""')"
+    printf 'URL: %s\n' "$(printf '%s' "$metadata" | jq -r '.html_url // ""')"
   fi
   if [ "$(prompt_segment_bool pr_metadata include_base_branch true)" = "true" ]; then
-    printf 'Base: %s\n' "$(printf '%s' "$metadata" | jq -r '.baseRefName // ""')"
+    printf 'Base: %s\n' "$(printf '%s' "$metadata" | jq -r '.base.ref // ""')"
   fi
   if [ "$(prompt_segment_bool pr_metadata include_head_branch true)" = "true" ]; then
-    printf 'Head: %s\n' "$(printf '%s' "$metadata" | jq -r '.headRefName // ""')"
+    printf 'Head: %s\n' "$(printf '%s' "$metadata" | jq -r '.head.ref // ""')"
   fi
   if [ "$(prompt_segment_bool pr_metadata include_head_sha true)" = "true" ]; then
-    printf 'Head SHA: %s\n' "$(printf '%s' "$metadata" | jq -r '.headRefOid // ""')"
+    printf 'Head SHA: %s\n' "$(printf '%s' "$metadata" | jq -r '.head.sha // ""')"
   fi
 
   if [ "$(prompt_segment_bool pr_metadata include_description false)" = "true" ]; then
@@ -70,13 +70,14 @@ append_pr_metadata() {
 append_ci_status() {
   local ci_state="$1"
   local num="$2"
+  local head_sha="$3"
   local mode
 
   mode=$(prompt_segment_string ci_status mode one_line)
   prompt_section "CI Status"
   if [ "$mode" = "all_check_summary" ]; then
     printf 'Required-check gate state: %s\n\n' "$ci_state"
-    gh pr checks "$num" --repo "$REPO" 2>>"$LOG_FILE" || true
+    github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || true
     return 0
   fi
 
@@ -90,7 +91,8 @@ write_changed_paths() {
   local num="$1"
   local output_file="$2"
 
-  gh pr diff "$num" --repo "$REPO" --name-only >"$output_file"
+  github_api_paginate_array "repos/$REPO/pulls/$num/files" |
+    jq -r '.filename' >"$output_file"
 }
 
 append_changed_paths() {
@@ -214,7 +216,7 @@ append_diff() {
   local num="$1"
 
   prompt_section "Diff"
-  gh pr diff "$num" --repo "$REPO"
+  github_api_get "repos/$REPO/pulls/$num" "application/vnd.github.diff"
 }
 
 append_response_format() {
@@ -243,7 +245,7 @@ build_review_prompt() {
       append_pr_metadata "$num"
     fi
     if prompt_segment_enabled ci_status; then
-      append_ci_status "$ci_state" "$num"
+      append_ci_status "$ci_state" "$num" "$head_sha"
     fi
     if prompt_segment_enabled changed_paths; then
       append_changed_paths "$changed_paths_file"
@@ -256,7 +258,7 @@ build_review_prompt() {
     fi
     if prompt_segment_enabled all_check_summary; then
       prompt_section "All Check Summary"
-      gh pr checks "$num" --repo "$REPO" 2>>"$LOG_FILE" || true
+      github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || true
     fi
     if prompt_segment_enabled full_file_tree; then
       append_full_file_tree "$worktree_dir"

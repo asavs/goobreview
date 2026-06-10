@@ -142,7 +142,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 ## What The Reviewer Does
 
 1. Acquires a non-blocking `flock`.
-2. Mints a GitHub App installation token (cached in `app_token.json`) and exports it as `GH_TOKEN` so `gh` calls authenticate as the App.
+2. Mints a GitHub App installation token (cached in `app_token.json`) and exports it as `GH_TOKEN` so direct API calls and the final `gh pr review` authenticate as the App.
 3. Lists open non-draft PRs in `REVIEWER_REPO`.
 4. Skips PRs authored by `BOT_LOGIN` (`<app-slug>[bot]`); also skips PRs authored by `REVIEWER_USER` if set.
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.

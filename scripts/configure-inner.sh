@@ -268,7 +268,7 @@ ops_copy_if_missing "$prompt_payload" "$CONFIG_DIR/prompt-payload.example.json" 
 apply_prompt_payload_profile "$prompt_payload" "$payload_profile"
 
 if [ "$create_labels" -eq 1 ]; then
-  ops_require_command gh "GitHub CLI is needed for label creation; setup-vm.sh installs it."
+  ops_require_command curl "curl is needed for App-token label creation; setup-vm.sh installs it."
   if token=$("$APP_TOKEN_SH" 2>/dev/null); then
     GH_TOKEN="$token" "$SCRIPT_DIR/reviewer/ensure-labels.sh"
   else

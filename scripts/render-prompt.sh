@@ -52,7 +52,7 @@ ops_require_file "$REVIEWER_APP_PRIVATE_KEY_PATH" "Set REVIEWER_APP_PRIVATE_KEY_
 if [ ! -s "$REVIEWER_APP_PRIVATE_KEY_PATH" ] || [ ! -r "$REVIEWER_APP_PRIVATE_KEY_PATH" ]; then
   ops_die "Private key is empty or unreadable: $REVIEWER_APP_PRIVATE_KEY_PATH"
 fi
-for cmd in gh jq node tar flock; do
+for cmd in curl jq node tar flock; do
   ops_require_command "$cmd" "Run scripts/setup-vm.sh first."
 done
 

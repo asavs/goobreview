@@ -27,7 +27,7 @@ prepare_review_worktree() {
   extracted="$tmp/root"
   mkdir -p "$extracted"
 
-  if ! gh api -H "Accept: application/vnd.github+json" "repos/$REPO/tarball/$head_sha" >"$archive" 2>>"$LOG_FILE"; then
+  if ! github_api_get "repos/$REPO/tarball/$head_sha" >"$archive" 2>>"$LOG_FILE"; then
     rm -rf "$tmp"
     return 1
   fi

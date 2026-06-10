@@ -69,7 +69,7 @@ For Ubuntu, follow the current official apt instructions from the GitHub CLI doc
 gh --version
 ```
 
-GoobReview does not call `gh auth login`. The reviewer authenticates as a GitHub App using a short-lived installation token minted at runtime from a private key; `gh` picks up the token via `GH_TOKEN`. See [github-app-setup.md](github-app-setup.md) for App registration.
+GoobReview does not call `gh auth login`. Setup, tuning, prompt rendering, and basic PR metadata reads use GitHub App-token API calls directly. Posting the final PR review still uses `gh pr review`, with `gh` picking up the short-lived installation token via `GH_TOKEN`. See [github-app-setup.md](github-app-setup.md) for App registration.
 
 ## Install Gemini CLI
 

@@ -33,6 +33,8 @@ CONFIG_DIR="${REVIEWER_CONFIG_DIR:-$REPO_DIR/config}"
 # shellcheck disable=SC1091
 . "$LIB_DIR/gemini.sh"
 # shellcheck disable=SC1091
+. "$LIB_DIR/github-api.sh"
+# shellcheck disable=SC1091
 . "$LIB_DIR/github.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/output.sh"
@@ -116,11 +118,11 @@ fi
 BOT_LOGIN="${REVIEWER_APP_SLUG}[bot]"
 
 if [ -n "$ONLY_PR" ] && { [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; }; then
-  PRS=$(gh pr view "$ONLY_PR" --repo "$REPO" --json number,author,headRefOid \
-    --jq '[.number, .author.login, .headRefOid] | @tsv')
+  PRS=$(github_api_get "repos/$REPO/pulls/$ONLY_PR" |
+    jq -r '[.number, .user.login, .head.sha] | @tsv')
 else
-  PRS=$(gh pr list --repo "$REPO" --state open --json number,author,headRefOid,isDraft \
-    --jq '.[] | select(.isDraft == false) | [.number, .author.login, .headRefOid] | @tsv')
+  PRS=$(github_api_paginate_array "repos/$REPO/pulls?state=open" |
+    jq -r 'select(.draft == false) | [.number, .user.login, .head.sha] | @tsv')
 fi
 
 review_actions=0
@@ -138,8 +140,9 @@ while IFS=$'\t' read -r num author head_sha; do
   fi
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
-    existing=$(gh api "repos/$REPO/pulls/$num/reviews" \
-      --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and .commit_id == \"$head_sha\")] | length")
+    existing=$(github_api_paginate_array "repos/$REPO/pulls/$num/reviews" |
+      jq -s --arg bot "$BOT_LOGIN" --arg head "$head_sha" \
+        '[.[] | select(.user.login == $bot and .commit_id == $head)] | length')
     if [ "$existing" -gt 0 ]; then
       log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, skipping"
       continue
@@ -174,7 +177,7 @@ while IFS=$'\t' read -r num author head_sha; do
           continue
         fi
         log "PR #$num@$head_sha: CI is failing, posting REQUEST_CHANGES without Gemini"
-        ci_summary=$(gh pr checks "$num" --repo "$REPO" 2>>"$LOG_FILE" || true)
+        ci_summary=$(github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || true)
         ci_failure_body=$(cat <<EOF
 CI is failing on this commit. Fix the failing job(s) and push a new commit - I will re-review on the new head SHA.
 

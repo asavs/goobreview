@@ -31,5 +31,5 @@ apply_review_labels() {
     | unique
     | {labels: .}')
 
-  printf '%s' "$labels_json" | gh api -X POST "repos/$REPO/issues/$num/labels" --input - >/dev/null 2>>"$LOG_FILE"
+  github_api_post_json "repos/$REPO/issues/$num/labels" "$labels_json" >/dev/null 2>>"$LOG_FILE"
 }
