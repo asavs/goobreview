@@ -228,8 +228,6 @@ echo "[register-app] Key + App config written on \$(hostname)."
 REMOTE
 )"
 
-INSTALL_URL="https://github.com/apps/$APP_SLUG/installations/new"
-
 cat <<EOF
 
 ============================================================
@@ -254,7 +252,7 @@ else
   cat <<TARGET
 One step left: install the App on your target repo.
 
-  $INSTALL_URL
+  https://github.com/apps/$APP_SLUG/installations/new
 TARGET
 fi)
 
