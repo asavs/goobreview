@@ -26,6 +26,8 @@ run_sensor "$SCRIPT_DIR/preflight/gcloud.sh"
 printf '\n'
 run_sensor "$SCRIPT_DIR/preflight/vm.sh"
 printf '\n'
+run_sensor "$SCRIPT_DIR/preflight/vm-discovery.sh"
+printf '\n'
 run_sensor "$SCRIPT_DIR/preflight/app.sh"
 printf '\n'
 run_sensor "$SCRIPT_DIR/preflight/config.sh"

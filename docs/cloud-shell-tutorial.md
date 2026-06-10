@@ -18,6 +18,13 @@ bash scripts/status.sh
 ```
 
 It prints the current GCloud, VM, GitHub App, config, and runtime state with a recommended next action.
+It also runs a read-only VM discovery pass across accessible projects using
+`gcloud compute instances list`, which can help you find an existing
+GoobReview VM without creating anything. Run only that helper with:
+
+```bash
+bash scripts/discover-vms.sh
+```
 
 ## 1. Run the bootstrap script
 

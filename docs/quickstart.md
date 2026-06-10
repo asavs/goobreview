@@ -12,7 +12,11 @@ At any point, run:
 bash scripts/status.sh
 ```
 
-It summarizes local config, dry-run/scheduler state, and the active GCloud project/billing readiness so you can see which setup step is next.
+It summarizes local config, dry-run/scheduler state, active GCloud project/billing readiness, and likely existing GoobReview VMs visible to your account. To run only the read-only VM search:
+
+```bash
+bash scripts/discover-vms.sh
+```
 
 If you can't use Cloud Shell, see the [Manual VM Setup](#manual-vm-setup) appendix at the end of this document.
 

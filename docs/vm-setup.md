@@ -31,6 +31,16 @@ gcloud compute instances create goobreview-1 \
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 ```
 
+To look for an existing GoobReview VM before creating anything, run the
+read-only discovery helper from the Cloud Shell checkout:
+
+```bash
+bash scripts/discover-vms.sh
+```
+
+It uses ordinary `gcloud compute instances list` calls across accessible
+projects and zones, filtering for likely GoobReview instance names.
+
 `e2-micro` (2 vCPU, 1 GB RAM) in `us-central1`, `us-west1`, or `us-east1` (excluding northern Virginia) is covered by GCP's always-free tier - one instance and 30 GB standard disk per month. Gemini CLI can spike past 1 GB during a review, so `scripts/setup-vm.sh` configures a 2 GB swap file by default; set `GOOBREVIEW_SWAP_SIZE=0` to skip if you're on a larger machine.
 
 Keep firewall exposure minimal. The reviewer needs outbound HTTPS and inbound SSH only.
