@@ -23,6 +23,7 @@ if [ -f "$STATE_FILE" ]; then
 fi
 
 target_repo="${GOOBREVIEW_TARGET_REPO:-}"
+port="${GOOBREVIEW_REGISTER_PORT:-}"
 positionals=()
 
 usage() {
@@ -32,6 +33,7 @@ Usage: bash scripts/register-app.sh [options] [VM_NAME] [ZONE]
 Options:
   --repo OWNER/REPO   Poll for the GitHub App installation on this repo and
                       pre-fill REVIEWER_REPO + REVIEWER_APP_INSTALLATION_ID.
+  --port PORT         Use a specific local Web Preview port.
   -h, --help          Show this help.
 EOF
 }
@@ -43,6 +45,14 @@ while [ "$#" -gt 0 ]; do
         ops_die "--repo requires OWNER/REPO."
       fi
       target_repo="$2"
+      shift 2
+      continue
+      ;;
+    --port)
+      if [ "$#" -lt 2 ]; then
+        ops_die "--port requires a numeric port."
+      fi
+      port="$2"
       shift 2
       continue
       ;;
@@ -74,7 +84,6 @@ fi
 
 VM_NAME="${positionals[0]:-${GOOBREVIEW_VM_NAME:-goobreview-1}}"
 ZONE="${positionals[1]:-${GOOBREVIEW_ZONE:-us-central1-a}}"
-PORT="${GOOBREVIEW_REGISTER_PORT:-8080}"
 VM_KEY_PATH="${REVIEWER_APP_PRIVATE_KEY_PATH:-/var/lib/goobreview/example/app-key.pem}"
 VM_ENV_PATH="${REVIEWER_ENV_FILE:-/opt/goobreview/example/config/reviewer.env}"
 VM_EXAMPLE_ENV_PATH="/opt/goobreview/example/config/reviewer.env.example"
@@ -82,7 +91,13 @@ VM_EXAMPLE_ENV_PATH="/opt/goobreview/example/config/reviewer.env.example"
 ops_require_command node "In Cloud Shell, run 'sudo apt-get install -y nodejs' or use setup-vm.sh's install path."
 ops_require_command gcloud "Run from Cloud Shell or install the gcloud CLI."
 ops_require_command jq "In Cloud Shell, run 'sudo apt-get install -y jq'."
-ops_validate_uint GOOBREVIEW_REGISTER_PORT "$PORT"
+if [ -n "$port" ]; then
+  ops_validate_uint GOOBREVIEW_REGISTER_PORT "$port"
+else
+  port="$(node -e "const net=require('node:net');const s=net.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close();});s.on('error',err=>{console.error(err.message);process.exit(1);});")"
+  ops_validate_uint GOOBREVIEW_REGISTER_PORT "$port"
+fi
+PORT="$port"
 ops_require_nonempty "VM name" "$VM_NAME"
 ops_require_nonempty "Zone" "$ZONE"
 if [ -n "$target_repo" ]; then

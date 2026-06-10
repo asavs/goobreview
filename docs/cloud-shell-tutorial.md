@@ -98,7 +98,7 @@ bash scripts/register-app.sh --repo OWNER/REPO YOUR_VM_NAME YOUR_ZONE
 
 This starts a tiny local server. Keep the terminal open while you use the browser page. The walkthrough is:
 
-1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port 8080**.
+1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port PORT_FROM_THE_TERMINAL**.
 2. In the new browser tab, click through to the **pre-filled GitHub form** (it already has the name, homepage, webhook setting, and the five permissions set). At the bottom click **Create GitHub App**.
 3. On the App's settings page that loads, click **Generate a private key** to download the `.pem`, and note the **App ID** at the top.
 4. Back on the Web Preview page, upload the `.pem` and paste the App ID. After it verifies, click **Install ... on a repo ->** and pick your target repo. If you passed `--repo`, keep the helper page open until it reports the installation ID.

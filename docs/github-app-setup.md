@@ -25,7 +25,7 @@ The bootstrap step saves the selected VM name and zone in `.goobreview-cloud-she
 bash scripts/register-app.sh --repo OWNER/REPO YOUR_VM_NAME YOUR_ZONE
 ```
 
-The script spins up a tiny local web server on port 8080. You open Cloud Shell's **Web Preview** at that port and the page walks you through two steps:
+The script spins up a tiny local web server and prints the exact Cloud Shell Web Preview port. You open Cloud Shell's **Web Preview** at that port and the page walks you through two steps. To force a port, pass `--port PORT` or set `GOOBREVIEW_REGISTER_PORT`.
 
 1. **Create the App on GitHub.** A button links you to GitHub's App-creation form with name, homepage, description, webhook setting, and all five permissions pre-filled from `config/app-manifest.json`. You click **Create GitHub App** at the bottom of the form, then on the resulting settings page click **Generate a private key** (the `.pem` downloads) and note the **App ID** at the top.
 2. **Upload the key back to the helper.** The same Web Preview page has a file picker for the `.pem` and a field for the App ID. The helper signs a JWT to verify the key, looks up the App's slug via the GitHub API, writes `app-key.pem` to the VM at `/var/lib/goobreview/example/app-key.pem`, and pre-populates `REVIEWER_APP_ID` in `config/reviewer.env`. The success page then links you to **Install on a repo**, where you pick the target repository. If you passed `--repo`, keep the helper page open after installing; it polls the App installation endpoint and writes `REVIEWER_REPO` plus `REVIEWER_APP_INSTALLATION_ID` when GitHub reports the install.
