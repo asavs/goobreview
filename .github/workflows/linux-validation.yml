@@ -41,6 +41,9 @@ jobs:
       - name: Reviewer fixtures
         run: bash scripts/reviewer/tests/run-fixtures.sh
 
+      - name: Preflight fixtures
+        run: bash scripts/preflight/tests/run-fixtures.sh
+
       - name: JSON validation
         run: |
           set -euo pipefail
