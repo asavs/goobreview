@@ -13,7 +13,7 @@ The setup intentionally pauses for browser-only steps. When it does, finish the 
 
 The Cloud Shell bootstrap path expects this template checkout to be readable without interactive credentials from the VM. If you made a private template copy, either keep it public during bootstrap or use the manual VM setup path.
 
-At any point, run:
+At any point, Gemini can run:
 
 ```bash
 bash scripts/status.sh
@@ -28,29 +28,20 @@ GoobReview VM without creating anything. Run only that helper with:
 bash scripts/discover-vms.sh
 ```
 
-## 1. Run the bootstrap script
+## 1. Let Gemini run the bootstrap script
+
+Open Gemini in Cloud Shell:
 
 ```bash
-bash scripts/bootstrap-gcp.sh
+gemini
 ```
 
-This is the first command to run. It checks your Google Cloud project and billing state, then walks you through whatever is missing:
+Then ask it to set up GoobReview from this checkout. Gemini should run the
+read-only sensors, choose the default VM shape, and execute the flag-driven
+scripts for you. The shell commands below are shown so you can see what Gemini
+is doing; use them yourself only if you are taking the manual path.
 
-- If your active project is Cloud Shell's temporary `cloudshell-NNNN` project, it offers to create a normal project.
-- If your selected project does not exist, it offers to create it.
-- If your selected project has billing disabled, it offers to link billing.
-- If it cannot find a usable Cloud Billing account, it sends you to https://console.cloud.google.com/billing and tells you to rerun the same command afterward.
-
-The script looks for billing accounts directly, and can also infer one from an existing project that already has billing enabled. Cloud Shell has Gemini preinstalled, so if the billing page is confusing, type `gemini` and ask it to guide you through the Google Cloud console step.
-
-You'll be asked for three things (defaults shown in brackets):
-
-- **GCP project ID** - defaults to whatever `gcloud config get-value project` returns, or a new project ID if the script is creating one
-- **Zone** - defaults to `us-central1-a`
-- **VM name** - defaults to `goobreview-1`
-
-If you are using Gemini to drive the setup, it should use the flag-driven form
-after confirming the values with you:
+Gemini's first provisioning command is:
 
 ```bash
 bash scripts/bootstrap-gcp.sh \
@@ -58,6 +49,27 @@ bash scripts/bootstrap-gcp.sh \
   --zone us-central1-a \
   --vm-name goobreview-1 \
   --yes
+```
+
+The bootstrap script checks your Google Cloud project and billing state, then handles whatever is missing:
+
+- If your active project is Cloud Shell's temporary `cloudshell-NNNN` project, it offers to create a normal project.
+- If your selected project does not exist, it offers to create it.
+- If your selected project has billing disabled, it offers to link billing.
+- If it cannot find a usable Cloud Billing account, it sends you to https://console.cloud.google.com/billing and tells you to rerun the same command afterward.
+
+The script looks for billing accounts directly, and can also infer one from an existing project that already has billing enabled. If the billing page is confusing, stay in Gemini and ask it to guide you through the Google Cloud console step.
+
+Gemini should only ask you for choices that cannot be inferred. The default values are:
+
+- **GCP project ID** - defaults to whatever `gcloud config get-value project` returns, or a new project ID if the script is creating one
+- **Zone** - defaults to `us-central1-a`
+- **VM name** - defaults to `goobreview-1`
+
+Manual fallback:
+
+```bash
+bash scripts/bootstrap-gcp.sh
 ```
 
 A billing account is required to enable Compute Engine, but the default GoobReview VM is an `e2-micro` in `us-central1`, which runs within GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) (1 instance + 30 GB standard disk per month). You won't be charged unless you bump to a larger machine, run multiple VMs, or move to a non-free region. New Google Cloud accounts also get $300 in 90-day credits.
