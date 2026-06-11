@@ -39,7 +39,7 @@ append_pr_metadata() {
   local num="$1"
   local metadata
 
-  metadata=$(github_api_get "repos/$REPO/pulls/$num")
+  metadata=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE") || return 1
 
   prompt_section "PR Metadata"
   if [ "$(prompt_segment_bool pr_metadata include_title true)" = "true" ]; then
@@ -91,7 +91,7 @@ write_changed_paths() {
   local num="$1"
   local output_file="$2"
 
-  github_api_paginate_array "repos/$REPO/pulls/$num/files" |
+  github_api_paginate_array "repos/$REPO/pulls/$num/files" 2>>"$LOG_FILE" |
     jq -r '.filename' >"$output_file"
 }
 
@@ -216,7 +216,7 @@ append_diff() {
   local num="$1"
 
   prompt_section "Diff"
-  github_api_get "repos/$REPO/pulls/$num" "application/vnd.github.diff"
+  github_api_get "repos/$REPO/pulls/$num" "application/vnd.github.diff" 2>>"$LOG_FILE"
 }
 
 append_response_format() {
@@ -230,50 +230,59 @@ build_review_prompt() {
   local ci_state="${3:-unknown}"
   local head_sha="${4:-}"
   local worktree_dir="${5:-}"
-  local changed_paths_file guidance_paths_file
+  local changed_paths_file guidance_paths_file status
 
   changed_paths_file=$(mktemp)
   guidance_paths_file=$(mktemp)
+  status=0
 
-  write_changed_paths "$num" "$changed_paths_file"
-  collect_relevant_guidance_paths "$changed_paths_file" "$guidance_paths_file"
+  if ! write_changed_paths "$num" "$changed_paths_file"; then
+    rm -f "$changed_paths_file" "$guidance_paths_file"
+    return 1
+  fi
+  if ! collect_relevant_guidance_paths "$changed_paths_file" "$guidance_paths_file"; then
+    rm -f "$changed_paths_file" "$guidance_paths_file"
+    return 1
+  fi
 
-  {
-    if prompt_segment_enabled personality; then
-      cat "$PERSONALITY_FILE"
-    fi
-    if prompt_segment_enabled pr_metadata; then
-      append_pr_metadata "$num"
-    fi
-    if prompt_segment_enabled ci_status; then
-      append_ci_status "$ci_state" "$num" "$head_sha"
-    fi
-    if prompt_segment_enabled changed_paths; then
-      append_changed_paths "$changed_paths_file"
-    fi
-    if prompt_segment_enabled relevant_guidance; then
-      append_relevant_guidance "$guidance_paths_file" "$worktree_dir"
-    fi
-    if prompt_segment_enabled source_snapshot_hint; then
-      append_source_snapshot_hint
-    fi
-    if prompt_segment_enabled all_check_summary; then
+  : >"$output_prompt_file"
+  if [ "$status" -eq 0 ] && prompt_segment_enabled personality; then
+    cat "$PERSONALITY_FILE" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled pr_metadata; then
+    append_pr_metadata "$num" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled ci_status; then
+    append_ci_status "$ci_state" "$num" "$head_sha" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled changed_paths; then
+    append_changed_paths "$changed_paths_file" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled relevant_guidance; then
+    append_relevant_guidance "$guidance_paths_file" "$worktree_dir" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled source_snapshot_hint; then
+    append_source_snapshot_hint >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled all_check_summary; then
+    {
       prompt_section "All Check Summary"
       github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || true
-    fi
-    if prompt_segment_enabled full_file_tree; then
-      append_full_file_tree "$worktree_dir"
-    fi
-    if prompt_segment_enabled selected_file_contents; then
-      append_selected_file_contents "$worktree_dir"
-    fi
-    if prompt_segment_enabled diff; then
-      append_diff "$num"
-    fi
-    if prompt_segment_enabled response_format; then
-      append_response_format
-    fi
-  } >"$output_prompt_file"
+    } >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled full_file_tree; then
+    append_full_file_tree "$worktree_dir" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled selected_file_contents; then
+    append_selected_file_contents "$worktree_dir" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled diff; then
+    append_diff "$num" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled response_format; then
+    append_response_format >>"$output_prompt_file" || status=1
+  fi
 
   rm -f "$changed_paths_file" "$guidance_paths_file"
+  return "$status"
 }
