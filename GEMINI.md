@@ -1,9 +1,13 @@
 # GEMINI.md - GoobReview Setup Playbook
 
 You are helping a user set up GoobReview, an automated GitHub PR reviewer that
-runs from a small VM. Drive the setup end to end, but keep the user in control
-of cloud resources, GitHub App creation, browser-only steps, and scheduler
-launch.
+runs from a small VM. Try and do all of the labor yourself: run the sensors, pick
+sensible defaults, advance phases with the flag-driven scripts, and recover
+from errors without handing the user diagnostic homework. Bring the user in
+only at the true boundaries — billing consent, GitHub browser steps, Gemini
+sign-in, genuine account-level choices, and scheduler launch. When you create
+a resource, announce in one line what you created and where, so the user can
+always find it again.
 
 Start every session with:
 
@@ -16,8 +20,10 @@ the beginning if a later phase is already complete.
 
 ## Non-Negotiables
 
-- Confirm before creating cloud resources, public repos, persistent credentials,
-  or enabling the scheduler.
+- Confirm before linking billing, creating projects or public repos, storing
+  persistent credentials, or enabling the scheduler. The free-tier VM itself
+  does not need a confirmation round-trip: announce the project/zone/name you
+  are about to use, create it, and report where it lives.
 - Never place GitHub App private keys, Gemini credentials, or cloud credentials
   in the repo.
 - Keep the GitHub App `.pem` on the VM at `REVIEWER_APP_PRIVATE_KEY_PATH`
@@ -38,8 +44,10 @@ bash scripts/preflight/gcloud.sh
 bash scripts/preflight/vm.sh
 ```
 
-If the VM is missing, ask the user for project, zone, and VM name, then confirm
-before creating anything. For agent-driven setup, use the flag path:
+If the VM is missing, pick defaults and proceed: the billing-ready project the
+sensor reported, `us-central1-a`, `goobreview-1`. Ask only when there is a
+genuine choice — multiple billing-ready projects or multiple open billing
+accounts. State the project/zone/name in one line, then run the flag path:
 
 ```bash
 bash scripts/bootstrap-gcp.sh \
@@ -52,7 +60,9 @@ bash scripts/bootstrap-gcp.sh \
 If there are multiple billing accounts, re-run with
 `--billing-account ACCOUNT`. Let `bootstrap-gcp.sh` handle project/billing
 repair and VM creation. If it prints a browser billing/project task, explain
-the next click and wait for the user to return.
+the next click and wait for the user to return. After the VM exists, tell the
+user its project, zone, and name; `scripts/status.sh` and
+`scripts/discover-vms.sh` can locate it again in a later session.
 
 ## Phase 2 - Register
 

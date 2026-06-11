@@ -66,6 +66,7 @@ If you fork instead, the cleanup workflow won't fire until a push to `main`. Eit
 - Do not hard-code private repository names in generic docs or examples.
 - Keep local config ignored so `sync-worktree.sh` can safely update clean daemon checkouts.
 - Avoid adding dependencies unless they materially improve reliability.
+- Onboarding changes must follow the design principles in `AGENTS.md` & `README.md`
 
 ## Testing Real Reviews
 
@@ -75,4 +76,3 @@ Use `REVIEWER_DRY_RUN=1` first. Only post a real review after:
 - Gemini CLI works headlessly from the daemon checkout.
 - The configured target repo is correct.
 - Required check names match GitHub check-run display names.
-

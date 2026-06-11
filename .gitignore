@@ -4,3 +4,4 @@ config/prompt-payload.json
 .goobreview-cloud-shell.env
 *.log
 .DS_Store
+.claude/
