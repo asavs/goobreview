@@ -266,6 +266,7 @@ JSON
 
   REPO="example/repo"
 
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
   github_api_get() {
     if [ "${1:-}" = "repos/example/repo/pulls/999" ] && [ "${2:-}" = "application/vnd.github.diff" ]; then
       printf 'diff --git a/src/auth.py b/src/auth.py\n+++ b/src/auth.py\n@@ -1,0 +1,1 @@\n+def get_user_from_request(request): pass\n'
@@ -279,6 +280,7 @@ JSON
     return 1
   }
 
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
   github_api_paginate_array() {
     if [ "${1:-}" = "repos/example/repo/pulls/999/files" ]; then
       printf '%s\n' '{"filename":"client/src/auth.py"}'
@@ -312,6 +314,84 @@ JSON
   assert_not_contains "prompt omits full file tree" "Full PR-Head File Tree" "$prompt_file"
   assert_not_contains "prompt omits selected file contents" "Selected PR-Head File Contents" "$prompt_file"
   assert_not_contains "prompt omits all-check summary" "All Check Summary" "$prompt_file"
+}
+
+test_prompt_failure_propagates() {
+  local prompt_file worktree_dir
+
+  prompt_file="$TMP_ROOT/prompt-failure.md"
+  worktree_dir="$TMP_ROOT/worktree-failure"
+
+  PERSONALITY_FILE="$TMP_ROOT/personality-failure.md"
+  PROMPT_FILE="$TMP_ROOT/engine-failure.md"
+  PROMPT_PAYLOAD_FILE="$TMP_ROOT/prompt-payload-failure.json"
+  printf '## Role\nBe sharp.\n' > "$PERSONALITY_FILE"
+  printf 'First line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+  cat > "$PROMPT_PAYLOAD_FILE" <<'JSON'
+{
+  "segments": {
+    "personality": {"enabled": true},
+    "pr_metadata": {"enabled": false},
+    "ci_status": {"enabled": false},
+    "changed_paths": {"enabled": true},
+    "relevant_guidance": {"enabled": false},
+    "source_snapshot_hint": {"enabled": false},
+    "all_check_summary": {"enabled": false},
+    "full_file_tree": {"enabled": false},
+    "selected_file_contents": {"enabled": false},
+    "diff": {"enabled": true},
+    "response_format": {"enabled": true}
+  }
+}
+JSON
+  mkdir -p "$worktree_dir"
+  REPO="example/repo"
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
+  github_api_get() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999" ] && [ "${2:-}" = "application/vnd.github.diff" ]; then
+      return 1
+    fi
+
+    return 1
+  }
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
+  github_api_paginate_array() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999/files" ]; then
+      printf '%s\n' '{"filename":"client/src/auth.py"}'
+      return 0
+    fi
+
+    return 1
+  }
+
+  if build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"; then
+    fail "prompt build failure is propagated"
+  fi
+  pass "prompt build failure is propagated"
+}
+
+test_invalid_verdict_state() {
+  local artifact count
+
+  STATE_DIR="$TMP_ROOT/invalid-state"
+  mkdir -p "$STATE_DIR"
+
+  assert_eq "missing invalid verdict count is zero" "0" "$(invalid_verdict_attempt_count 17 abc123)"
+  count=$(record_invalid_verdict_attempt 17 abc123)
+  assert_eq "invalid verdict first attempt is recorded" "1" "$count"
+  count=$(record_invalid_verdict_attempt 17 abc123)
+  assert_eq "invalid verdict attempts increment per head" "2" "$count"
+  assert_eq "different head has separate invalid verdict count" "0" "$(invalid_verdict_attempt_count 17 def456)"
+
+  artifact=$(write_invalid_verdict_artifact 17 abc123 INVALID_VERDICT $'NOPE\nbody')
+  assert_contains "invalid artifact records PR" "PR: #17" "$artifact"
+  assert_contains "invalid artifact records head SHA" "Head SHA: abc123" "$artifact"
+  assert_contains "invalid artifact persists rejected output" "NOPE" "$artifact"
+
+  clear_invalid_verdict_attempts 17 abc123
+  assert_eq "invalid verdict attempts clear after valid output" "0" "$(invalid_verdict_attempt_count 17 abc123)"
 }
 
 test_gemini_invocation_isolates_review_context() {
@@ -358,6 +438,8 @@ test_gemini_invocation_isolates_review_context() {
 
 test_output_parser
 test_prompt_assembly
+test_prompt_failure_propagates
+test_invalid_verdict_state
 test_gemini_invocation_isolates_review_context
 test_ci_states
 

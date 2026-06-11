@@ -23,6 +23,26 @@ function die(msg) {
   process.exit(1);
 }
 
+function redactSensitive(value) {
+  if (Array.isArray(value)) {
+    return value.map(redactSensitive);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      /token/i.test(key) ? "[REDACTED]" : redactSensitive(entry),
+    ]),
+  );
+}
+
+function safeJsonForLog(value) {
+  return JSON.stringify(redactSensitive(value));
+}
+
 function requireEnv(name) {
   const v = process.env[name];
   if (!v) die(`missing required env: ${name}`);
@@ -196,7 +216,7 @@ async function mintInstallationToken(jwt, id) {
   }
   const tokenJson = await tokenResp.json();
   if (!tokenJson.token || !tokenJson.expires_at) {
-    die(`unexpected token response: ${JSON.stringify(tokenJson).slice(0, 300)}`);
+    die(`unexpected token response: ${safeJsonForLog(tokenJson).slice(0, 300)}`);
   }
   return tokenJson;
 }
