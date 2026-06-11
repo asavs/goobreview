@@ -15,9 +15,46 @@ cat > "$FAKE_BIN/gcloud" <<'FAKE_GCLOUD'
 set -euo pipefail
 
 fixture="${GCLOUD_FIXTURE:-}"
-[ -n "$fixture" ] || { echo "GCLOUD_FIXTURE is required" >&2; exit 2; }
+checkout_fixture="${CHECKOUT_GCLOUD_FIXTURE:-}"
+[ -n "$fixture$checkout_fixture" ] || { echo "GCLOUD_FIXTURE or CHECKOUT_GCLOUD_FIXTURE is required" >&2; exit 2; }
 
 cmd="$1:$2"
+if [ -n "$checkout_fixture" ]; then
+  case "$cmd" in
+    config:get-value)
+      echo "alpha-project"
+      exit 0
+      ;;
+    compute:instances)
+      case "$checkout_fixture" in
+        unreachable) exit 1 ;;
+        *) echo "goobreview-1" ; exit 0 ;;
+      esac
+      ;;
+    compute:ssh)
+      case "$checkout_fixture" in
+        aligned)
+          cat "$CHECKOUT_VM_REPORT"
+          ;;
+        dirty-vm)
+          sed 's/vm_dirty=false/vm_dirty=true/; s/vm_status_count=0/vm_status_count=1/' "$CHECKOUT_VM_REPORT"
+          ;;
+        diverged-vm)
+          sed 's/vm_head=.*/vm_head=0000000000000000000000000000000000000000/' "$CHECKOUT_VM_REPORT"
+          ;;
+        unreachable)
+          exit 1
+          ;;
+        *)
+          echo "unexpected CHECKOUT_GCLOUD_FIXTURE: $checkout_fixture" >&2
+          exit 2
+          ;;
+      esac
+      exit 0
+      ;;
+  esac
+fi
+
 case "$cmd" in
   config:get-value)
     case "$fixture" in
@@ -120,6 +157,64 @@ run_gcloud_preflight() {
     bash "$PREFLIGHT_DIR/gcloud.sh" "$@" > "$out"
 }
 
+setup_checkout_repo() {
+  local name="$1" branch="${2:-main}" repo
+  repo="$TMP_ROOT/$name"
+
+  mkdir -p "$repo/scripts/preflight" "$repo/scripts/lib"
+  cp "$PREFLIGHT_DIR/checkout.sh" "$repo/scripts/preflight/checkout.sh"
+  cp "$PREFLIGHT_DIR/../lib/ops.sh" "$repo/scripts/lib/ops.sh"
+
+  git -C "$repo" init -b "$branch" >/dev/null
+  git -C "$repo" config user.email fixtures@example.test
+  git -C "$repo" config user.name "Fixture Tests"
+  printf 'hello\n' > "$repo/README.md"
+  git -C "$repo" add README.md scripts/preflight/checkout.sh scripts/lib/ops.sh
+  git -C "$repo" commit -m "initial" >/dev/null
+  git -C "$repo" remote add origin https://github.com/asavschaeffer/goobreview
+
+  printf '%s' "$repo"
+}
+
+write_vm_report_for_repo() {
+  local repo="$1" out="$2" dirty="${3:-false}" head
+
+  head="$(git -C "$repo" rev-parse --verify HEAD)"
+  cat > "$out" <<EOF
+vm_reachable=true
+vm_checkout_present=true
+vm_branch=$(git -C "$repo" symbolic-ref --quiet --short HEAD)
+vm_head=$head
+vm_origin=https://github.com/asavschaeffer/goobreview
+vm_status_count=0
+vm_dirty=$dirty
+EOF
+}
+
+run_checkout_preflight() {
+  local repo="$1" out="$2"
+  shift 2
+
+  PATH="$FAKE_BIN:$PATH" \
+    bash "$repo/scripts/preflight/checkout.sh" "$@" > "$out"
+}
+
+run_checkout_preflight_with_setup_url() {
+  local repo="$1" out="$2" setup_url="$3"
+  shift 3
+
+  PATH="$FAKE_BIN:$PATH" GOOBREVIEW_SETUP_VM_URL="$setup_url" \
+    bash "$repo/scripts/preflight/checkout.sh" "$@" > "$out"
+}
+
+run_checkout_preflight_with_vm() {
+  local fixture="$1" repo="$2" out="$3" vm_report="$4"
+  shift 4
+
+  PATH="$FAKE_BIN:$PATH" CHECKOUT_GCLOUD_FIXTURE="$fixture" CHECKOUT_VM_REPORT="$vm_report" \
+    bash "$repo/scripts/preflight/checkout.sh" "$@" > "$out"
+}
+
 assert_contains() {
   local name="$1" needle="$2" file="$3"
 
@@ -198,10 +293,135 @@ test_active_billed_project_with_compute_disabled() {
   assert_contains "delegates compute enablement to bootstrap" "bootstrap-gcp.sh can do this before VM creation" "$out"
 }
 
+test_checkout_aligned_clean() {
+  local repo out
+  repo="$(setup_checkout_repo checkout-aligned main)"
+  out="$TMP_ROOT/checkout-aligned.report"
+
+  run_checkout_preflight "$repo" "$out" --report --strict
+
+  assert_contains "checkout reports clean local state" "local_dirty='false'" "$out"
+  assert_contains "checkout reports matching setup ref" "setup_ref_mismatch='false'" "$out"
+  assert_contains "checkout strict passes" "strict_ok='true'" "$out"
+}
+
+test_checkout_setup_ref_mismatch_fails_strict() {
+  local repo out
+  repo="$(setup_checkout_repo checkout-branch feature-sync)"
+  out="$TMP_ROOT/checkout-branch.report"
+
+  if run_checkout_preflight "$repo" "$out" --report --strict; then
+    fail "checkout setup ref mismatch fails strict"
+  fi
+  assert_contains "checkout detects setup ref mismatch" "setup_ref_mismatch='true'" "$out"
+  pass "checkout setup ref mismatch fails strict"
+}
+
+test_checkout_explicit_setup_url_passes_strict() {
+  local repo out
+  repo="$(setup_checkout_repo checkout-explicit feature-sync)"
+  out="$TMP_ROOT/checkout-explicit.report"
+
+  run_checkout_preflight_with_setup_url "$repo" "$out" \
+    "https://raw.githubusercontent.com/asavschaeffer/goobreview/feature-sync/scripts/setup-vm.sh" \
+    --report --strict
+
+  assert_contains "checkout explicit setup URL clears mismatch" "setup_ref_mismatch='false'" "$out"
+  assert_contains "checkout explicit setup URL strict passes" "strict_ok='true'" "$out"
+}
+
+test_checkout_allows_setup_ref_mismatch_when_requested() {
+  local repo out
+  repo="$(setup_checkout_repo checkout-allowed feature-sync)"
+  out="$TMP_ROOT/checkout-allowed.report"
+
+  run_checkout_preflight "$repo" "$out" --report --strict --allow-setup-ref-mismatch
+
+  assert_contains "checkout still reports allowed setup mismatch" "setup_ref_mismatch='true'" "$out"
+  assert_contains "checkout allowed setup mismatch strict passes" "strict_ok='true'" "$out"
+}
+
+test_checkout_dirty_local_fails_strict() {
+  local repo out
+  repo="$(setup_checkout_repo checkout-dirty main)"
+  printf 'dirty\n' >> "$repo/README.md"
+  out="$TMP_ROOT/checkout-dirty.report"
+
+  if run_checkout_preflight "$repo" "$out" --report --strict; then
+    fail "checkout dirty local fails strict"
+  fi
+  assert_contains "checkout detects dirty local state" "local_dirty='true'" "$out"
+  pass "checkout dirty local fails strict"
+}
+
+test_checkout_vm_aligned() {
+  local repo out vm_report
+  repo="$(setup_checkout_repo checkout-vm-aligned main)"
+  out="$TMP_ROOT/checkout-vm-aligned.report"
+  vm_report="$TMP_ROOT/checkout-vm-aligned.vm"
+  write_vm_report_for_repo "$repo" "$vm_report"
+
+  run_checkout_preflight_with_vm aligned "$repo" "$out" "$vm_report" --report --strict
+
+  assert_contains "checkout reports VM reachable" "vm_reachable='true'" "$out"
+  assert_contains "checkout reports VM alignment" "alignment='true'" "$out"
+  assert_contains "checkout VM strict passes" "strict_ok='true'" "$out"
+}
+
+test_checkout_vm_diverged_fails_strict() {
+  local repo out vm_report
+  repo="$(setup_checkout_repo checkout-vm-diverged main)"
+  out="$TMP_ROOT/checkout-vm-diverged.report"
+  vm_report="$TMP_ROOT/checkout-vm-diverged.vm"
+  write_vm_report_for_repo "$repo" "$vm_report"
+
+  if run_checkout_preflight_with_vm diverged-vm "$repo" "$out" "$vm_report" --report --strict; then
+    fail "checkout VM divergence fails strict"
+  fi
+  assert_contains "checkout reports VM divergence" "alignment='false'" "$out"
+  pass "checkout VM divergence fails strict"
+}
+
+test_checkout_dirty_vm_fails_strict() {
+  local repo out vm_report
+  repo="$(setup_checkout_repo checkout-vm-dirty main)"
+  out="$TMP_ROOT/checkout-vm-dirty.report"
+  vm_report="$TMP_ROOT/checkout-vm-dirty.vm"
+  write_vm_report_for_repo "$repo" "$vm_report"
+
+  if run_checkout_preflight_with_vm dirty-vm "$repo" "$out" "$vm_report" --report --strict; then
+    fail "checkout dirty VM fails strict"
+  fi
+  assert_contains "checkout reports dirty VM" "vm_dirty='true'" "$out"
+  pass "checkout dirty VM fails strict"
+}
+
+test_checkout_unreachable_vm_does_not_fail_strict() {
+  local repo out vm_report
+  repo="$(setup_checkout_repo checkout-vm-unreachable main)"
+  out="$TMP_ROOT/checkout-vm-unreachable.report"
+  vm_report="$TMP_ROOT/checkout-vm-unreachable.vm"
+  write_vm_report_for_repo "$repo" "$vm_report"
+
+  run_checkout_preflight_with_vm unreachable "$repo" "$out" "$vm_report" --report --strict
+
+  assert_contains "checkout reports unchecked VM" "vm_checked='false'" "$out"
+  assert_contains "checkout unreachable VM strict passes" "strict_ok='true'" "$out"
+}
+
 test_no_active_project_lists_billing_ready_projects
 test_no_active_project_with_billing_account_but_no_billed_project
 test_no_active_project_without_billing
 test_active_unbilled_project_points_to_alternative
 test_active_billed_project_with_compute_disabled
+test_checkout_aligned_clean
+test_checkout_setup_ref_mismatch_fails_strict
+test_checkout_explicit_setup_url_passes_strict
+test_checkout_allows_setup_ref_mismatch_when_requested
+test_checkout_dirty_local_fails_strict
+test_checkout_vm_aligned
+test_checkout_vm_diverged_fails_strict
+test_checkout_dirty_vm_fails_strict
+test_checkout_unreachable_vm_does_not_fail_strict
 
 printf 'passed %s preflight fixture assertions\n' "$pass_count"

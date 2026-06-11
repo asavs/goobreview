@@ -148,6 +148,7 @@ EOF
 ops_require_command curl "Run this in Google Cloud Shell, or install curl first."
 ops_require_command git "Run this in Google Cloud Shell, or install git first."
 ops_require_command gcloud "Run this in Google Cloud Shell, or install gcloud first."
+bash "$SCRIPT_DIR/preflight/checkout.sh" --strict
 preflight_source_access
 
 print_billing_setup_help() {

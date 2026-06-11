@@ -91,6 +91,7 @@ VM_EXAMPLE_ENV_PATH="/opt/goobreview/example/config/reviewer.env.example"
 ops_require_command node "Install Node 20 or newer, or use scripts/setup-vm.sh's install path."
 ops_require_command gcloud "Run from Cloud Shell or install the gcloud CLI."
 ops_require_command jq "In Cloud Shell, run 'sudo apt-get install -y jq'."
+bash "$SCRIPT_DIR/preflight/checkout.sh" --strict --allow-setup-ref-mismatch
 if [ -n "$port" ]; then
   ops_validate_uint GOOBREVIEW_REGISTER_PORT "$port"
 else
