@@ -120,13 +120,13 @@ BOT_LOGIN="${REVIEWER_APP_SLUG}[bot]"
 
 if [ -n "$ONLY_PR" ] && { [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; }; then
   if ! PRS=$(github_api_get "repos/$REPO/pulls/$ONLY_PR" 2>>"$LOG_FILE" |
-    jq -r '[.number, .user.login, .head.sha] | @tsv'); then
+    pull_request_queue_rows); then
     log "Failed to fetch requested PR #$ONLY_PR, will retry next tick"
     exit 0
   fi
 else
   if ! PRS=$(github_api_paginate_array "repos/$REPO/pulls?state=open" 2>>"$LOG_FILE" |
-    jq -r 'select(.draft == false) | [.number, .user.login, .head.sha] | @tsv'); then
+    pull_request_queue_rows); then
     log "Failed to list open PRs, will retry next tick"
     exit 0
   fi
@@ -134,12 +134,12 @@ fi
 
 review_actions=0
 
-while IFS=$'\t' read -r num author head_sha; do
+while IFS=$'\t' read -r num author head_sha draft; do
   [ -n "${num:-}" ] || continue
-  [ -n "${head_sha:-}" ] || { log "PR #$num has no head SHA, skipping"; continue; }
-  [ -z "$ONLY_PR" ] || [ "$num" = "$ONLY_PR" ] || continue
-  [ "$author" != "$BOT_LOGIN" ] || continue
-  [ -z "$EXTRA_SKIP_USER" ] || [ "$author" != "$EXTRA_SKIP_USER" ] || continue
+  if skip_reason=$(reviewer_pr_skip_reason "$num" "$author" "$head_sha" "${draft:-false}" "$BOT_LOGIN" "$EXTRA_SKIP_USER" "$ONLY_PR"); then
+    log "$skip_reason"
+    continue
+  fi
 
   if [ "$review_actions" -ge "$MAX_PRS" ]; then
     log "Reached REVIEWER_MAX_PRS=$MAX_PRS, stopping this tick"
