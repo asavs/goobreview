@@ -158,16 +158,16 @@ A billing account is required to enable Compute Engine, even though the
 default VM (e2-micro in us-central1) is intended to stay within GCP's
 always-free tier when you keep the defaults.
 
-Create or attach a Cloud Billing account in the browser:
+Open the Cloud Billing page in your browser and create or attach a billing
+account:
   https://console.cloud.google.com/billing
 
-Cloud Shell has Gemini preinstalled. If you want a guided walkthrough, run:
-  gemini
-and ask:
+If Gemini is driving setup, tell it when the billing step is complete so it can
+rerun this script. If you want help with the browser page, ask Gemini:
   Help me create a Cloud Billing account for a small Compute Engine VM,
-  then come back to this Cloud Shell command.
+  then continue GoobReview setup when I come back.
 
-After billing is active, re-run:
+Manual fallback after billing is active:
   bash scripts/bootstrap-gcp.sh
 MSG
 }
@@ -424,10 +424,10 @@ To finish setup manually:
       https://console.cloud.google.com/projectcreate
       https://console.cloud.google.com/billing
 
-    You can also type 'gemini' in Cloud Shell and ask it to walk you
-    through the Google Cloud billing/project console step.
+    If Gemini is driving setup, return to it after the browser step and say:
+      billing is ready; continue GoobReview setup
 
-Then re-run: bash scripts/bootstrap-gcp.sh
+Manual fallback: bash scripts/bootstrap-gcp.sh
 EOF
       exit 1
     fi
