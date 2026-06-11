@@ -1,6 +1,6 @@
 # GoobReview: Cloud Shell Setup
 
-This walkthrough is the Cloud Shell version of [docs/quickstart.md](quickstart.md). It provisions a small Compute Engine VM, registers the GitHub App, and then sends you through one dry-run review before anything is posted.
+This walkthrough is the canonical setup path. It provisions a small Compute Engine VM, registers the GitHub App, and then sends you through one dry-run review before anything is posted. For deeper detail on the on-VM steps (configure flags, dry-run options, scheduler), see [docs/quickstart.md](quickstart.md); for non-Cloud-Shell setups, see its Manual VM Setup appendix.
 
 You will need:
 

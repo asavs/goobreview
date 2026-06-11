@@ -233,118 +233,32 @@ node scripts/reviewer/lib/app-token.mjs token \
 
 ## Configuration Reference
 
-The reviewer reads three gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` walks you through them interactively; this section is the reference for what each one does.
+The reviewer reads three gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` writes them interactively, and the example files themselves carry the authoritative inline documentation:
 
-When a file is missing, the daemon transparently falls back to the
-committed `.example` version — so a fresh checkout works for a dry run
-without any edits.
+- **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_PERSONALITY_FILE` (no default — the daemon fails loudly when it is unset; `configure.sh` pre-selects `config/personalities/control.md`).
+- **`config/prompt-payload.json`** (from `prompt-payload.example.json`) — which prompt segments Gemini receives. Each segment has an `enabled` flag, description, and example; the example file documents every segment. `configure.sh` offers `minimal`/`lean`/`guided`/`full` presets, with `lean` as the default. Inspect the assembled payload with `scripts/render-prompt.sh 123 --explain`.
+- **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
 
-### `reviewer.env`
+When a file is missing, the daemon transparently falls back to the committed `.example` version, so a fresh checkout works for a dry run without any edits.
 
-Environment for the daemon. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`. Optional runtime and log controls include `REVIEWER_RUNTIME_STATE`, `REVIEWER_LOG_MAX_BYTES`, and `REVIEWER_LOG_ROTATE_KEEP`. See `config/reviewer.env.example` for the full list with inline comments.
-
-### Personality
-
-The reviewer's role, voice, and focus areas. **The main thing you
-customize.** Personalities live in `config/personalities/<name>.md`
-and are committed verbatim — there is no `.example` layer. Select one
-via `REVIEWER_PERSONALITY_FILE` in `reviewer.env` (defaults to
-`config/personalities/control.md`). The selected file is prepended to
-the diff on every review. The engine prompt
-(`scripts/reviewer/review-prompt.md`) only defines the minimal GitHub
-review output format. `config/prompt-payload.json` decides which
-context segments are sent alongside that personality and format.
-
-Available out of the box:
-
-- `control.md` — Role + responsibilities only, no voice. Sensible
-  default for general-purpose review and the research-baseline arm of
-  any A/B comparison.
-- `linus.md` — Opinionated, profane-when-warranted voice on top of the
-  same Role.
-
-To add a new personality, drop a `.md` file in `config/personalities/`
-and point `REVIEWER_PERSONALITY_FILE` at it. To run a dry-run with a
-different personality, override the env var inline:
+Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim and selected via `REVIEWER_PERSONALITY_FILE`. To try one in a dry run without editing config:
 
 ```bash
 REVIEWER_PERSONALITY_FILE=config/personalities/linus.md scripts/dry-run.sh 42
 ```
 
-### `prompt-payload.json`
+The engine prompt at `scripts/reviewer/review-prompt.md` only defines the parsed output contract (first line `APPROVE`/`REQUEST_CHANGES`/`COMMENT`, rest is the review body) — edit it only to change that contract; everything voice-related belongs in a personality file.
 
-Prompt input manifest. Every potential Gemini input stream has:
+### Optional Runtime Switches
 
-- `enabled`: whether the segment is included.
-- `description`: what the segment means.
-- `example`: a small sample so humans can understand what Gemini sees.
+Env vars (set in `reviewer.env` or inline) beyond the required set:
 
-The setup helper offers four presets:
-
-- `minimal`: personality, diff, response format.
-- `lean`: compact PR metadata, CI one-liner, changed paths, relevant guidance paths, read-only source snapshot hint, diff, response format.
-- `guided`: lean plus full relevant guidance docs selected from changed paths.
-- `full`: verbose/MOG-style payload, including author body, all-check summary, full file tree, and selected file contents.
-
-The default example is `lean`. It keeps review attention on the diff
-while still making adjacent source available through Gemini's read-only
-source snapshot tools.
-
-Important segment details:
-
-- PR metadata fields are independently configurable:
-  `include_title`, `include_author`, `include_url`,
-  `include_base_branch`, `include_head_branch`, `include_head_sha`,
-  and `include_description`. The description is `false` by default; if
-  enabled, it is labeled as untrusted author-provided text.
-- `ci_status` is a one-line pass statement by default. Pending or
-  failing required checks stop review before Gemini is called.
-- `relevant_guidance.rules` maps changed path patterns to local docs.
-  Use `paths_only` for a lean prompt, or `full_content` to paste the
-  matching PR-head docs with untrusted framing.
-- `full_file_tree` and `selected_file_contents` are off by default and
-  exist for users who want a verbose repo-aware reviewer.
-
-Render and inspect the exact payload before enabling cron:
-
-```bash
-scripts/render-prompt.sh 123 --explain
-```
-
-### `required-checks.json`
-
-Exact GitHub check-run display names that gate review posting:
-
-```json
-["Unit tests", "Build", "Lint"]
-```
-
-The daemon waits when required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when a required check fails. An empty array means "do not gate" — use that only for initial setup or repos without CI.
-
-### Runtime CI Override (Advanced)
-
-Two env vars let you override the required-check gate without editing `required-checks.json` — useful for one-off dry runs against a different target repo:
-
-- `REVIEWER_REQUIRED_CHECKS_JSON` — a JSON array of check-run name strings, e.g. `["Unit tests","Build"]`. When set and the override flag is enabled, it takes precedence over the file.
-- `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE` — must be `1` to allow the env override to apply. Defaults to `0`; the env var is silently ignored when this is not `1`.
-
-These are intentionally off by default so a stray env var cannot accidentally loosen the gate on a production reviewer.
-
-### Labels (optional)
-
-`scripts/reviewer/ensure-labels.sh` creates or updates three labels in the target repo: `agent-reviewed`, `agent-requested-changes`, and `needs-human-decision`. Review posting does not depend on them.
-
-### Engine Prompt (Advanced)
-
-`scripts/reviewer/review-prompt.md` defines the small output contract
-that `reviewer.sh` parses:
-
-- The first line must be `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`.
-- The remaining text is posted as the GitHub review body.
-
-Edit it only when you are intentionally changing those contracts. For
-voice, role, and focus — pick (or write) a file in
-`config/personalities/` and point `REVIEWER_PERSONALITY_FILE` at it.
+- `REVIEWER_APPLY_LABELS` — apply the helper labels after posting (default `1`; set `0` to disable). `scripts/reviewer/ensure-labels.sh` creates the labels; review posting never depends on them.
+- `REVIEWER_IGNORE_GEMINI_BACKOFF` — set `1` to run even while a Gemini quota backoff (`gemini_backoff_until`) is active. `dry-run.sh` sets this automatically.
+- `REVIEWER_REQUIRED_CHECKS_JSON` + `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE=1` — override the required-check gate from the environment for one-off runs; both must be set, so a stray env var cannot loosen a production gate.
+- `REVIEWER_SYNC_REMOTE`, `REVIEWER_SYNC_BRANCH`, `REVIEWER_SYNC_LOG` — which remote/branch `sync-worktree.sh` tracks (default `origin`/`main`) and where it logs.
+- `REVIEWER_ONLY_PR` — restrict a run (including `merge-gate.sh`) to a single PR number.
+- `REVIEWER_RUNTIME_STATE`, `REVIEWER_LOG_MAX_BYTES`, `REVIEWER_LOG_ROTATE_KEEP` — runtime dir and log rotation controls; see `config/reviewer.env.example`.
 
 ## Known Limits
 

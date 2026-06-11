@@ -26,7 +26,7 @@ State directory (`REVIEWER_STATE`, default `$HOME/.goobreview`) holds: `log.txt`
 
 **Prompt layering** — there are two prompt inputs and they have different owners:
 
-- `config/personalities/*.md` (**committed gallery, the only personality surface**) — each file defines a reviewer's **role, voice, and focus areas**. One is selected at runtime via `REVIEWER_PERSONALITY_FILE` in `reviewer.env` (defaults to `config/personalities/control.md`). Prepended to the diff and review-format prompt. To add or change a personality, drop a `.md` file in this directory and point the env var at it. There is no `personality.md` / `personality.example.md` fallback layer — `reviewer.sh` fails loudly if the selected file is missing.
+- `config/personalities/*.md` (**committed gallery, the only personality surface**) — each file defines a reviewer's **role, voice, and focus areas**. One is selected at runtime via `REVIEWER_PERSONALITY_FILE` in `reviewer.env` (required — the daemon fails loudly when unset; `configure.sh` pre-selects `config/personalities/control.md`). Prepended to the diff and review-format prompt. To add or change a personality, drop a `.md` file in this directory and point the env var at it. There is no `personality.md` / `personality.example.md` fallback layer — `reviewer.sh` fails loudly if the selected file is missing or unset.
 - `scripts/reviewer/review-prompt.md` (**engine, invariant**) — defines the minimal GitHub review event output contract. Parsed by `reviewer.sh`. Edit only if you're changing that contract.
 
 Two contracts that span deployments — **never break these silently:**

@@ -2,11 +2,7 @@
 
 End-to-end setup from a fresh fork to a posting reviewer in about 10 minutes. Assumes one target repository and one reviewer identity.
 
-## 1. Open This Repo In Cloud Shell
-
-Click the **Open in Cloud Shell** button on the [project README](../README.md) (or run `git clone https://github.com/asavschaeffer/goobreview.git` in any Cloud Shell session). Cloud Shell is a browser terminal with `gcloud` pre-authenticated to your Google account.
-
-If you created a private copy of this template, do not use the one-click Cloud Shell bootstrap yet. The VM must fetch `setup-vm.sh` and clone the template without interactive credentials, so keep the copy public during bootstrap or use the [Manual VM Setup](#manual-vm-setup) path.
+The recommended path is Cloud Shell: click the **Open in Cloud Shell** button on the [project README](../README.md) and follow the tutorial pane ([docs/cloud-shell-tutorial.md](cloud-shell-tutorial.md)). It covers VM provisioning (`scripts/bootstrap-gcp.sh`) and GitHub App registration (`scripts/register-app.sh`). This document covers what comes after — finishing setup on the VM — plus the non-Cloud-Shell path.
 
 At any point, run:
 
@@ -14,80 +10,7 @@ At any point, run:
 bash scripts/status.sh
 ```
 
-It summarizes local config, dry-run/scheduler state, active GCloud project/billing readiness, and likely existing GoobReview VMs visible to your account. To run only the read-only VM search:
-
-```bash
-bash scripts/discover-vms.sh
-```
-
-If you can't use Cloud Shell, see the [Manual VM Setup](#manual-vm-setup) appendix at the end of this document.
-
-## 2. Provision The VM
-
-From the Cloud Shell checkout:
-
-```bash
-bash scripts/bootstrap-gcp.sh
-```
-
-Start with this command. It checks project/billing state, prompts for GCP project, zone, and VM name, then:
-
-- Creates an `e2-micro` Ubuntu 24.04 VM (1 shared vCPU, 1 GB RAM, 20 GB disk). See [docs/vm-setup.md](vm-setup.md) for the full spec and larger-machine alternatives.
-- Installs the required packages, GitHub CLI, Gemini CLI, and a 2 GB swap file.
-- Clones this template into `/opt/goobreview/example` on the VM.
-
-The script can create a project, link it to an existing billing account, or repair a selected project whose billing is disabled. It looks for billing accounts directly, and can also infer one from an existing project that already has billing enabled. If your Google account has no active Cloud Billing account yet, it will send you to https://console.cloud.google.com/billing and tell you to rerun the same command afterward.
-
-The default VM is an `e2-micro` in `us-central1`, which is on GCP's [always-free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) when you keep the defaults. You won't be charged unless you bump to a larger machine, run multiple VMs, move to a non-free region, or otherwise exceed free-tier limits.
-
-Cloud Shell has Gemini preinstalled. If the billing/project page is confusing, type `gemini` and ask it to walk you through that Google Cloud console step; then come back here and rerun the same bootstrap command.
-
-For scripted or Gemini-driven setup, use flags after confirming the values:
-
-```bash
-bash scripts/bootstrap-gcp.sh \
-  --project YOUR_PROJECT_ID \
-  --zone us-central1-a \
-  --vm-name goobreview-1 \
-  --yes
-```
-
-Takes about 3 minutes. When it finishes, it prints the remaining commands.
-
-## 3. Register The GitHub App
-
-Still in Cloud Shell:
-
-```bash
-bash scripts/register-app.sh
-```
-
-If you already know the target repository, pass it now. The helper will detect
-the GitHub App installation ID after you install the App and will pre-fill the
-repo plus installation ID on the VM:
-
-```bash
-bash scripts/register-app.sh --repo OWNER/REPO
-```
-
-The bootstrap step saved your selected VM name and zone in `.goobreview-cloud-shell.env`, so this command still works if you changed either default. From a fresh checkout, pass them explicitly:
-
-```bash
-bash scripts/register-app.sh --repo OWNER/REPO YOUR_VM_NAME YOUR_ZONE
-```
-
-It starts a tiny local server, using Cloud Shell's standard port 8080 unless that port is already occupied. Click Cloud Shell's **Web Preview** button -> **Preview on port 8080** (or the fallback port printed in the terminal). The page walks you through two steps:
-
-1. Click the link to GitHub's pre-filled App-creation form (name, homepage, webhook off, all five permissions already set). At the bottom of the GitHub form, click **Create GitHub App**. On the App's settings page that loads, click **Generate a private key** to download the `.pem` and note the **App ID** at the top.
-2. Back on the helper page, upload the `.pem` and paste the App ID. The helper signs a JWT to verify them, ships the key to the VM, pre-populates `REVIEWER_APP_ID` in `reviewer.env`, and shows an **Install ... on a repo ->** link. Click it and pick your target repo. If you passed `--repo`, keep the helper page open; it detects the installation ID and writes `REVIEWER_REPO` plus `REVIEWER_APP_INSTALLATION_ID`.
-
-When the script finishes, the App's private key is at `/var/lib/goobreview/example/app-key.pem` on the VM and `REVIEWER_APP_ID` is filled in. GitHub may download the `.pem` to your browser's Downloads folder before you upload it to the helper; after the helper confirms the key is on the VM, delete the local download. See [docs/github-app-setup.md](github-app-setup.md) for the App identity, permissions, and the by-hand path.
-
-Registering under an organization instead of your personal account:
-
-```bash
-GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh
-```
+It summarizes local config, dry-run/scheduler state, active GCloud project/billing readiness, and likely existing GoobReview VMs visible to your account, with a recommended next action.
 
 ## 4. Finish Setup On The VM
 
@@ -102,20 +25,7 @@ scripts/configure.sh  # auto-detects target repo + installation ID when possible
 
 The `gemini` step is intentionally interactive when you want Google-account quota, including Google AI Pro or Ultra entitlement. Gemini CLI's documented non-interactive auth paths are `GEMINI_API_KEY` and Vertex AI credentials, which use API/Vertex quota and billing rather than personal subscription quota. Keep any Gemini API keys, Vertex credentials, or cached Google auth state out of this repo and checkout.
 
-`configure.sh` is the interactive wrapper. It prompts for human choices, then
-delegates deterministic writes and validation to `scripts/configure-inner.sh`.
-
-`configure.sh`:
-
-- Copies each gitignored config file (`reviewer.env`, `required-checks.json`, `prompt-payload.json`) from its `.example` sibling.
-- Auto-detects `REVIEWER_REPO` plus installation ID when the GitHub App installation exposes exactly one repo; otherwise prompts for the repo.
-- Auto-discovers the installation ID from the repo when it was not already filled by the registration helper or repo detection.
-- Lists the personalities in `config/personalities/` and writes your pick to `REVIEWER_PERSONALITY_FILE` in `reviewer.env`.
-- Lets you pick a prompt payload profile (`lean`, `minimal`, `guided`, `full`, or custom). The generated `config/prompt-payload.json` shows every possible prompt segment with an enabled flag, description, and example.
-- Offers to open each config file in `$EDITOR`.
-- Offers to create the helper labels on the target repo.
-
-For agent-driven or scripted setup, call the non-interactive core directly:
+`configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, walks you through personality and prompt-payload choices, and offers to create helper labels. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
 
 ```bash
 scripts/configure-inner.sh \
@@ -201,5 +111,5 @@ To pause: edit the crontab (`crontab -e`) and comment out the line, or `sudo sys
 For non-Cloud-Shell paths (own hardware, AWS, manual GCP, corporate GitHub, etc.), keep the same order but use the canonical references for the pieces Cloud Shell normally automates:
 
 1. Provision a small Ubuntu LTS VM, run `bash scripts/setup-vm.sh` to install the tools and clone the template, using [docs/vm-setup.md](vm-setup.md) for details.
-2. Register and install the App using [docs/github-app-setup.md](github-app-setup.md). If registering manually, place the `.pem` at `/var/lib/goobreview/example/app-key.pem` with mode `0600`.
+2. Register and install the App using [docs/github-app-setup.md](github-app-setup.md). If registering manually, place the `.pem` at `/var/lib/goobreview/example/app-key.pem` with mode `0600`. Registering under an organization: `GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh`.
 3. Continue at [Step 4 above](#4-finish-setup-on-the-vm) for Gemini auth, `scripts/configure.sh`, dry run, and scheduler enablement.
