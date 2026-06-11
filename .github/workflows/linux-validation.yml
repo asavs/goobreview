@@ -59,6 +59,14 @@ jobs:
             jq -e . "$file" >/dev/null
           done
 
+      - name: Template cleanup coverage
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git grep -l 'asavschaeffer/goobreview' -- . || true)
+          printf '%s\n' "${files[@]}" | grep -Fxq 'config/app-manifest.json'
+          printf '%s\n' "${files[@]}" | grep -Fxq 'deploy/systemd/goobreview.service.example'
+          printf '%s\n' "${files[@]}" | grep -Fxq 'deploy/systemd/goobreview.timer.example'
+
       - name: ShellCheck
         if: env.shellcheck_available == '1'
         run: |
