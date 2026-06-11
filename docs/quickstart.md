@@ -181,7 +181,7 @@ Once the dry run looks good:
 scripts/enable-cron.sh
 ```
 
-Installs a one-line crontab entry that runs `run-once.sh` every minute. It refuses to launch until at least one dry-run artifact exists in `$REVIEWER_STATE`; set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN=1` only when you intentionally want to bypass that guard. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
+Installs a one-line crontab entry that rotates `cron.log` and runs `run-once.sh` every minute. It refuses to launch until at least one dry-run artifact exists in `$REVIEWER_STATE`; set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN=1` only when you intentionally want to bypass that guard. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
 
 Prefer systemd? See [docs/daemon-runbook.md#systemd-timer](daemon-runbook.md#systemd-timer).
 

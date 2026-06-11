@@ -3,10 +3,15 @@
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG_FILE"; }
 
+fatal() {
+  log "$*"
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
 require() {
   command -v "$1" >/dev/null || {
-    log "missing: $1"
-    exit 1
+    fatal "missing: $1"
   }
 }
 
@@ -16,8 +21,7 @@ validate_uint_env() {
 
   case "$value" in
     ''|*[!0-9]*)
-      log "invalid $name: $value"
-      exit 1
+      fatal "invalid $name: $value"
       ;;
   esac
 }
@@ -30,35 +34,54 @@ validate_bool_env() {
     0|1)
       ;;
     *)
-      log "invalid $name: $value"
-      exit 1
+      fatal "invalid $name: $value"
       ;;
   esac
+}
+
+validate_private_key_file() {
+  local path="$1"
+  local mode
+
+  if [ ! -f "$path" ]; then
+    fatal "private key not found: $path"
+  fi
+  if [ ! -s "$path" ] || [ ! -r "$path" ]; then
+    fatal "private key is empty or unreadable: $path"
+  fi
+  if [ ! -O "$path" ]; then
+    fatal "private key must be owned by the reviewer user: $path"
+  fi
+
+  mode=$(stat -c '%a' "$path" 2>/dev/null || true)
+  case "$mode" in
+    ''|*[!0-7]*)
+      fatal "could not read private key permissions for $path"
+      ;;
+  esac
+  if [ $((8#$mode & 077)) -ne 0 ]; then
+    fatal "private key permissions must not grant group/other access: $path has mode $mode; run chmod 600"
+  fi
 }
 
 validate_reviewer_config() {
   require jq
 
   if [ -z "$REPO" ]; then
-    log "missing REVIEWER_REPO; set it to owner/repo"
-    exit 1
+    fatal "missing REVIEWER_REPO; set it to owner/repo"
   fi
 
   if [ -z "$PERSONALITY_FILE" ]; then
-    log "REVIEWER_PERSONALITY_FILE is required (set it in reviewer.env). See config/personalities/ for options."
-    exit 1
+    fatal "REVIEWER_PERSONALITY_FILE is required (set it in reviewer.env). See config/personalities/ for options."
   fi
   if [ ! -f "$PERSONALITY_FILE" ]; then
-    log "REVIEWER_PERSONALITY_FILE points at '$PERSONALITY_FILE' which does not exist."
-    exit 1
+    fatal "REVIEWER_PERSONALITY_FILE points at '$PERSONALITY_FILE' which does not exist."
   fi
   if [ -z "${PROMPT_PAYLOAD_FILE:-}" ] || [ ! -f "$PROMPT_PAYLOAD_FILE" ]; then
-    log "missing prompt payload config: ${PROMPT_PAYLOAD_FILE:-unset}"
-    exit 1
+    fatal "missing prompt payload config: ${PROMPT_PAYLOAD_FILE:-unset}"
   fi
   if ! jq -e '.segments | type == "object"' "$PROMPT_PAYLOAD_FILE" >/dev/null 2>&1; then
-    log "invalid prompt payload config in $PROMPT_PAYLOAD_FILE"
-    exit 1
+    fatal "invalid prompt payload config in $PROMPT_PAYLOAD_FILE"
   fi
 
   validate_uint_env REVIEWER_MAX_PRS "$MAX_PRS"
@@ -83,10 +106,10 @@ validate_reviewer_config() {
   local var
   for var in REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH; do
     if [ -z "${!var:-}" ]; then
-      log "missing required env: $var (see docs/github-app-setup.md)"
-      exit 1
+      fatal "missing required env: $var (see docs/github-app-setup.md)"
     fi
   done
+  validate_private_key_file "$REVIEWER_APP_PRIVATE_KEY_PATH"
 }
 
 load_effective_required_checks_json() {
@@ -94,8 +117,7 @@ load_effective_required_checks_json() {
   if [ -n "${REVIEWER_REQUIRED_CHECKS_JSON:-}" ]; then
     if [ "$ALLOW_REQUIRED_CHECKS_OVERRIDE" = "1" ]; then
       if ! EFFECTIVE_REQUIRED_CHECKS_JSON=$(REQUIRED_CHECKS_JSON="$REVIEWER_REQUIRED_CHECKS_JSON" reviewer_required_checks_json "$REQUIRED_CHECKS_FILE"); then
-        log "invalid REVIEWER_REQUIRED_CHECKS_JSON; expected a JSON array of nonempty strings"
-        exit 1
+        fatal "invalid REVIEWER_REQUIRED_CHECKS_JSON; expected a JSON array of nonempty strings"
       fi
     else
       log "Ignoring REVIEWER_REQUIRED_CHECKS_JSON because REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE is not 1"
@@ -104,8 +126,7 @@ load_effective_required_checks_json() {
 
   if [ -z "$EFFECTIVE_REQUIRED_CHECKS_JSON" ]; then
     if ! EFFECTIVE_REQUIRED_CHECKS_JSON=$(REQUIRED_CHECKS_JSON='' reviewer_required_checks_json "$REQUIRED_CHECKS_FILE"); then
-      log "invalid required checks config in $REQUIRED_CHECKS_FILE; expected a JSON array of nonempty strings"
-      exit 1
+      fatal "invalid required checks config in $REQUIRED_CHECKS_FILE; expected a JSON array of nonempty strings"
     fi
   fi
 

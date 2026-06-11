@@ -11,7 +11,7 @@ prepare_review_worktree() {
   local slug dir parent stamp tmp archive extracted current_head
 
   slug=$(review_worktree_slug)
-  parent="$STATE_DIR/worktrees/$slug"
+  parent="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/worktrees/$slug"
   dir="$parent/current"
   stamp="$parent/current.head"
 

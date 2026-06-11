@@ -125,6 +125,7 @@ reviewer_pr_skip_reason() {
   local bot_login="$5"
   local extra_skip_user="$6"
   local only_pr="$7"
+  local bot_author="${8:-}"
 
   if [ -z "${head_sha:-}" ]; then
     printf 'PR #%s has no head SHA, skipping\n' "$num"
@@ -138,7 +139,7 @@ reviewer_pr_skip_reason() {
     printf 'PR #%s@%s is a draft, skipping until it is marked ready for review\n' "$num" "$head_sha"
     return 0
   fi
-  if [ "$author" = "$bot_login" ]; then
+  if [ "$author" = "$bot_login" ] || { [ -n "$bot_author" ] && [ "$author" = "$bot_author" ]; }; then
     printf 'PR #%s@%s is authored by %s, skipping self-review\n' "$num" "$head_sha" "$bot_login"
     return 0
   fi

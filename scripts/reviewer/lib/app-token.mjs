@@ -43,6 +43,25 @@ function safeJsonForLog(value) {
   return JSON.stringify(redactSensitive(value));
 }
 
+function nextActionForHttpStatus(status, operation) {
+  if (status === 401) {
+    return "Next action: verify REVIEWER_APP_ID belongs to the downloaded private key, then re-upload or re-paste the matching .pem.";
+  }
+  if (status === 404 && operation === "mint-installation-token") {
+    return "Next action: verify REVIEWER_APP_INSTALLATION_ID is the installation for this App and target repository, then re-run scripts/configure.sh.";
+  }
+  if (status === 404) {
+    return "Next action: verify the App is installed on the target repository and re-run scripts/configure.sh to rediscover the installation ID.";
+  }
+  return "";
+}
+
+function dieHttp(operation, label, status, body) {
+  const guidance = nextActionForHttpStatus(status, operation);
+  const suffix = guidance ? `\n${guidance}` : "";
+  die(`${label} failed (${status}): ${body.slice(0, 500)}${suffix}`);
+}
+
 function requireEnv(name) {
   const v = process.env[name];
   if (!v) die(`missing required env: ${name}`);
@@ -178,7 +197,7 @@ async function ghJson(url, jwt) {
   });
   if (!resp.ok) {
     const body = await resp.text();
-    die(`GET ${url} failed (${resp.status}): ${body.slice(0, 500)}`);
+    dieHttp("get-app-json", `GET ${url}`, resp.status, body);
   }
   return resp.json();
 }
@@ -194,7 +213,7 @@ async function ghJsonWithToken(url, token) {
   });
   if (!resp.ok) {
     const body = await resp.text();
-    die(`GET ${url} failed (${resp.status}): ${body.slice(0, 500)}`);
+    dieHttp("get-installation-json", `GET ${url}`, resp.status, body);
   }
   return resp.json();
 }
@@ -212,7 +231,7 @@ async function mintInstallationToken(jwt, id) {
   });
   if (!tokenResp.ok) {
     const body = await tokenResp.text();
-    die(`token mint failed (${tokenResp.status}): ${body.slice(0, 500)}`);
+    dieHttp("mint-installation-token", "token mint", tokenResp.status, body);
   }
   const tokenJson = await tokenResp.json();
   if (!tokenJson.token || !tokenJson.expires_at) {

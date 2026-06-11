@@ -10,4 +10,5 @@ User=goobreview
 Group=goobreview
 WorkingDirectory=/opt/goobreview/example
 Environment=REVIEWER_ENV_FILE=/opt/goobreview/example/config/reviewer.env
+ExecStartPre=/usr/bin/bash scripts/reviewer/require-dry-run-artifact.sh
 ExecStart=/usr/bin/bash scripts/reviewer/run-once.sh

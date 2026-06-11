@@ -11,6 +11,7 @@ STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
 LOG_FILE="${REVIEWER_SYNC_LOG:-$STATE_DIR/sync.log}"
 
 mkdir -p "$STATE_DIR"
+"$SCRIPT_DIR/rotate-log.sh" "$LOG_FILE" 2>/dev/null || true
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG_FILE"; }
 

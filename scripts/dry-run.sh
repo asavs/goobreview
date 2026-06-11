@@ -22,10 +22,7 @@ ops_require_envs REVIEWER_REPO REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVI
 ops_validate_owner_repo "$REVIEWER_REPO" REVIEWER_REPO
 ops_validate_uint REVIEWER_APP_ID "$REVIEWER_APP_ID"
 ops_validate_uint REVIEWER_APP_INSTALLATION_ID "$REVIEWER_APP_INSTALLATION_ID"
-ops_require_file "$REVIEWER_APP_PRIVATE_KEY_PATH" "Set REVIEWER_APP_PRIVATE_KEY_PATH in $ENV_FILE."
-if [ ! -s "$REVIEWER_APP_PRIVATE_KEY_PATH" ] || [ ! -r "$REVIEWER_APP_PRIVATE_KEY_PATH" ]; then
-  ops_die "Private key is empty or unreadable: $REVIEWER_APP_PRIVATE_KEY_PATH"
-fi
+ops_require_private_key "$REVIEWER_APP_PRIVATE_KEY_PATH"
 if [ ! -d "$HOME/.gemini" ]; then
   ops_die "Gemini CLI auth/trust state not found at $HOME/.gemini. Run 'gemini' once in this checkout, sign in, trust the folder, then /quit."
 fi
