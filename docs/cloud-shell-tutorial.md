@@ -56,7 +56,7 @@ The bootstrap script checks your Google Cloud project and billing state, then ha
 - If your active project is Cloud Shell's temporary `cloudshell-NNNN` project, it offers to create a normal project.
 - If your selected project does not exist, it offers to create it.
 - If your selected project has billing disabled, it offers to link billing.
-- If it cannot find a usable Cloud Billing account, it sends you to https://console.cloud.google.com/billing and tells you to rerun the same command afterward.
+- If it cannot find a usable Cloud Billing account, it sends you to https://console.cloud.google.com/billing; after you finish the browser consent step, return to Gemini so it can continue.
 
 The script looks for billing accounts directly, and can also infer one from an existing project that already has billing enabled. If the billing page is confusing, stay in Gemini and ask it to guide you through the Google Cloud console step.
 
