@@ -109,3 +109,43 @@ write_invalid_verdict_artifact() {
   mv "$tmp" "$artifact"
   printf '%s\n' "$artifact"
 }
+
+# Convert GitHub pull request JSON objects into tab-separated queue rows.
+# Keep draft state in-band so the main loop can log draft skips instead of
+# filtering them silently in jq.
+pull_request_queue_rows() {
+  jq -r '[.number, .user.login, .head.sha, (.draft // false)] | @tsv'
+}
+
+reviewer_pr_skip_reason() {
+  local num="$1"
+  local author="$2"
+  local head_sha="$3"
+  local draft="$4"
+  local bot_login="$5"
+  local extra_skip_user="$6"
+  local only_pr="$7"
+
+  if [ -z "${head_sha:-}" ]; then
+    printf 'PR #%s has no head SHA, skipping\n' "$num"
+    return 0
+  fi
+  if [ -n "$only_pr" ] && [ "$num" != "$only_pr" ]; then
+    printf 'PR #%s does not match REVIEWER_ONLY_PR=%s, skipping\n' "$num" "$only_pr"
+    return 0
+  fi
+  if [ "$draft" = "true" ]; then
+    printf 'PR #%s@%s is a draft, skipping until it is marked ready for review\n' "$num" "$head_sha"
+    return 0
+  fi
+  if [ "$author" = "$bot_login" ]; then
+    printf 'PR #%s@%s is authored by %s, skipping self-review\n' "$num" "$head_sha" "$bot_login"
+    return 0
+  fi
+  if [ -n "$extra_skip_user" ] && [ "$author" = "$extra_skip_user" ]; then
+    printf 'PR #%s@%s is authored by REVIEWER_USER=%s, skipping configured reviewer identity\n' "$num" "$head_sha" "$extra_skip_user"
+    return 0
+  fi
+
+  return 1
+}

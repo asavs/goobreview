@@ -436,10 +436,39 @@ test_gemini_invocation_isolates_review_context() {
   assert_eq "gemini settings excludes mcp servers" "0" "$(jq '.mcp.allowed | length' "$settings_path")"
 }
 
+
+test_pr_queue_skip_reasons() {
+  local pulls rows reason
+
+  pulls='[{"number":1,"draft":true,"user":{"login":"alice"},"head":{"sha":"sha1"}},
+    {"number":2,"draft":false,"user":{"login":"goobreview[bot]"},"head":{"sha":"sha2"}},
+    {"number":3,"user":{"login":"maintainer"},"head":{"sha":"sha3"}},
+    {"number":4,"draft":false,"user":{"login":"reviewer"},"head":{"sha":"sha4"}}]'
+  rows=$(printf '%s\n' "$pulls" | jq -c '.[]' | pull_request_queue_rows)
+
+  assert_contains "PR queue preserves draft rows" $'1\talice\tsha1\ttrue' <(printf '%s\n' "$rows")
+  assert_contains "PR queue defaults missing draft to false" $'3\tmaintainer\tsha3\tfalse' <(printf '%s\n' "$rows")
+
+  reason=$(reviewer_pr_skip_reason 1 alice sha1 true 'goobreview[bot]' '' '')
+  assert_eq "draft skip reason is explicit" "PR #1@sha1 is a draft, skipping until it is marked ready for review" "$reason"
+
+  reason=$(reviewer_pr_skip_reason 2 'goobreview[bot]' sha2 false 'goobreview[bot]' '' '')
+  assert_eq "bot author skip reason is explicit" "PR #2@sha2 is authored by goobreview[bot], skipping self-review" "$reason"
+
+  reason=$(reviewer_pr_skip_reason 4 reviewer sha4 false 'goobreview[bot]' reviewer '')
+  assert_eq "reviewer user skip reason is explicit" "PR #4@sha4 is authored by REVIEWER_USER=reviewer, skipping configured reviewer identity" "$reason"
+
+  if reviewer_pr_skip_reason 3 maintainer sha3 false 'goobreview[bot]' reviewer '' >/dev/null; then
+    fail "reviewable PR has no skip reason"
+  fi
+  pass "reviewable PR has no skip reason"
+}
+
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
 test_invalid_verdict_state
+test_pr_queue_skip_reasons
 test_gemini_invocation_isolates_review_context
 test_ci_states
 
