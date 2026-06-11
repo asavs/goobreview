@@ -144,12 +144,23 @@ GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh
 
 ## 3. Configure the reviewer
 
-SSH to the VM, trust Gemini, and run the configure helper:
+Gemini should open the VM SSH session for you and land in the checkout:
 
 ```bash
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 cd /opt/goobreview/example
+```
+
+When the VM shell is ready, your next true browser/auth boundary is Gemini CLI
+sign-in and workspace trust:
+
+```bash
 gemini                # Google OAuth - sign in, trust this folder, then /quit
+```
+
+After you quit Gemini CLI, let the setup agent continue with:
+
+```bash
 scripts/configure.sh
 ```
 

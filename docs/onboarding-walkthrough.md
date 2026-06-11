@@ -118,13 +118,16 @@ bash scripts/register-app.sh
 - Phases 1 + 2 complete.
 - App installed on target repo (Phase 2 step 7).
 
-**Commands (on the VM):**
+**Commands Gemini should run to reach the VM:**
 ```bash
 gcloud compute ssh goobreview-1 --zone=us-central1-a   # from Cloud Shell
 cd /opt/goobreview/example
 gemini                  # first-time Google OAuth; trust this folder; /quit
 scripts/configure.sh
 ```
+
+The user should only take over for the `gemini` browser sign-in and workspace
+trust prompt, then return control to the setup agent for `scripts/configure.sh`.
 
 **What happens inside `configure.sh`:**
 1. Preflight: `node`, `jq`, `gemini` on PATH; `~/.gemini` exists; copies
