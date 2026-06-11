@@ -31,11 +31,12 @@ Non-interactive GoobReview configuration. Values omitted from flags may be
 read from config/reviewer.env when present; otherwise required values fail.
 
 Required before dry-run:
-  --repo OWNER/REPO
   --app-id ID
   --key-path PATH
 
 Options:
+  --repo OWNER/REPO           Target repository. If omitted, auto-detect when
+                             the App installation exposes exactly one repo.
   --installation-id ID       Use an existing App installation ID. If omitted,
                              auto-discover from --repo.
   --personality PATH         Personality file, relative to repo root or absolute.
@@ -208,19 +209,15 @@ mkdir -p "$(dirname "$ENV_FILE")"
 ops_copy_if_missing "$ENV_FILE" "$CONFIG_DIR/reviewer.env.example" || exit 1
 
 [ -n "$repo" ] || repo="$(ops_env_get "$ENV_FILE" REVIEWER_REPO)"
+[ "$repo" != "owner/repo" ] || repo=""
 [ -n "$app_id" ] || app_id="$(ops_env_get "$ENV_FILE" REVIEWER_APP_ID)"
 [ -n "$installation_id" ] || installation_id="$(ops_env_get "$ENV_FILE" REVIEWER_APP_INSTALLATION_ID)"
 [ -n "$key_path" ] || key_path="$(ops_env_get "$ENV_FILE" REVIEWER_APP_PRIVATE_KEY_PATH)"
 [ -n "$personality" ] || personality="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
 [ -n "$personality" ] || personality="config/personalities/control.md"
 
-ops_require_nonempty "REVIEWER_REPO" "$repo" "Pass --repo OWNER/REPO."
-ops_validate_owner_repo "$repo" REVIEWER_REPO
 ops_require_nonempty "REVIEWER_APP_ID" "$app_id" "Pass --app-id ID."
 ops_validate_uint REVIEWER_APP_ID "$app_id"
-
-ops_env_set "$ENV_FILE" REVIEWER_REPO "$repo"
-ops_env_set "$ENV_FILE" REVIEWER_APP_ID "$app_id"
 
 ops_source_env "$ENV_FILE"
 ops_require_nonempty "REVIEWER_STATE" "${REVIEWER_STATE:-}" "Set it in $ENV_FILE."
@@ -236,6 +233,30 @@ chmod 600 "$key_path"
 ops_env_set "$ENV_FILE" REVIEWER_APP_PRIVATE_KEY_PATH "$key_path"
 export REVIEWER_APP_PRIVATE_KEY_PATH="$key_path"
 export REVIEWER_APP_ID="$app_id"
+
+if [ -z "$repo" ]; then
+  if [ -n "$installation_id" ]; then
+    export REVIEWER_APP_INSTALLATION_ID="$installation_id"
+  else
+    unset REVIEWER_APP_INSTALLATION_ID
+  fi
+  ops_log "Looking up target repo from GitHub App installation..."
+  if discovered_target=$("$APP_TOKEN_SH" discover-target 2>&1); then
+    repo="$(printf '%s' "$discovered_target" | jq -r '.repo // empty')"
+    discovered_installation_id="$(printf '%s' "$discovered_target" | jq -r '.installation_id // empty')"
+    if [ -z "$installation_id" ] && [ -n "$discovered_installation_id" ]; then
+      installation_id="$discovered_installation_id"
+    fi
+    ops_log "Found target repo: $repo"
+  else
+    ops_die "Auto-discover target repo failed: $discovered_target. Pass --repo OWNER/REPO."
+  fi
+fi
+
+ops_require_nonempty "REVIEWER_REPO" "$repo" "Pass --repo OWNER/REPO."
+ops_validate_owner_repo "$repo" REVIEWER_REPO
+ops_env_set "$ENV_FILE" REVIEWER_REPO "$repo"
+ops_env_set "$ENV_FILE" REVIEWER_APP_ID "$app_id"
 
 if [ -n "$installation_id" ]; then
   ops_validate_uint REVIEWER_APP_INSTALLATION_ID "$installation_id"

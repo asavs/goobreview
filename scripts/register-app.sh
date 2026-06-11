@@ -7,7 +7,7 @@
 #
 # Usage:  scripts/register-app.sh [--repo OWNER/REPO] [VM_NAME] [ZONE]
 # Env:    GOOBREVIEW_GH_ORG=myorg  Register under an organization (defaults to personal account)
-#         GOOBREVIEW_REGISTER_PORT=8080  Override server port (must match Web Preview)
+#         GOOBREVIEW_REGISTER_PORT=8080  Override server port (defaults to 8080)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,7 +94,7 @@ ops_require_command jq "In Cloud Shell, run 'sudo apt-get install -y jq'."
 if [ -n "$port" ]; then
   ops_validate_uint GOOBREVIEW_REGISTER_PORT "$port"
 else
-  port="$(node -e "const net=require('node:net');const s=net.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close();});s.on('error',err=>{console.error(err.message);process.exit(1);});")"
+  port="$(node -e "const net=require('node:net');function listen(port){return new Promise(resolve=>{const s=net.createServer();s.once('error',()=>resolve(null));s.listen(port,'127.0.0.1',()=>{const chosen=s.address().port;s.close(()=>resolve(chosen));});});}(async()=>{const preferred=await listen(8080);if(preferred){console.log(preferred);return;}const fallback=await listen(0);if(!fallback)throw new Error('no local port available');console.log(fallback);})().catch(err=>{console.error(err.message);process.exit(1);});")"
   ops_validate_uint GOOBREVIEW_REGISTER_PORT "$port"
 fi
 PORT="$port"

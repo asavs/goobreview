@@ -49,9 +49,9 @@ Give your coding agent this repository and ask:
 ```text
 Use this template to set up an automated PR reviewer for OWNER/REPO. Walk me
 through bootstrap-gcp.sh (VM provisioning), register-app.sh (GitHub App
-registration helper), configure.sh (target repo + auto-discover installation
-ID), a dry-run review, and enabling the scheduler only after the dry run is
-clean.
+registration helper), configure.sh (auto-detect target repo and installation
+ID when possible), a dry-run review, and enabling the scheduler only after the
+dry run is clean.
 ```
 
 The agent should follow:

@@ -103,9 +103,9 @@ If you accepted a custom VM name or zone during bootstrap, keep using the no-arg
 bash scripts/register-app.sh --repo OWNER/REPO YOUR_VM_NAME YOUR_ZONE
 ```
 
-This starts a tiny local server. Keep the terminal open while you use the browser page. The walkthrough is:
+This starts a tiny local server on port 8080 unless that port is already occupied. Keep the terminal open while you use the browser page. The walkthrough is:
 
-1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port PORT_FROM_THE_TERMINAL**.
+1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port 8080** (or the fallback port printed in the terminal).
 2. In the new browser tab, click through to the **pre-filled GitHub form** (it already has the name, homepage, webhook setting, and the five permissions set). At the bottom click **Create GitHub App**.
 3. On the App's settings page that loads, click **Generate a private key** to download the `.pem`, and note the **App ID** at the top.
 4. Back on the Web Preview page, upload the `.pem` and paste the App ID. After it verifies, click **Install ... on a repo ->** and pick your target repo. If you passed `--repo`, keep the helper page open until it reports the installation ID.
@@ -118,7 +118,7 @@ Quick check:
 bash scripts/status.sh
 ```
 
-The GitHub App preflight should now show an App ID and VM key. If you used `--repo`, it should also show an installation ID; otherwise that is filled during the next configure step after you install the App on the target repo.
+The GitHub App preflight should now show an App ID and VM key. If you used `--repo`, it should also show an installation ID; otherwise configure can detect the target repo and installation ID when the App installation exposes exactly one repo.
 
 Registering the App under an organization instead of your personal account? Pass the org name:
 
@@ -139,7 +139,7 @@ gemini                # Google OAuth - sign in, trust this folder, then /quit
 scripts/configure.sh
 ```
 
-`configure.sh` prompts for the target repo, auto-discovers the App installation ID, lets you pick a personality and prompt payload profile, and offers to open the generated config files in `$EDITOR`.
+`configure.sh` auto-detects the target repo plus App installation ID when the App installation exposes exactly one repo, then lets you pick a personality and prompt payload profile and offers to open the generated config files in `$EDITOR`. If the App can see multiple repos, it prompts for `owner/repo`.
 
 Personality choice is the most consequential decision before your first dry run: it defines what kind of reviewer this is. `control` is neutral and general-purpose. `linus` is intentionally blunt. You can change this later with `scripts/tune.sh`.
 
