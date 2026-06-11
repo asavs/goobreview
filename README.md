@@ -103,7 +103,7 @@ scripts/
     check-ci.sh                      Required check-run gate.
     merge-gate.sh                    Mechanical pre-merge checks.
     ensure-labels.sh                 Optional helper-label setup.
-    get-installation-token.sh        Mint/cache a GitHub App installation token.
+    get-installation-token.sh        Discover installation IDs or mint/cache App tokens.
     lib/app-token.mjs                Node helper: signs JWT, fetches /app, mints token.
 
 docs/
@@ -131,6 +131,6 @@ Three ways to shape what your reviewer does, in order of impact:
 
 ## Safety Model
 
-The daemon trusts a GitHub App installation token (minted from a private key stored at `REVIEWER_APP_PRIVATE_KEY_PATH`) and local `gemini` authentication on the VM. Keep the private key file at mode `0600`, owned by the user that runs the cron. Do not run this from a developer's active working checkout. PR-head source snapshots under `REVIEWER_STATE/worktrees/<repo>/current` are read-only review context; Gemini runs from `REVIEWER_STATE/gemini-runtime` with PR-authored `GEMINI.md` / `.env` files excluded from automatic context and MCP servers disabled for the review invocation, and the daemon does not execute project code from snapshots.
+The daemon trusts a GitHub App installation token (minted from a private key stored at `REVIEWER_APP_PRIVATE_KEY_PATH`) and local `gemini` authentication on the VM. Keep the private key file at mode `0600`, owned by the user that runs the cron. Do not run this from a developer's active working checkout. PR-head source snapshots under `REVIEWER_STATE/worktrees/<repo>/current` are read-only review context; Gemini runs from `REVIEWER_STATE/gemini-runtime` with PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled, and Gemini CLI's documented workspace-trust session override set for the isolated review invocation. The daemon does not execute project code from snapshots.
 
 The daemon does not merge PRs and does not edit source code. It only posts reviews and applies optional labels.

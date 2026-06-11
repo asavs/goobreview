@@ -41,6 +41,9 @@ jobs:
       - name: Reviewer fixtures
         run: bash scripts/reviewer/tests/run-fixtures.sh
 
+      - name: App token helper smoke test
+        run: node scripts/reviewer/lib/app-token.mjs --help
+
       - name: Preflight fixtures
         run: bash scripts/preflight/tests/run-fixtures.sh
 

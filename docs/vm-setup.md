@@ -92,7 +92,13 @@ cd /opt/goobreview/example
 gemini
 ```
 
-The Gemini CLI authentication docs describe individual Google account login and note that Google AI Pro or Google AI Ultra subscribers should use the Google account associated with that subscription.
+The Gemini CLI authentication docs describe three supported auth families:
+
+- **Sign in with Google** for individual Google accounts and Gemini Code Assist licenses. This is the path that preserves Google AI Pro or Google AI Ultra subscription entitlement; use the Google account associated with that subscription.
+- **Gemini API key** for headless setup through `GEMINI_API_KEY`. This is suitable for automation but uses API-key quota and billing, not personal Google AI Pro/Ultra subscription quota.
+- **Vertex AI** through Application Default Credentials, a service account JSON key, or a Google Cloud API key, plus `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`. This is suitable for enterprise or production automation but uses Vertex AI quota and billing, not personal Google AI Pro/Ultra subscription quota.
+
+GoobReview's default path intentionally uses Sign in with Google. Do not copy Google auth files, service account JSON, API keys, or other Gemini credentials into the repo or checkout. If you choose API key or Vertex AI mode instead, keep those credentials in the VM user's shell environment, systemd environment, or another VM-side secret store.
 
 Exit Gemini with:
 
@@ -106,7 +112,7 @@ Verify headless mode from the same checkout:
 printf 'say hi in three words' | timeout 60s gemini -m auto -p ""
 ```
 
-If this prompts for authorization, reports an untrusted workspace, or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_STATE/gemini-runtime` with the PR-head source snapshot attached as read-only workspace context; if the first dry run reports that runtime path as untrusted, `cd` into that path and run `gemini` once there too.
+If this prompts for authorization or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_STATE/gemini-runtime` with the PR-head source snapshot attached as read-only workspace context. For that isolated runtime call, GoobReview sets Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override and writes system settings that disable project context filename loading, local `.env` loading, shell tools, and MCP servers.
 
 ## Clone The Template
 

@@ -98,6 +98,8 @@ gemini                # Google OAuth - sign in, trust this folder, then /quit
 scripts/configure.sh  # prompts for target repo; auto-discovers installation ID
 ```
 
+The `gemini` step is intentionally interactive when you want Google-account quota, including Google AI Pro or Ultra entitlement. Gemini CLI's documented non-interactive auth paths are `GEMINI_API_KEY` and Vertex AI credentials, which use API/Vertex quota and billing rather than personal subscription quota. Keep any Gemini API keys, Vertex credentials, or cached Google auth state out of this repo and checkout.
+
 `configure.sh` is the interactive wrapper. It prompts for human choices, then
 delegates deterministic writes and validation to `scripts/configure-inner.sh`.
 

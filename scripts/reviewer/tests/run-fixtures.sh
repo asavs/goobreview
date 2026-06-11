@@ -337,6 +337,7 @@ test_gemini_invocation_isolates_review_context() {
     printf 'gh_token=%s\n' "${GH_TOKEN:-unset}"
     printf 'github_token=%s\n' "${GITHUB_TOKEN:-unset}"
     printf 'key_path=%s\n' "${REVIEWER_APP_PRIVATE_KEY_PATH:-unset}"
+    printf 'trust_workspace=%s\n' "${GEMINI_CLI_TRUST_WORKSPACE:-unset}"
     printf 'settings=%s\n' "$GEMINI_CLI_SYSTEM_SETTINGS_PATH"
   }
 
@@ -347,6 +348,7 @@ test_gemini_invocation_isolates_review_context() {
   assert_contains "gemini child gets no gh token" "gh_token=unset" <(printf '%s\n' "$output")
   assert_contains "gemini child gets no github token" "github_token=unset" <(printf '%s\n' "$output")
   assert_contains "gemini child gets no app key path" "key_path=unset" <(printf '%s\n' "$output")
+  assert_contains "gemini trusts isolated runtime workspace" "trust_workspace=true" <(printf '%s\n' "$output")
   assert_eq "gemini settings disables context filename" ".goobreview-gemini-context-disabled.md" "$(jq -r '.context.fileName' "$settings_path")"
   assert_eq "gemini settings attaches PR snapshot" "$worktree_dir" "$(jq -r '.context.includeDirectories[0]' "$settings_path")"
   assert_eq "gemini settings disables local env" "true" "$(jq -r '.advanced.ignoreLocalEnv' "$settings_path")"

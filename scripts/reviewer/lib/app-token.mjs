@@ -3,7 +3,7 @@
 // caching both on disk until shortly before expiry. Prints the requested
 // field to stdout based on argv[2]: "token" (default) or "slug".
 //
-// Inputs (all via env):
+// Inputs (env by default; direct CLI flags are accepted for diagnostics):
 //   REVIEWER_APP_ID                  Numeric App ID from the App settings page.
 //   REVIEWER_APP_INSTALLATION_ID     Installation ID (per-account or per-repo).
 //   REVIEWER_APP_PRIVATE_KEY_PATH    Path to the App's .pem private key.
@@ -28,20 +28,73 @@ function requireEnv(name) {
   return v;
 }
 
-const what = process.argv[2] || "token";
+function usage(exitCode = 1) {
+  process.stderr.write(`[app-token] usage:
+  app-token.mjs [token|slug] [--app-id ID] [--installation-id ID] [--key-path PATH] [--state DIR]
+  app-token.mjs discover <owner/repo> [--app-id ID] [--key-path PATH]\n`);
+  process.exit(exitCode);
+}
+
+function parseArgs(argv) {
+  const args = [...argv];
+  let what = "token";
+  let target = "";
+  const opts = {};
+
+  if (args[0] && !args[0].startsWith("--")) {
+    what = args.shift();
+  }
+
+  while (args.length > 0) {
+    const arg = args.shift();
+    switch (arg) {
+      case "--app-id":
+        opts.appId = args.shift() || "";
+        break;
+      case "--installation-id":
+        opts.installationId = args.shift() || "";
+        break;
+      case "--key-path":
+        opts.keyPath = args.shift() || "";
+        break;
+      case "--state":
+        opts.stateDir = args.shift() || "";
+        break;
+      case "-h":
+      case "--help":
+        usage(0);
+        break;
+      default:
+        if (arg.startsWith("--")) die(`unknown option: ${arg}`);
+        if (!target) {
+          target = arg;
+        } else {
+          die(`unexpected argument: ${arg}`);
+        }
+    }
+  }
+
+  return { what, target, opts };
+}
+
+function configuredValue(name, value) {
+  return value || requireEnv(name);
+}
+
+const { what, target, opts } = parseArgs(process.argv.slice(2));
 if (!["token", "slug", "discover"].includes(what)) {
   die(`unknown query: ${what}; expected 'token', 'slug', or 'discover'`);
 }
 
-const appId = requireEnv("REVIEWER_APP_ID");
-const keyPath = requireEnv("REVIEWER_APP_PRIVATE_KEY_PATH");
+const appId = configuredValue("REVIEWER_APP_ID", opts.appId);
+const keyPath = configuredValue("REVIEWER_APP_PRIVATE_KEY_PATH", opts.keyPath);
 if (!existsSync(keyPath)) die(`private key not found: ${keyPath}`);
 
 // `discover` only needs App ID + key (no installation, no cache).
 let installationId, stateDir, cachePath;
 if (what !== "discover") {
-  installationId = requireEnv("REVIEWER_APP_INSTALLATION_ID");
-  stateDir = requireEnv("REVIEWER_STATE");
+  installationId = configuredValue("REVIEWER_APP_INSTALLATION_ID", opts.installationId);
+  stateDir = configuredValue("REVIEWER_STATE", opts.stateDir);
   mkdirSync(stateDir, { recursive: true });
   cachePath = join(stateDir, "app_token.json");
 }
@@ -140,9 +193,8 @@ async function refresh() {
 }
 
 if (what === "discover") {
-  const target = process.argv[3];
   if (!target || !/^[^/]+\/[^/]+$/.test(target)) {
-    die("usage: app-token.mjs discover <owner/repo>");
+    usage();
   }
   const pem = readFileSync(keyPath, "utf8");
   const jwt = signJwt(pem);
