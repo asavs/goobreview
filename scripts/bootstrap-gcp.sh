@@ -36,7 +36,7 @@ Options:
   --zone ZONE                Compute Engine zone. Default: $DEFAULT_ZONE.
   --vm-name NAME             VM name. Default: $DEFAULT_VM_NAME.
   --billing-account ACCOUNT  Billing account ID/name to use when linking billing.
-  --yes                      Accept script confirmations for non-interactive setup.
+  --yes                      Accept script confirmations and defaults for non-interactive setup.
   -h, --help                 Show this help.
 
 Examples:
@@ -375,6 +375,8 @@ create_project_interactive() {
   default_id="goobreview-${RANDOM}${RANDOM}"
   if [ -n "$PROJECT_ARG" ]; then
     project_id="$PROJECT_ARG"
+  elif [ "$ASSUME_YES" -eq 1 ]; then
+    project_id="$default_id"
   else
     project_id=$(ops_prompt 'New project ID (6-30 lowercase chars/digits/hyphens, globally unique)' "$default_id")
   fi
@@ -436,6 +438,8 @@ esac
 
 if [ -n "$PROJECT_ARG" ]; then
   project="$PROJECT_ARG"
+elif [ "$ASSUME_YES" -eq 1 ]; then
+  project="$current_project"
 else
   project="$(ops_prompt 'GCP project ID' "$current_project")"
 fi
@@ -453,11 +457,15 @@ fi
 
 if [ -n "$ZONE_ARG" ]; then
   zone="$ZONE_ARG"
+elif [ "$ASSUME_YES" -eq 1 ]; then
+  zone="$DEFAULT_ZONE"
 else
   zone="$(ops_prompt 'Zone' "$DEFAULT_ZONE")"
 fi
 if [ -n "$VM_NAME_ARG" ]; then
   vm_name="$VM_NAME_ARG"
+elif [ "$ASSUME_YES" -eq 1 ]; then
+  vm_name="$DEFAULT_VM_NAME"
 else
   vm_name="$(ops_prompt 'VM name' "$DEFAULT_VM_NAME")"
 fi
