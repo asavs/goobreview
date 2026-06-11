@@ -6,6 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck disable=SC1091
 . "$REPO_ROOT/scripts/lib/ops.sh"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/gcloud.sh"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/vm.sh"
 export OPS_LOG_PREFIX="preflight-vm-discovery"
 
 report=0
@@ -80,9 +84,9 @@ truncated=false
 discovered=""
 recommendation="Run from Cloud Shell or install/authenticate gcloud."
 
-if command -v gcloud >/dev/null 2>&1; then
+if gcloud_command_found gcloud; then
   gcloud_found=1
-  projects="$(gcloud projects list --format='value(projectId)' 2>/dev/null || true)"
+  projects="$(gcloud_list_accessible_projects)"
   project_count="$(printf '%s\n' "$projects" | awk 'NF {count++} END {print count + 0}')"
 
   while IFS= read -r project; do
@@ -93,10 +97,7 @@ if command -v gcloud >/dev/null 2>&1; then
     fi
     searched_count=$((searched_count + 1))
 
-    rows="$(gcloud compute instances list \
-      --project="$project" \
-      --filter="name~${name_pattern}" \
-      --format='value(name,zone.basename(),machineType.basename(),status)' 2>/dev/null || true)"
+    rows="$(vm_list_matching_instances "$project" "$name_pattern")"
     while IFS=$'\t' read -r name zone machine status; do
       [ -n "$name" ] || continue
       append_line "$project	$zone	$name	$machine	$status"

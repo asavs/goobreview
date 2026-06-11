@@ -58,7 +58,7 @@ fi
 case "$cmd" in
   config:get-value)
     case "$fixture" in
-      no-active-two-billed|no-active-no-billed-with-account|no-active-no-billing) echo "(unset)" ;;
+      no-active-two-billed|no-active-inferred-billing|no-active-no-billed-with-account|no-active-no-billing) echo "(unset)" ;;
       active-unbilled-with-alternative|active-billed-compute-disabled) echo "alpha-project" ;;
       *) exit 2 ;;
     esac
@@ -66,7 +66,7 @@ case "$cmd" in
 
   projects:list)
     case "$fixture" in
-      no-active-two-billed|active-unbilled-with-alternative)
+      no-active-two-billed|no-active-inferred-billing|active-unbilled-with-alternative)
         printf '%s\n' alpha-project beta-project gamma-project
         ;;
       no-active-no-billed-with-account|no-active-no-billing|active-billed-compute-disabled)
@@ -101,6 +101,13 @@ case "$cmd" in
       no-active-two-billed:alpha-project|no-active-two-billed:beta-project)
         if [[ "$*" == *"billingAccountName,billingEnabled"* ]]; then
           printf '%s\t%s\n' billingAccounts/ABC123 True
+        else
+          printf '%s\n' True
+        fi
+        ;;
+      no-active-inferred-billing:alpha-project|no-active-inferred-billing:beta-project)
+        if [[ "$*" == *"billingAccountName,billingEnabled"* ]]; then
+          printf '%s\t%s\n' billingAccounts/INFERRED True
         else
           printf '%s\n' True
         fi
@@ -246,6 +253,7 @@ test_no_active_project_lists_billing_ready_projects() {
 
   assert_contains "counts accessible projects" "accessible projects:     3" "$out"
   assert_contains "counts billing-ready projects" "billing-ready projects:  2 (alpha-project (+1 more))" "$out"
+  assert_contains "dedupes direct and linked billing accounts" "open billing accounts:   1" "$out"
   assert_contains "prints first billing-ready project" "  - alpha-project" "$out"
   assert_contains "prints second billing-ready project" "  - beta-project" "$out"
   assert_not_contains "omits unbilled project from billing-ready list" "  - gamma-project" "$out"
@@ -253,6 +261,19 @@ test_no_active_project_lists_billing_ready_projects() {
 
   run_gcloud_preflight no-active-two-billed "$report" --report
   assert_contains "report keeps project list single-line" "billing_enabled_projects='alpha-project,beta-project'" "$report"
+}
+
+
+test_no_active_project_infers_billing_account_from_projects() {
+  local out="$TMP_ROOT/no-active-inferred-billing.txt" report="$TMP_ROOT/no-active-inferred-billing.report"
+
+  run_gcloud_preflight no-active-inferred-billing "$out"
+
+  assert_contains "counts inferred billing account once" "open billing accounts:   1" "$out"
+  assert_contains "dedupes linked billing account across projects" "billing-ready projects:  2 (alpha-project (+1 more))" "$out"
+
+  run_gcloud_preflight no-active-inferred-billing "$report" --report
+  assert_contains "reports inferred billing account count" "billing_account_count='1'" "$report"
 }
 
 test_no_active_project_with_billing_account_but_no_billed_project() {
@@ -410,6 +431,7 @@ test_checkout_unreachable_vm_does_not_fail_strict() {
 }
 
 test_no_active_project_lists_billing_ready_projects
+test_no_active_project_infers_billing_account_from_projects
 test_no_active_project_with_billing_account_but_no_billed_project
 test_no_active_project_without_billing
 test_active_unbilled_project_points_to_alternative
