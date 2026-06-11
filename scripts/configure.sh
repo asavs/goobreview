@@ -94,6 +94,7 @@ ops_require_file "$CONFIG_DIR/reviewer.env.example" "This checkout looks incompl
 ops_require_command node "Run scripts/setup-vm.sh first."
 ops_require_command jq "Run scripts/setup-vm.sh first."
 ops_require_command gemini "Run scripts/setup-vm.sh first, then authenticate Gemini."
+bash "$SCRIPT_DIR/preflight/checkout.sh" --strict --allow-setup-ref-mismatch
 
 allow_missing_gemini=0
 if [ ! -d "$HOME/.gemini" ]; then

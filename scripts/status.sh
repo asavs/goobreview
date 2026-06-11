@@ -24,6 +24,8 @@ EOF
 
 run_sensor "$SCRIPT_DIR/preflight/gcloud.sh"
 printf '\n'
+run_sensor "$SCRIPT_DIR/preflight/checkout.sh"
+printf '\n'
 run_sensor "$SCRIPT_DIR/preflight/vm.sh"
 printf '\n'
 run_sensor "$SCRIPT_DIR/preflight/vm-discovery.sh"

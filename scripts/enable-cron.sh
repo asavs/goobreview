@@ -22,6 +22,7 @@ ops_require_executable "$ROTATE_LOG" "This checkout looks incomplete."
 if [ ! -x /usr/bin/bash ]; then
   ops_die "Missing /usr/bin/bash; cron line would not be runnable."
 fi
+bash "$SCRIPT_DIR/preflight/checkout.sh" --strict --allow-setup-ref-mismatch
 
 ops_source_env "$ENV_FILE"
 ops_require_envs REVIEWER_REPO REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH
