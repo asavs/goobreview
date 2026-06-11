@@ -45,9 +45,12 @@ bash scripts/preflight/vm.sh
 ```
 
 If the VM is missing, pick defaults and proceed: the billing-ready project the
-sensor reported, `us-central1-a`, `goobreview-1`. Ask only when there is a
-genuine choice — multiple billing-ready projects or multiple open billing
-accounts. State the project/zone/name in one line, then run the flag path:
+sensor reported, `us-central1-a`, `goobreview-1`. If there are no projects but
+exactly one open billing account, generate a valid `goobreview-*` project ID,
+state that you will create and link it, then let `bootstrap-gcp.sh` do the
+project creation and billing link. Ask only when there is a genuine choice —
+multiple billing-ready projects or multiple open billing accounts. State the
+project/zone/name in one line, then run the flag path:
 
 ```bash
 bash scripts/bootstrap-gcp.sh \
