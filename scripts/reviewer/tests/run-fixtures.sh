@@ -266,6 +266,7 @@ JSON
 
   REPO="example/repo"
 
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
   github_api_get() {
     if [ "${1:-}" = "repos/example/repo/pulls/999" ] && [ "${2:-}" = "application/vnd.github.diff" ]; then
       printf 'diff --git a/src/auth.py b/src/auth.py\n+++ b/src/auth.py\n@@ -1,0 +1,1 @@\n+def get_user_from_request(request): pass\n'
@@ -279,6 +280,7 @@ JSON
     return 1
   }
 
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
   github_api_paginate_array() {
     if [ "${1:-}" = "repos/example/repo/pulls/999/files" ]; then
       printf '%s\n' '{"filename":"client/src/auth.py"}'
@@ -345,6 +347,7 @@ JSON
   mkdir -p "$worktree_dir"
   REPO="example/repo"
 
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
   github_api_get() {
     if [ "${1:-}" = "repos/example/repo/pulls/999" ] && [ "${2:-}" = "application/vnd.github.diff" ]; then
       return 1
@@ -353,6 +356,7 @@ JSON
     return 1
   }
 
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
   github_api_paginate_array() {
     if [ "${1:-}" = "repos/example/repo/pulls/999/files" ]; then
       printf '%s\n' '{"filename":"client/src/auth.py"}'
