@@ -6,6 +6,8 @@ End-to-end setup from a fresh fork to a posting reviewer in about 10 minutes. As
 
 Click the **Open in Cloud Shell** button on the [project README](../README.md) (or run `git clone https://github.com/asavschaeffer/goobreview.git` in any Cloud Shell session). Cloud Shell is a browser terminal with `gcloud` pre-authenticated to your Google account.
 
+If you created a private copy of this template, do not use the one-click Cloud Shell bootstrap yet. The VM must fetch `setup-vm.sh` and clone the template without interactive credentials, so keep the copy public during bootstrap or use the [Manual VM Setup](#manual-vm-setup) path.
+
 At any point, run:
 
 ```bash
@@ -79,7 +81,7 @@ It starts a tiny local server, using Cloud Shell's standard port 8080 unless tha
 1. Click the link to GitHub's pre-filled App-creation form (name, homepage, webhook off, all five permissions already set). At the bottom of the GitHub form, click **Create GitHub App**. On the App's settings page that loads, click **Generate a private key** to download the `.pem` and note the **App ID** at the top.
 2. Back on the helper page, upload the `.pem` and paste the App ID. The helper signs a JWT to verify them, ships the key to the VM, pre-populates `REVIEWER_APP_ID` in `reviewer.env`, and shows an **Install ... on a repo ->** link. Click it and pick your target repo. If you passed `--repo`, keep the helper page open; it detects the installation ID and writes `REVIEWER_REPO` plus `REVIEWER_APP_INSTALLATION_ID`.
 
-When the script finishes, the App's private key is at `/var/lib/goobreview/example/app-key.pem` on the VM and `REVIEWER_APP_ID` is filled in. The `.pem` lives only in Cloud Shell and on the VM &mdash; never on your local machine. See [docs/github-app-setup.md](github-app-setup.md) for the App identity, permissions, and the by-hand path.
+When the script finishes, the App's private key is at `/var/lib/goobreview/example/app-key.pem` on the VM and `REVIEWER_APP_ID` is filled in. GitHub may download the `.pem` to your browser's Downloads folder before you upload it to the helper; after the helper confirms the key is on the VM, delete the local download. See [docs/github-app-setup.md](github-app-setup.md) for the App identity, permissions, and the by-hand path.
 
 Registering under an organization instead of your personal account:
 
@@ -198,6 +200,6 @@ To pause: edit the crontab (`crontab -e`) and comment out the line, or `sudo sys
 
 For non-Cloud-Shell paths (own hardware, AWS, manual GCP, corporate GitHub, etc.), keep the same order but use the canonical references for the pieces Cloud Shell normally automates:
 
-1. Provision a small Ubuntu LTS VM, install the tools, and clone the template using [docs/vm-setup.md](vm-setup.md).
+1. Provision a small Ubuntu LTS VM, run `bash scripts/setup-vm.sh` to install the tools and clone the template, using [docs/vm-setup.md](vm-setup.md) for details.
 2. Register and install the App using [docs/github-app-setup.md](github-app-setup.md). If registering manually, place the `.pem` at `/var/lib/goobreview/example/app-key.pem` with mode `0600`.
 3. Continue at [Step 4 above](#4-finish-setup-on-the-vm) for Gemini auth, `scripts/configure.sh`, dry run, and scheduler enablement.

@@ -11,6 +11,8 @@ You will need:
 
 The setup intentionally pauses for browser-only steps. When it does, finish the browser action, return to Cloud Shell, and keep going.
 
+The Cloud Shell bootstrap path expects this template checkout to be readable without interactive credentials from the VM. If you made a private template copy, either keep it public during bootstrap or use the manual VM setup path.
+
 At any point, run:
 
 ```bash
@@ -110,7 +112,7 @@ This starts a tiny local server on port 8080 unless that port is already occupie
 3. On the App's settings page that loads, click **Generate a private key** to download the `.pem`, and note the **App ID** at the top.
 4. Back on the Web Preview page, upload the `.pem` and paste the App ID. After it verifies, click **Install ... on a repo ->** and pick your target repo. If you passed `--repo`, keep the helper page open until it reports the installation ID.
 
-When the script finishes, the private key is on the VM at `/var/lib/goobreview/example/app-key.pem` and the App ID is pre-filled in `reviewer.env`. The key only lives in Cloud Shell and on the VM &mdash; never on your local machine.
+When the script finishes, the private key is on the VM at `/var/lib/goobreview/example/app-key.pem` and the App ID is pre-filled in `reviewer.env`. GitHub may download the `.pem` to your browser's Downloads folder before you upload it to the helper; after the helper confirms the key is on the VM, delete the local download.
 
 Quick check:
 

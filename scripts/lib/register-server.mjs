@@ -88,7 +88,7 @@ function renderForm() {
   <p class="muted">If <code>${htmlEscape(manifest.name)}</code> is taken, change the name on the GitHub form &mdash; it has to be globally unique. Then on the App's settings page, scroll to <strong>Private keys</strong> &rarr; <strong>Generate a private key</strong> to download the <code>.pem</code>, and note the <strong>App ID</strong> at the top.</p>
 
   <h2>2. Upload the key</h2>
-  <p>Submit the downloaded <code>.pem</code> and the App ID below. They're forwarded to your VM by <code>register-app.sh</code> and never leave this Cloud Shell session.</p>
+  <p>Submit the downloaded <code>.pem</code> and the App ID below. <code>register-app.sh</code> forwards the key to your VM; after success, delete the browser download.</p>
   ${TARGET_REPO ? `<p class="muted">After the key is verified, this page will ask you to install the App on <code>${htmlEscape(TARGET_REPO)}</code> and will detect the installation ID automatically.</p>` : ''}
   <div class="upload">
     <form method="POST" action="/complete" enctype="multipart/form-data">
@@ -151,7 +151,7 @@ function renderSuccess(summary) {
 </head>
 <body>
   <h1>App registered: ${htmlEscape(summary.name)}</h1>
-  <p>App ID <code>${htmlEscape(summary.id)}</code>, slug <code>${htmlEscape(summary.slug)}</code>. The private key is on the VM.</p>
+  <p>App ID <code>${htmlEscape(summary.id)}</code>, slug <code>${htmlEscape(summary.slug)}</code>. The private key is on the VM; delete the downloaded <code>.pem</code> from this browser.</p>
   ${pollingHtml}
 </body>
 </html>`;

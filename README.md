@@ -15,11 +15,11 @@ bash scripts/bootstrap-gcp.sh
 bash scripts/register-app.sh
 ```
 
-`bootstrap-gcp.sh` creates the VM, installs dependencies, and saves the selected VM name/zone for the next step. `register-app.sh` uses that saved handoff, then spins up a local web helper that walks you through creating the GitHub App from a pre-filled form, uploading its private key, and installing it on your target repo &mdash; with the `.pem` going straight from Cloud Shell to the VM, never to your local machine.
+`bootstrap-gcp.sh` creates the VM, installs dependencies, and saves the selected VM name/zone for the next step. `register-app.sh` uses that saved handoff, then spins up a local web helper that walks you through creating the GitHub App from a pre-filled form, uploading its private key, and installing it on your target repo. GitHub may download the `.pem` to your browser's Downloads folder; upload it to the helper, confirm it reached the VM, then delete the local download.
 
 At any point, run `bash scripts/status.sh` to see which setup phase is complete and what to do next. After configuration, use `scripts/dry-run.sh` and `scripts/tune.sh` to inspect and adjust the reviewer's behavior before enabling the scheduler.
 
-> Want your own copy to customize? Click **Use this template** at the top of this repo on GitHub. A first-push workflow (`.github/workflows/template-cleanup.yml`) auto-personalizes the Cloud Shell button, bootstrap script, and clone URL to point at your new repo.
+> Want your own copy to customize? Click **Use this template** at the top of this repo on GitHub. A first-push workflow (`.github/workflows/template-cleanup.yml`) auto-personalizes the Cloud Shell button, bootstrap script, and clone URL to point at your new repo. The one-click Cloud Shell bootstrap requires that copy to be public while the VM installs; private copies should use the manual VM path in [docs/vm-setup.md](docs/vm-setup.md).
 
 ## Manual Setup
 

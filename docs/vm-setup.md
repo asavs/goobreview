@@ -45,16 +45,47 @@ projects and zones, filtering for likely GoobReview instance names.
 
 Keep firewall exposure minimal. The reviewer needs outbound HTTPS and inbound SSH only.
 
-## Base Packages
+## Install GoobReview Runtime
 
-On Ubuntu:
+After SSHing to the VM, the recommended manual path is to run the same installer
+the Cloud Shell bootstrap uses. It installs base packages, GitHub CLI, Node 20,
+Gemini CLI, the checkout, the state directory, and optional swap:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/asavschaeffer/goobreview/main/scripts/setup-vm.sh | bash
+```
+
+For your own public template copy, replace the URL and repo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/YOUR/REPO/main/scripts/setup-vm.sh \
+  | GOOBREVIEW_REPO_URL=https://github.com/YOUR/REPO.git bash
+```
+
+For a private repository, copy or clone it onto the VM using credentials you
+control, then run the checked-out installer locally:
+
+```bash
+cd /path/to/private/goobreview
+GOOBREVIEW_CHECKOUT_DIR="$PWD" bash scripts/setup-vm.sh
+```
+
+The script is idempotent; rerun it when you need to repair missing tools or the
+default `/opt/goobreview/example` and `/var/lib/goobreview/example` layout.
+
+## Manual Package Reference
+
+Use this only if you cannot run `scripts/setup-vm.sh`.
+
+On Ubuntu, install the base packages first:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils nodejs npm
+sudo apt-get install -y git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils
 ```
 
-`flock` comes from `util-linux`; `timeout` comes from `coreutils`.
+`flock` comes from `util-linux`; `timeout` comes from `coreutils`. Do not rely
+on Ubuntu's `nodejs` package on older LTS images; install Node 20 or newer.
 
 ## Install GitHub CLI
 
@@ -73,7 +104,7 @@ GoobReview does not call `gh auth login`. Setup, tuning, prompt rendering, and b
 
 ## Install Gemini CLI
 
-The Gemini CLI project documents npm installation:
+The Gemini CLI project documents npm installation. It requires Node 20 or newer:
 
 - https://github.com/google-gemini/gemini-cli
 - https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/index.md
@@ -116,11 +147,11 @@ If this prompts for authorization or times out, run `gemini` interactively again
 
 ## Clone The Template
 
-Use one stable checkout per reviewer identity:
+Use one stable checkout and state directory per reviewer identity:
 
 ```bash
-sudo mkdir -p /opt/goobreview
-sudo chown "$USER:$USER" /opt/goobreview
+sudo mkdir -p /opt/goobreview/example /var/lib/goobreview/example
+sudo chown -R "$USER:$USER" /opt/goobreview /var/lib/goobreview
 git clone https://github.com/asavschaeffer/goobreview.git /opt/goobreview/example
 cd /opt/goobreview/example
 git checkout --detach origin/main

@@ -98,7 +98,57 @@ fi
 REPO_URL="${GOOBREVIEW_REPO_URL:-https://github.com/${detected_owner_repo}.git}"
 SETUP_VM_URL="${GOOBREVIEW_SETUP_VM_URL:-https://raw.githubusercontent.com/${detected_owner_repo}/main/scripts/setup-vm.sh}"
 
+preflight_source_access() {
+  local setup_probe ls_remote_err
+
+  setup_probe=$(mktemp)
+  if ! curl -fsSL --max-time 20 "$SETUP_VM_URL" -o "$setup_probe"; then
+    rm -f "$setup_probe"
+    cat >&2 <<EOF
+[bootstrap-gcp] Cannot fetch setup-vm.sh before creating the VM:
+  $SETUP_VM_URL
+
+The Cloud Shell bootstrap path must be able to fetch setup-vm.sh and clone the
+template repo from the VM without interactive credentials. This usually means
+the template copy is private.
+
+Make the template copy public before running bootstrap, or use the manual VM
+path in docs/vm-setup.md where you can copy a private checkout yourself.
+EOF
+    exit 1
+  fi
+  if ! grep -q 'setup-vm' "$setup_probe"; then
+    rm -f "$setup_probe"
+    ops_die "Fetched $SETUP_VM_URL, but it does not look like scripts/setup-vm.sh."
+  fi
+  rm -f "$setup_probe"
+
+  ls_remote_err=$(mktemp)
+  if ! git ls-remote --exit-code "$REPO_URL" HEAD >/dev/null 2>"$ls_remote_err"; then
+    cat >&2 <<EOF
+[bootstrap-gcp] Cannot read the source repo before creating the VM:
+  $REPO_URL
+
+The VM setup later runs:
+  git clone $REPO_URL /opt/goobreview/example
+
+That clone must work without interactive credentials. Make the template copy
+public, set GOOBREVIEW_REPO_URL/GOOBREVIEW_SETUP_VM_URL to URLs the VM can read,
+or use the manual VM path in docs/vm-setup.md for private repositories.
+
+git said:
+$(sed -n '1,8p' "$ls_remote_err")
+EOF
+    rm -f "$ls_remote_err"
+    exit 1
+  fi
+  rm -f "$ls_remote_err"
+}
+
+ops_require_command curl "Run this in Google Cloud Shell, or install curl first."
+ops_require_command git "Run this in Google Cloud Shell, or install git first."
 ops_require_command gcloud "Run this in Google Cloud Shell, or install gcloud first."
+preflight_source_access
 
 print_billing_setup_help() {
   cat >&2 <<MSG
