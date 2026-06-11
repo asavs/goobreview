@@ -21,6 +21,8 @@ MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
 INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
+RUNTIME_OWNER="${USER:-$(id -u 2>/dev/null || printf user)}"
+RUNTIME_STATE_DIR="${REVIEWER_RUNTIME_STATE:-${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/goobreview-runtime-$RUNTIME_OWNER}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
 PROMPT_FILE="${REVIEWER_PROMPT:-$SCRIPT_DIR/review-prompt.md}"
@@ -67,6 +69,9 @@ LOCK_FILE="$STATE_DIR/lock"
 GEMINI_BACKOFF_FILE="$STATE_DIR/gemini_backoff_until"
 
 mkdir -p "$STATE_DIR"
+mkdir -p "$RUNTIME_STATE_DIR"
+chmod 700 "$RUNTIME_STATE_DIR" 2>/dev/null || true
+"$SCRIPT_DIR/rotate-log.sh" "$LOG_FILE" 2>/dev/null || true
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
@@ -109,14 +114,13 @@ if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$IGNORE_GEMINI_BACKOFF" ]; then
   fi
 fi
 
-if [ -z "${GH_TOKEN:-}" ]; then
-  GH_TOKEN=$("$SCRIPT_DIR/get-installation-token.sh" token 2>>"$LOG_FILE") || { log "failed to mint installation token"; exit 1; }
-  export GH_TOKEN
-fi
+GH_TOKEN=$("$SCRIPT_DIR/get-installation-token.sh" token 2>>"$LOG_FILE") || fatal "failed to mint installation token"
+export GH_TOKEN
 if [ -z "${REVIEWER_APP_SLUG:-}" ]; then
-  REVIEWER_APP_SLUG=$("$SCRIPT_DIR/get-installation-token.sh" slug 2>>"$LOG_FILE") || { log "failed to fetch app slug"; exit 1; }
+  REVIEWER_APP_SLUG=$("$SCRIPT_DIR/get-installation-token.sh" slug 2>>"$LOG_FILE") || fatal "failed to fetch app slug"
 fi
 BOT_LOGIN="${REVIEWER_APP_SLUG}[bot]"
+BOT_AUTHOR="app/${REVIEWER_APP_SLUG}"
 
 if [ -n "$ONLY_PR" ] && { [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; }; then
   if ! PRS=$(github_api_get "repos/$REPO/pulls/$ONLY_PR" 2>>"$LOG_FILE" |
@@ -136,7 +140,7 @@ review_actions=0
 
 while IFS=$'\t' read -r num author head_sha draft; do
   [ -n "${num:-}" ] || continue
-  if skip_reason=$(reviewer_pr_skip_reason "$num" "$author" "$head_sha" "${draft:-false}" "$BOT_LOGIN" "$EXTRA_SKIP_USER" "$ONLY_PR"); then
+  if skip_reason=$(reviewer_pr_skip_reason "$num" "$author" "$head_sha" "${draft:-false}" "$BOT_LOGIN" "$EXTRA_SKIP_USER" "$ONLY_PR" "$BOT_AUTHOR"); then
     log "$skip_reason"
     continue
   fi
@@ -148,8 +152,8 @@ while IFS=$'\t' read -r num author head_sha draft; do
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
     if ! existing=$(github_api_paginate_array "repos/$REPO/pulls/$num/reviews" 2>>"$LOG_FILE" |
-      jq -s --arg bot "$BOT_LOGIN" --arg head "$head_sha" \
-        '[.[] | select(.user.login == $bot and .commit_id == $head)] | length'); then
+      jq -s --arg bot "$BOT_LOGIN" --arg bot_author "$BOT_AUTHOR" --arg head "$head_sha" \
+        '[.[] | select((.user.login == $bot or .user.login == $bot_author) and .commit_id == $head)] | length'); then
       log "PR #$num@$head_sha: failed to read existing reviews, will retry next tick"
       continue
     fi
@@ -320,17 +324,6 @@ EOF
   fi
 
   review_body=$(printf '%s' "$review" | review_body_after_verdict)
-  if [ "$author" = "$BOT_LOGIN" ] && [ "$event" != "COMMENT" ]; then
-    log "PR #$num is authored by $BOT_LOGIN; posting $event verdict as COMMENT"
-    event="COMMENT"
-    review_body=$(cat <<EOF
-Note: GitHub does not allow @$BOT_LOGIN to approve or request changes on their own PR, so this automated review was posted as a comment.
-
-$review_body
-EOF
-)
-  fi
-
   body=$(cat <<EOF
 $review_body
 

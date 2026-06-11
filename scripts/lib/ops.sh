@@ -44,6 +44,25 @@ ops_require_file() {
   fi
 }
 
+ops_require_private_key() {
+  local path="$1"
+  local mode
+
+  ops_require_file "$path" "Set REVIEWER_APP_PRIVATE_KEY_PATH, then run chmod 600 on the key."
+  if [ ! -s "$path" ] || [ ! -r "$path" ]; then
+    ops_die "Private key is empty or unreadable: $path"
+  fi
+  mode=$(stat -c '%a' "$path" 2>/dev/null || true)
+  case "$mode" in
+    ''|*[!0-7]*)
+      ops_die "Could not read private key permissions for $path."
+      ;;
+  esac
+  if [ $((8#$mode & 077)) -ne 0 ]; then
+    ops_die "Private key permissions must not grant group/other access: $path has mode $mode. Run chmod 600 '$path'."
+  fi
+}
+
 ops_require_executable() {
   local path="$1" hint="${2:-}"
   if [ ! -x "$path" ]; then

@@ -59,8 +59,8 @@ run_gemini_review() {
   local worktree_dir="$3"
   local runtime_dir settings_file context_file_name
 
-  runtime_dir="$STATE_DIR/gemini-runtime"
-  settings_file="$STATE_DIR/gemini-settings.json"
+  runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/gemini-runtime"
+  settings_file="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/gemini-settings.json"
   context_file_name=".goobreview-gemini-context-disabled.md"
 
   mkdir -p "$runtime_dir"

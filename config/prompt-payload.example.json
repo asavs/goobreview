@@ -31,7 +31,7 @@
     },
     "relevant_guidance": {
       "enabled": true,
-      "description": "Local project guidance selected from changed paths. Use paths_only to keep the prompt lean, or full_content to paste matching docs.",
+      "description": "Configured guidance paths selected from changed paths. Use paths_only to keep the prompt lean, or full_content to paste matching PR-head docs with untrusted framing.",
       "mode": "paths_only",
       "max_lines_per_file": 220,
       "rules": [
@@ -52,7 +52,7 @@
     },
     "source_snapshot_hint": {
       "enabled": true,
-      "description": "Short reminder that Gemini has read-only tool access to the PR-head source snapshot.",
+      "description": "Short reminder that Gemini has read-only tool access to the untrusted PR-head source snapshot.",
       "example": "You may inspect the read-only PR-head source tree when adjacent files are needed to verify a concrete issue raised by the diff."
     },
     "all_check_summary": {
@@ -62,12 +62,12 @@
     },
     "full_file_tree": {
       "enabled": false,
-      "description": "All repository paths at the PR head SHA, generated from the read-only source snapshot.",
+      "description": "All repository paths at the PR head SHA, generated from the untrusted read-only source snapshot.",
       "example": "AGENTS.md\nclient/src/App.tsx\nserver/spacetimedb/src/lib.rs"
     },
     "selected_file_contents": {
       "enabled": false,
-      "description": "Configured files copied from the PR-head source snapshot. This reproduces the older MOG-style context payload when enabled.",
+      "description": "Configured files copied from the untrusted PR-head source snapshot. This reproduces the older MOG-style context payload when enabled.",
       "max_lines_per_file": 180,
       "paths": [
         "AGENTS.md",
@@ -80,7 +80,7 @@
     },
     "diff": {
       "enabled": true,
-      "description": "The PR diff. This should almost always stay enabled.",
+      "description": "The untrusted PR diff. This should almost always stay enabled.",
       "example": "diff --git a/client/src/environment.ts b/client/src/environment.ts"
     },
     "response_format": {

@@ -143,7 +143,7 @@ Verify headless mode from the same checkout:
 printf 'say hi in three words' | timeout 60s gemini -m auto -p ""
 ```
 
-If this prompts for authorization or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_STATE/gemini-runtime` with the PR-head source snapshot attached as read-only workspace context. For that isolated runtime call, GoobReview sets Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override and writes system settings that disable project context filename loading, local `.env` loading, shell tools, and MCP servers.
+If this prompts for authorization or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_RUNTIME_STATE/gemini-runtime` with the PR-head source snapshot attached as read-only workspace context. For that isolated runtime call, GoobReview sets Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override and writes system settings that disable project context filename loading, local `.env` loading, shell tools, and MCP servers.
 
 ## Clone The Template
 

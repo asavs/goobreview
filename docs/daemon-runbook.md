@@ -9,6 +9,7 @@ Preferred layout:
 ```text
 /opt/goobreview/<name>          Stable checkout of this template repo.
 /var/lib/goobreview/<name>      Runtime state and logs.
+/tmp/goobreview-runtime-<user>  Default PR snapshot and Gemini runtime root.
 ```
 
 Runtime state:
@@ -20,10 +21,15 @@ lock                    flock lock file.
 gemini_backoff_until    Quota/capacity retry timestamp.
 sync.log                Checkout sync log.
 app_token.json          Cached App installation token + slug (refreshed when <5 min remain).
-gemini-settings.json    Gemini CLI settings written before each review call (tools, context, MCP policy).
 app-key.pem             GitHub App private key (you provide; mode 0600).
 dry-pr-<number>.txt     Dry-run artifact with full Gemini prompt payload and response.
 ```
+
+PR-head source snapshots, Gemini's isolated working directory, and
+`gemini-settings.json` are written under `REVIEWER_RUNTIME_STATE`, which
+defaults to `${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/goobreview-runtime-$USER`.
+Keeping those files away from `REVIEWER_APP_PRIVATE_KEY_PATH` provides
+defense in depth if a model is ever tricked into path traversal.
 
 Gemini's Google-account OAuth cache lives under the VM user's home directory,
 usually `~/.gemini`, not in `REVIEWER_STATE`. Keep it owned by the Unix user
@@ -75,8 +81,13 @@ Run every minute:
 
 ```cron
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-* * * * * cd /opt/goobreview/example && REVIEWER_ENV_FILE=/opt/goobreview/example/config/reviewer.env /usr/bin/bash scripts/reviewer/run-once.sh >> /var/lib/goobreview/example/cron.log 2>&1
+* * * * * cd /opt/goobreview/example && REVIEWER_ENV_FILE=/opt/goobreview/example/config/reviewer.env /usr/bin/bash scripts/reviewer/rotate-log.sh /var/lib/goobreview/example/cron.log && REVIEWER_ENV_FILE=/opt/goobreview/example/config/reviewer.env /usr/bin/bash scripts/reviewer/run-once.sh >> /var/lib/goobreview/example/cron.log 2>&1
 ```
+
+`scripts/enable-cron.sh` installs this with shell-quoted paths. The
+`rotate-log.sh` pre-step keeps `cron.log` from growing forever. The daemon
+also rotates `log.txt` and `sync.log`; tune this with
+`REVIEWER_LOG_MAX_BYTES` and `REVIEWER_LOG_ROTATE_KEEP`.
 
 `run-once.sh` loads `config/reviewer.env`, syncs the template checkout, then runs one reviewer tick.
 
@@ -114,6 +125,11 @@ sudo systemctl edit --full goobreview.service   # adjust paths/user if needed
 sudo systemctl edit --full goobreview.timer
 ```
 
+The example service includes a dry-run artifact gate. It refuses to run until
+`$REVIEWER_STATE` contains `dry-run-*.txt` or `dry-pr-*.txt`; set
+`REVIEWER_ALLOW_ENABLE_SYSTEMD_WITHOUT_DRY_RUN=1` only for an intentional
+override.
+
 ### Validate One Run
 
 ```bash
@@ -126,7 +142,7 @@ sudo journalctl -u goobreview.service -n 100 --no-pager
 If this fails, fix the service before enabling the timer. Common causes:
 
 - App private key not readable by the `goobreview` Unix user, or `REVIEWER_APP_*` env vars not set.
-- Gemini CLI has not authenticated for the Unix user that runs the service, or the checkout trust prompt was never completed. The daemon runtime under `REVIEWER_STATE/gemini-runtime` uses Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override, but initial Google-account auth still needs to exist.
+- Gemini CLI has not authenticated for the Unix user that runs the service, or the checkout trust prompt was never completed. The daemon runtime under `REVIEWER_RUNTIME_STATE/gemini-runtime` uses Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override, but initial Google-account auth still needs to exist.
 - `config/reviewer.env` is missing or points to the wrong target repo.
 - The App is not installed on `REVIEWER_REPO` (token mint will fail).
 - The checkout is dirty, so `sync-worktree.sh` refuses to run.
@@ -151,9 +167,9 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 4. Skips PRs authored by `BOT_LOGIN` (`<app-slug>[bot]`); also skips PRs authored by `REVIEWER_USER` if set.
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
 6. Applies the required-check gate.
-7. Downloads a PR-head source snapshot to `REVIEWER_STATE/worktrees/<repo>/current`.
+7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`.
 8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata, CI one-liner, changed paths, relevant guidance, diff, and the GitHub review formatting rule).
-9. Runs Gemini CLI headlessly from `REVIEWER_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
+9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Posts a top-level GitHub review with `gh pr review`.
 12. Applies optional labels.
@@ -225,7 +241,7 @@ without any edits.
 
 ### `reviewer.env`
 
-Environment for the daemon. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`. See `config/reviewer.env.example` for the full list with inline comments.
+Environment for the daemon. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`. Optional runtime and log controls include `REVIEWER_RUNTIME_STATE`, `REVIEWER_LOG_MAX_BYTES`, and `REVIEWER_LOG_ROTATE_KEEP`. See `config/reviewer.env.example` for the full list with inline comments.
 
 ### Personality
 
@@ -285,7 +301,7 @@ Important segment details:
   failing required checks stop review before Gemini is called.
 - `relevant_guidance.rules` maps changed path patterns to local docs.
   Use `paths_only` for a lean prompt, or `full_content` to paste the
-  matching docs.
+  matching PR-head docs with untrusted framing.
 - `full_file_tree` and `selected_file_contents` are off by default and
   exist for users who want a verbose repo-aware reviewer.
 
@@ -334,10 +350,10 @@ voice, role, and focus — pick (or write) a file in
 
 - Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
 - Very large diffs may exceed useful Gemini context.
-- PR-head source snapshots are provided as read-only context under `REVIEWER_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot.
+- PR-head source snapshots are provided as read-only context under `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_RUNTIME_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot.
 - Google-account Gemini CLI auth is still an interactive, user-bound setup step. Gemini CLI's documented non-interactive auth modes are Gemini API key or Vertex AI; those do not preserve personal Google AI Pro/Ultra subscription entitlement.
 - The daemon does not inspect full CI logs; it gates on the configured required-check state.
 - The daemon does not create follow-up issues automatically.
 - The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.
-- The checkout must stay clean. `sync-worktree.sh` refuses to run from a dirty checkout.
+- The checkout must stay clean. `sync-worktree.sh` refuses to update a dirty checkout; `run-once.sh` logs that failure and continues one reviewer tick with the current checkout.
 - Each cron tick posts at most `REVIEWER_MAX_PRS` reviews, defaulting to one.
