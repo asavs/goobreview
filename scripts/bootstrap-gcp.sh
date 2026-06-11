@@ -17,6 +17,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 STATE_FILE="$REPO_ROOT/.goobreview-cloud-shell.env"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/gcloud.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/vm.sh"
 export OPS_LOG_PREFIX="bootstrap-gcp"
 
 PROJECT_ARG=""
@@ -173,44 +177,6 @@ After billing is active, re-run:
 MSG
 }
 
-list_direct_billing_accounts() {
-  gcloud billing accounts list --filter='open=true' \
-    --format='value(name,displayName)' 2>/dev/null || true
-}
-
-list_project_linked_billing_accounts() {
-  local project_id info billing_account billing_enabled seen
-  seen=""
-
-  while IFS= read -r project_id; do
-    [ -n "$project_id" ] || continue
-    info=$(gcloud billing projects describe "$project_id" \
-      --format='value(billingAccountName,billingEnabled)' 2>/dev/null || true)
-    IFS=$'\t' read -r billing_account billing_enabled <<< "$info"
-    case "$billing_enabled" in
-      True|true|TRUE) ;;
-      *) continue ;;
-    esac
-    billing_account="${billing_account#billingAccounts/}"
-    [ -n "$billing_account" ] || continue
-    case "$seen" in
-      *"|$billing_account|"*) continue ;;
-    esac
-    seen="${seen}|$billing_account|"
-    printf '%s\tlinked via %s\n' "$billing_account" "$project_id"
-  done < <(gcloud projects list --format='value(projectId)' 2>/dev/null || true)
-}
-
-list_open_billing_accounts() {
-  local direct linked combined
-
-  direct=$(list_direct_billing_accounts)
-  linked=$(list_project_linked_billing_accounts)
-  combined=$(printf '%s\n%s\n' "$direct" "$linked" | awk -F '\t' 'NF && !seen[$1]++')
-
-  printf '%s' "$combined"
-}
-
 select_billing_account() {
   local billing_raw="$1"
   local count name display choice
@@ -266,7 +232,7 @@ select_billing_account() {
 
 validate_project_id() {
   local project_id="$1"
-  if ! [[ "$project_id" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]; then
+  if ! gcloud_project_id_valid "$project_id"; then
     cat >&2 <<MSG
 [bootstrap-gcp] Project ID must be 6-30 chars, start with a lowercase
 letter, contain only lowercase letters/digits/hyphens, and not end with
@@ -283,7 +249,7 @@ create_project_with_billing() {
   validate_project_id "$project_id" || return 1
 
   printf '[bootstrap-gcp] Finding usable billing accounts...\n' >&2
-  billing_raw=$(list_open_billing_accounts)
+  billing_raw=$(gcloud_list_open_billing_accounts)
   billing_account=$(select_billing_account "$billing_raw") || return 1
 
   printf '[bootstrap-gcp] Creating project %s...\n' "$project_id" >&2
@@ -308,19 +274,6 @@ MSG
   printf '[bootstrap-gcp] Project %s ready.\n' "$project_id" >&2
 }
 
-project_exists() {
-  gcloud projects describe "$1" --format='value(projectId)' >/dev/null 2>&1
-}
-
-project_billing_enabled() {
-  local enabled
-  enabled=$(gcloud billing projects describe "$1" --format='value(billingEnabled)' 2>/dev/null || true)
-  case "$enabled" in
-    True|true|TRUE) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 link_project_billing_interactive() {
   local project_id="$1"
   local billing_raw billing_account
@@ -330,7 +283,7 @@ link_project_billing_interactive() {
   fi
 
   printf '[bootstrap-gcp] Finding usable billing accounts...\n' >&2
-  billing_raw=$(list_open_billing_accounts)
+  billing_raw=$(gcloud_list_open_billing_accounts)
   billing_account=$(select_billing_account "$billing_raw") || return 1
 
   printf '[bootstrap-gcp] Linking billing account...\n' >&2
@@ -340,7 +293,7 @@ link_project_billing_interactive() {
 ensure_project_ready() {
   local project_id="$1"
 
-  if ! project_exists "$project_id"; then
+  if ! gcloud_project_exists "$project_id"; then
     cat >&2 <<EOF
 [bootstrap-gcp] Project '$project_id' does not exist or you cannot access it.
 EOF
@@ -352,7 +305,7 @@ EOF
     fi
   fi
 
-  if project_billing_enabled "$project_id"; then
+  if gcloud_project_billing_enabled "$project_id"; then
     return 0
   fi
 
@@ -388,7 +341,7 @@ create_project_interactive() {
   printf '%s' "$project_id"
 }
 
-current_project="${PROJECT_ARG:-$(gcloud config get-value project 2>/dev/null || true)}"
+current_project="${PROJECT_ARG:-$(gcloud_active_project)}"
 case "$current_project" in
   ''|'(unset)'|cloudshell-*)
     cat >&2 <<EOF
@@ -494,13 +447,12 @@ chmod 600 "$STATE_FILE" 2>/dev/null || true
 # Fresh GCP projects don't have the Compute Engine API enabled. Without this,
 # the next gcloud compute call will prompt interactively to enable it and
 # hang silently when run non-interactively. Idempotent — already-enabled is a no-op.
-if ! gcloud services list --enabled --filter='config.name=compute.googleapis.com' \
-     --format='value(config.name)' 2>/dev/null | grep -q compute.googleapis.com; then
+if ! gcloud_compute_api_enabled "$project"; then
   echo "Enabling Compute Engine API (takes ~30s)..."
   gcloud services enable compute.googleapis.com
 fi
 
-if gcloud compute instances describe "$vm_name" --zone="$zone" >/dev/null 2>&1; then
+if vm_instance_exists "$vm_name" "$zone"; then
   echo "VM '$vm_name' already exists in $zone. Skipping create."
 else
   echo "Creating VM..."

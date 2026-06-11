@@ -7,6 +7,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 STATE_FILE="$REPO_ROOT/.goobreview-cloud-shell.env"
 # shellcheck disable=SC1091
 . "$REPO_ROOT/scripts/lib/ops.sh"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/gcloud.sh"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/vm.sh"
 export OPS_LOG_PREFIX="preflight-vm"
 
 report=0
@@ -80,38 +84,22 @@ checkout_present="unknown"
 dependencies_present="unknown"
 dependency_report=""
 
-if command -v gcloud >/dev/null 2>&1; then
+if gcloud_command_found gcloud; then
   gcloud_found=1
   if [ -z "$project" ]; then
-    project="$(gcloud config get-value project 2>/dev/null || true)"
+    project="$(gcloud_active_project)"
   fi
 
-  if gcloud compute instances describe "$vm_name" --zone="$zone" >/dev/null 2>&1; then
+  if vm_instance_exists "$vm_name" "$zone"; then
     vm_exists="true"
   else
     vm_exists="false"
   fi
 
   if [ "$vm_exists" = "true" ] && command -v timeout >/dev/null 2>&1; then
-    if timeout 15 gcloud compute ssh "$vm_name" --zone="$zone" --quiet --command='true' >/dev/null 2>&1; then
+    if vm_ssh_reachable "$vm_name" "$zone" 15; then
       ssh_reachable="true"
-      # The command runs on the VM; keep $cmd expansion remote-side.
-      # shellcheck disable=SC2016
-      remote_probe="$(timeout 30 gcloud compute ssh "$vm_name" --zone="$zone" --quiet --command='
-        set -eu
-        if [ -d /opt/goobreview/example ]; then
-          printf "checkout_present=true\n"
-        else
-          printf "checkout_present=false\n"
-        fi
-        for cmd in git jq curl wget node gh gemini; do
-          if command -v "$cmd" >/dev/null 2>&1; then
-            printf "%s=true\n" "$cmd"
-          else
-            printf "%s=false\n" "$cmd"
-          fi
-        done
-      ' 2>/dev/null || true)"
+      remote_probe="$(vm_remote_dependency_probe "$vm_name" "$zone" 30)"
       checkout_present="$(report_value checkout_present "$remote_probe")"
       missing=""
       for cmd in git jq curl wget node gh gemini; do
