@@ -490,7 +490,8 @@ To finish:
   1. Register the GitHub App and ship its key to the VM (still in Cloud Shell):
        bash scripts/register-app.sh
 
-     Click the Web Preview button (port 8080); the page walks you through
+     Click the Web Preview button and use the port printed by register-app.sh;
+     the page walks you through
      creating the App via a pre-filled GitHub form and uploading its key.
 
      This checkout saved your VM details in .goobreview-cloud-shell.env.

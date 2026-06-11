@@ -12,7 +12,11 @@ At any point, run:
 bash scripts/status.sh
 ```
 
-It summarizes local config, dry-run/scheduler state, and the active GCloud project/billing readiness so you can see which setup step is next.
+It summarizes local config, dry-run/scheduler state, active GCloud project/billing readiness, and likely existing GoobReview VMs visible to your account. To run only the read-only VM search:
+
+```bash
+bash scripts/discover-vms.sh
+```
 
 If you can't use Cloud Shell, see the [Manual VM Setup](#manual-vm-setup) appendix at the end of this document.
 
@@ -56,16 +60,24 @@ Still in Cloud Shell:
 bash scripts/register-app.sh
 ```
 
+If you already know the target repository, pass it now. The helper will detect
+the GitHub App installation ID after you install the App and will pre-fill the
+repo plus installation ID on the VM:
+
+```bash
+bash scripts/register-app.sh --repo OWNER/REPO
+```
+
 The bootstrap step saved your selected VM name and zone in `.goobreview-cloud-shell.env`, so this command still works if you changed either default. From a fresh checkout, pass them explicitly:
 
 ```bash
-bash scripts/register-app.sh YOUR_VM_NAME YOUR_ZONE
+bash scripts/register-app.sh --repo OWNER/REPO YOUR_VM_NAME YOUR_ZONE
 ```
 
-It starts a tiny local server. Click Cloud Shell's **Web Preview** button -> **Preview on port 8080**. The page walks you through two steps:
+It starts a tiny local server, using Cloud Shell's standard port 8080 unless that port is already occupied. Click Cloud Shell's **Web Preview** button -> **Preview on port 8080** (or the fallback port printed in the terminal). The page walks you through two steps:
 
 1. Click the link to GitHub's pre-filled App-creation form (name, homepage, webhook off, all five permissions already set). At the bottom of the GitHub form, click **Create GitHub App**. On the App's settings page that loads, click **Generate a private key** to download the `.pem` and note the **App ID** at the top.
-2. Back on the helper page, upload the `.pem` and paste the App ID. The helper signs a JWT to verify them, ships the key to the VM, pre-populates `REVIEWER_APP_ID` in `reviewer.env`, and shows an **Install ... on a repo ->** link. Click it and pick your target repo.
+2. Back on the helper page, upload the `.pem` and paste the App ID. The helper signs a JWT to verify them, ships the key to the VM, pre-populates `REVIEWER_APP_ID` in `reviewer.env`, and shows an **Install ... on a repo ->** link. Click it and pick your target repo. If you passed `--repo`, keep the helper page open; it detects the installation ID and writes `REVIEWER_REPO` plus `REVIEWER_APP_INSTALLATION_ID`.
 
 When the script finishes, the App's private key is at `/var/lib/goobreview/example/app-key.pem` on the VM and `REVIEWER_APP_ID` is filled in. The `.pem` lives only in Cloud Shell and on the VM &mdash; never on your local machine. See [docs/github-app-setup.md](github-app-setup.md) for the App identity, permissions, and the by-hand path.
 
@@ -83,8 +95,10 @@ SSH to the VM, authenticate Gemini, and run the configure helper:
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 cd /opt/goobreview/example
 gemini                # Google OAuth - sign in, trust this folder, then /quit
-scripts/configure.sh  # prompts for target repo; auto-discovers installation ID
+scripts/configure.sh  # auto-detects target repo + installation ID when possible
 ```
+
+The `gemini` step is intentionally interactive when you want Google-account quota, including Google AI Pro or Ultra entitlement. Gemini CLI's documented non-interactive auth paths are `GEMINI_API_KEY` and Vertex AI credentials, which use API/Vertex quota and billing rather than personal subscription quota. Keep any Gemini API keys, Vertex credentials, or cached Google auth state out of this repo and checkout.
 
 `configure.sh` is the interactive wrapper. It prompts for human choices, then
 delegates deterministic writes and validation to `scripts/configure-inner.sh`.
@@ -92,8 +106,8 @@ delegates deterministic writes and validation to `scripts/configure-inner.sh`.
 `configure.sh`:
 
 - Copies each gitignored config file (`reviewer.env`, `required-checks.json`, `prompt-payload.json`) from its `.example` sibling.
-- Prompts for `REVIEWER_REPO` (the App ID is already filled in after `scripts/register-app.sh`; the by-hand path prompts for it).
-- Auto-discovers the installation ID by minting an App token and looking up the install on the target repo.
+- Auto-detects `REVIEWER_REPO` plus installation ID when the GitHub App installation exposes exactly one repo; otherwise prompts for the repo.
+- Auto-discovers the installation ID from the repo when it was not already filled by the registration helper or repo detection.
 - Lists the personalities in `config/personalities/` and writes your pick to `REVIEWER_PERSONALITY_FILE` in `reviewer.env`.
 - Lets you pick a prompt payload profile (`lean`, `minimal`, `guided`, `full`, or custom). The generated `config/prompt-payload.json` shows every possible prompt segment with an enabled flag, description, and example.
 - Offers to open each config file in `$EDITOR`.
@@ -103,7 +117,6 @@ For agent-driven or scripted setup, call the non-interactive core directly:
 
 ```bash
 scripts/configure-inner.sh \
-  --repo OWNER/REPO \
   --app-id APP_ID \
   --key-path /var/lib/goobreview/example/app-key.pem \
   --personality config/personalities/control.md \
@@ -111,6 +124,7 @@ scripts/configure-inner.sh \
 ```
 
 Add `--create-labels` only when you want the helper labels created. Add
+`--repo OWNER/REPO` if the App has access to multiple repos. Add
 `--installation-id ID` if you already know it; otherwise the script discovers it.
 
 The most consequential choice is **which personality**: it defines the reviewer's role, voice, and focus areas. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.

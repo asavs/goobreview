@@ -18,6 +18,13 @@ bash scripts/status.sh
 ```
 
 It prints the current GCloud, VM, GitHub App, config, and runtime state with a recommended next action.
+It also runs a read-only VM discovery pass across accessible projects using
+`gcloud compute instances list`, which can help you find an existing
+GoobReview VM without creating anything. Run only that helper with:
+
+```bash
+bash scripts/discover-vms.sh
+```
 
 ## 1. Run the bootstrap script
 
@@ -83,18 +90,25 @@ From Cloud Shell (still in the goobreview checkout):
 bash scripts/register-app.sh
 ```
 
+If you know the target repository, pass it now so the helper can save the
+installation ID after you install the App:
+
+```bash
+bash scripts/register-app.sh --repo OWNER/REPO
+```
+
 If you accepted a custom VM name or zone during bootstrap, keep using the no-argument command above from the same Cloud Shell checkout. `bootstrap-gcp.sh` saved the handoff details locally. If you start from a fresh checkout instead, pass them explicitly:
 
 ```bash
-bash scripts/register-app.sh YOUR_VM_NAME YOUR_ZONE
+bash scripts/register-app.sh --repo OWNER/REPO YOUR_VM_NAME YOUR_ZONE
 ```
 
-This starts a tiny local server. Keep the terminal open while you use the browser page. The walkthrough is:
+This starts a tiny local server on port 8080 unless that port is already occupied. Keep the terminal open while you use the browser page. The walkthrough is:
 
-1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port 8080**.
+1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port 8080** (or the fallback port printed in the terminal).
 2. In the new browser tab, click through to the **pre-filled GitHub form** (it already has the name, homepage, webhook setting, and the five permissions set). At the bottom click **Create GitHub App**.
 3. On the App's settings page that loads, click **Generate a private key** to download the `.pem`, and note the **App ID** at the top.
-4. Back on the Web Preview page, upload the `.pem` and paste the App ID. After it verifies, click **Install ... on a repo ->** and pick your target repo.
+4. Back on the Web Preview page, upload the `.pem` and paste the App ID. After it verifies, click **Install ... on a repo ->** and pick your target repo. If you passed `--repo`, keep the helper page open until it reports the installation ID.
 
 When the script finishes, the private key is on the VM at `/var/lib/goobreview/example/app-key.pem` and the App ID is pre-filled in `reviewer.env`. The key only lives in Cloud Shell and on the VM &mdash; never on your local machine.
 
@@ -104,7 +118,7 @@ Quick check:
 bash scripts/status.sh
 ```
 
-The GitHub App preflight should now show an App ID and VM key. It may still say the installation ID is missing; that is filled during the next configure step after you install the App on the target repo.
+The GitHub App preflight should now show an App ID and VM key. If you used `--repo`, it should also show an installation ID; otherwise configure can detect the target repo and installation ID when the App installation exposes exactly one repo.
 
 Registering the App under an organization instead of your personal account? Pass the org name:
 
@@ -125,7 +139,7 @@ gemini                # Google OAuth - sign in, trust this folder, then /quit
 scripts/configure.sh
 ```
 
-`configure.sh` prompts for the target repo, auto-discovers the App installation ID, lets you pick a personality and prompt payload profile, and offers to open the generated config files in `$EDITOR`.
+`configure.sh` auto-detects the target repo plus App installation ID when the App installation exposes exactly one repo, then lets you pick a personality and prompt payload profile and offers to open the generated config files in `$EDITOR`. If the App can see multiple repos, it prompts for `owner/repo`.
 
 Personality choice is the most consequential decision before your first dry run: it defines what kind of reviewer this is. `control` is neutral and general-purpose. `linus` is intentionally blunt. You can change this later with `scripts/tune.sh`.
 

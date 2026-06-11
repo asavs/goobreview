@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Mint a GitHub App installation access token and fetch the App's slug,
 // caching both on disk until shortly before expiry. Prints the requested
-// field to stdout based on argv[2]: "token" (default) or "slug".
+// field to stdout based on argv[2]: "token" (default), "slug",
+// "discover", or "discover-target".
 //
-// Inputs (all via env):
+// Inputs (env by default; direct CLI flags are accepted for diagnostics):
 //   REVIEWER_APP_ID                  Numeric App ID from the App settings page.
 //   REVIEWER_APP_INSTALLATION_ID     Installation ID (per-account or per-repo).
 //   REVIEWER_APP_PRIVATE_KEY_PATH    Path to the App's .pem private key.
@@ -48,20 +49,75 @@ function requireEnv(name) {
   return v;
 }
 
-const what = process.argv[2] || "token";
-if (!["token", "slug", "discover"].includes(what)) {
-  die(`unknown query: ${what}; expected 'token', 'slug', or 'discover'`);
+function usage(exitCode = 1) {
+  process.stderr.write(`[app-token] usage:
+  app-token.mjs [token|slug] [--app-id ID] [--installation-id ID] [--key-path PATH] [--state DIR]
+  app-token.mjs discover <owner/repo> [--app-id ID] [--key-path PATH]
+  app-token.mjs discover-target [--app-id ID] [--installation-id ID] [--key-path PATH]\n`);
+  process.exit(exitCode);
 }
 
-const appId = requireEnv("REVIEWER_APP_ID");
-const keyPath = requireEnv("REVIEWER_APP_PRIVATE_KEY_PATH");
+function parseArgs(argv) {
+  const args = [...argv];
+  let what = "token";
+  let target = "";
+  const opts = {};
+
+  if (args[0] && !args[0].startsWith("--")) {
+    what = args.shift();
+  }
+
+  while (args.length > 0) {
+    const arg = args.shift();
+    switch (arg) {
+      case "--app-id":
+        opts.appId = args.shift() || "";
+        break;
+      case "--installation-id":
+        opts.installationId = args.shift() || "";
+        break;
+      case "--key-path":
+        opts.keyPath = args.shift() || "";
+        break;
+      case "--state":
+        opts.stateDir = args.shift() || "";
+        break;
+      case "-h":
+      case "--help":
+        usage(0);
+        break;
+      default:
+        if (arg.startsWith("--")) die(`unknown option: ${arg}`);
+        if (!target) {
+          target = arg;
+        } else {
+          die(`unexpected argument: ${arg}`);
+        }
+    }
+  }
+
+  return { what, target, opts };
+}
+
+function configuredValue(name, value) {
+  return value || requireEnv(name);
+}
+
+const { what, target, opts } = parseArgs(process.argv.slice(2));
+if (!["token", "slug", "discover", "discover-target"].includes(what)) {
+  die(`unknown query: ${what}; expected 'token', 'slug', 'discover', or 'discover-target'`);
+}
+
+const appId = configuredValue("REVIEWER_APP_ID", opts.appId);
+const keyPath = configuredValue("REVIEWER_APP_PRIVATE_KEY_PATH", opts.keyPath);
 if (!existsSync(keyPath)) die(`private key not found: ${keyPath}`);
 
-// `discover` only needs App ID + key (no installation, no cache).
+// Discovery only needs App ID + key. `discover-target` may optionally use
+// REVIEWER_APP_INSTALLATION_ID to constrain which installation to inspect.
 let installationId, stateDir, cachePath;
-if (what !== "discover") {
-  installationId = requireEnv("REVIEWER_APP_INSTALLATION_ID");
-  stateDir = requireEnv("REVIEWER_STATE");
+if (!["discover", "discover-target"].includes(what)) {
+  installationId = configuredValue("REVIEWER_APP_INSTALLATION_ID", opts.installationId);
+  stateDir = configuredValue("REVIEWER_STATE", opts.stateDir);
   mkdirSync(stateDir, { recursive: true });
   cachePath = join(stateDir, "app_token.json");
 }
@@ -127,16 +183,24 @@ async function ghJson(url, jwt) {
   return resp.json();
 }
 
-async function refresh() {
-  const pem = readFileSync(keyPath, "utf8");
-  const jwt = signJwt(pem);
-
-  const appInfo = await ghJson("https://api.github.com/app", jwt);
-  if (typeof appInfo.slug !== "string") {
-    die(`unexpected /app response: ${JSON.stringify(appInfo).slice(0, 300)}`);
+async function ghJsonWithToken(url, token) {
+  const resp = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "goobreview-app-token",
+    },
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    die(`GET ${url} failed (${resp.status}): ${body.slice(0, 500)}`);
   }
+  return resp.json();
+}
 
-  const tokenUrl = `https://api.github.com/app/installations/${installationId}/access_tokens`;
+async function mintInstallationToken(jwt, id) {
+  const tokenUrl = `https://api.github.com/app/installations/${id}/access_tokens`;
   const tokenResp = await fetch(tokenUrl, {
     method: "POST",
     headers: {
@@ -154,15 +218,85 @@ async function refresh() {
   if (!tokenJson.token || !tokenJson.expires_at) {
     die(`unexpected token response: ${safeJsonForLog(tokenJson).slice(0, 300)}`);
   }
+  return tokenJson;
+}
+
+async function refresh() {
+  const pem = readFileSync(keyPath, "utf8");
+  const jwt = signJwt(pem);
+
+  const appInfo = await ghJson("https://api.github.com/app", jwt);
+  if (typeof appInfo.slug !== "string") {
+    die(`unexpected /app response: ${JSON.stringify(appInfo).slice(0, 300)}`);
+  }
+
+  const tokenJson = await mintInstallationToken(jwt, installationId);
 
   writeCache(tokenJson.token, tokenJson.expires_at, appInfo.slug);
   return { token: tokenJson.token, slug: appInfo.slug };
 }
 
+async function discoverTarget() {
+  const pem = readFileSync(keyPath, "utf8");
+  const jwt = signJwt(pem);
+  const constrainedId = opts.installationId || process.env.REVIEWER_APP_INSTALLATION_ID || "";
+  if (constrainedId && !/^\d+$/.test(constrainedId)) {
+    die(`REVIEWER_APP_INSTALLATION_ID must be numeric; got '${constrainedId}'`);
+  }
+
+  let installations;
+  if (constrainedId) {
+    installations = [{ id: Number(constrainedId) }];
+  } else {
+    const data = await ghJson("https://api.github.com/app/installations?per_page=100", jwt);
+    if (!Array.isArray(data)) {
+      die(`unexpected /app/installations response: ${JSON.stringify(data).slice(0, 300)}`);
+    }
+    installations = data;
+  }
+
+  const candidates = [];
+  for (const installation of installations) {
+    if (typeof installation.id !== "number") continue;
+    const tokenJson = await mintInstallationToken(jwt, installation.id);
+    const repos = await ghJsonWithToken("https://api.github.com/installation/repositories?per_page=100", tokenJson.token);
+    if (!Array.isArray(repos.repositories)) {
+      die(`unexpected /installation/repositories response: ${JSON.stringify(repos).slice(0, 300)}`);
+    }
+    if (typeof repos.total_count === "number" && repos.total_count > repos.repositories.length) {
+      die(`installation ${installation.id} exposes ${repos.total_count} repositories; set REVIEWER_REPO or pass --repo`);
+    }
+    for (const repo of repos.repositories) {
+      if (typeof repo.full_name === "string") {
+        candidates.push({ repo: repo.full_name, installation_id: String(installation.id) });
+      }
+    }
+  }
+
+  const unique = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const key = `${candidate.installation_id}:${candidate.repo}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(candidate);
+  }
+
+  if (unique.length === 0) {
+    die("no repositories found for this GitHub App installation");
+  }
+  if (unique.length > 1) {
+    const preview = unique.slice(0, 10).map((candidate) => candidate.repo).join(", ");
+    const suffix = unique.length > 10 ? `, ... (+${unique.length - 10} more)` : "";
+    die(`multiple repositories found (${preview}${suffix}); set REVIEWER_REPO or pass --repo`);
+  }
+
+  process.stdout.write(JSON.stringify(unique[0]));
+}
+
 if (what === "discover") {
-  const target = process.argv[3];
   if (!target || !/^[^/]+\/[^/]+$/.test(target)) {
-    die("usage: app-token.mjs discover <owner/repo>");
+    usage();
   }
   const pem = readFileSync(keyPath, "utf8");
   const jwt = signJwt(pem);
@@ -171,6 +305,8 @@ if (what === "discover") {
     die(`unexpected /installation response: ${JSON.stringify(info).slice(0, 300)}`);
   }
   process.stdout.write(String(info.id));
+} else if (what === "discover-target") {
+  await discoverTarget();
 } else {
   const data = readCache() || (await refresh());
   process.stdout.write(what === "slug" ? data.slug : data.token);

@@ -80,8 +80,8 @@ bash scripts/register-app.sh
 
 **What happens:**
 1. Validates the VM exists.
-2. Spins up a Node server on port 8080.
-3. User clicks Cloud Shell's **Web Preview → port 8080**. A page loads with two
+2. Spins up a Node server on an open local port unless one was supplied.
+3. User clicks Cloud Shell's **Web Preview** and chooses the printed port. A page loads with two
    steps:
    - **a.** Click through to a pre-filled GitHub App-creation form
      (`github.com/settings/apps/new?...` with fields from `config/app-manifest.json`).

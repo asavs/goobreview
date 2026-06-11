@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
 # shellcheck disable=SC1091
 . "$LIB_DIR/ci.sh"
+# shellcheck disable=SC1091
+. "$LIB_DIR/github-api.sh"
 REQUIRED_CHECKS_FILE="${3:-$SCRIPT_DIR/../../config/required-checks.json}"
 if [ ! -f "$REQUIRED_CHECKS_FILE" ] && [ -f "$SCRIPT_DIR/../../config/required-checks.example.json" ]; then
   REQUIRED_CHECKS_FILE="$SCRIPT_DIR/../../config/required-checks.example.json"
@@ -22,5 +24,5 @@ fi
 if [ -n "${CHECK_RUNS_JSON:-}" ]; then
   printf '%s' "$CHECK_RUNS_JSON"
 else
-  gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?filter=latest&per_page=100"
+  github_api_get "repos/$REPO/commits/$HEAD_SHA/check-runs?filter=latest&per_page=100"
 fi | reviewer_ci_state_from_json "$required_checks_json"

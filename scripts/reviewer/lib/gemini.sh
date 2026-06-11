@@ -93,6 +93,7 @@ run_gemini_review() {
   (
     cd "$runtime_dir" || exit
     export GEMINI_CLI_SYSTEM_SETTINGS_PATH="$settings_file"
+    export GEMINI_CLI_TRUST_WORKSPACE=true
     unset GH_TOKEN GITHUB_TOKEN REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH
     timeout "$GEMINI_TIMEOUT" gemini -m "$GEMINI_MODEL" -p "" <"$prompt_file" 2>"$err_file"
   )

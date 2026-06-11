@@ -25,6 +25,10 @@ app-key.pem             GitHub App private key (you provide; mode 0600).
 dry-pr-<number>.txt     Dry-run artifact with full Gemini prompt payload and response.
 ```
 
+Gemini's Google-account OAuth cache lives under the VM user's home directory,
+usually `~/.gemini`, not in `REVIEWER_STATE`. Keep it owned by the Unix user
+that runs the reviewer.
+
 ## One-Off Run
 
 ```bash
@@ -122,7 +126,7 @@ sudo journalctl -u goobreview.service -n 100 --no-pager
 If this fails, fix the service before enabling the timer. Common causes:
 
 - App private key not readable by the `goobreview` Unix user, or `REVIEWER_APP_*` env vars not set.
-- Gemini CLI has not trusted the reviewer checkout or daemon runtime under `REVIEWER_STATE/gemini-runtime`.
+- Gemini CLI has not authenticated for the Unix user that runs the service, or the checkout trust prompt was never completed. The daemon runtime under `REVIEWER_STATE/gemini-runtime` uses Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override, but initial Google-account auth still needs to exist.
 - `config/reviewer.env` is missing or points to the wrong target repo.
 - The App is not installed on `REVIEWER_REPO` (token mint will fail).
 - The checkout is dirty, so `sync-worktree.sh` refuses to run.
@@ -142,14 +146,14 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 ## What The Reviewer Does
 
 1. Acquires a non-blocking `flock`.
-2. Mints a GitHub App installation token (cached in `app_token.json`) and exports it as `GH_TOKEN` so `gh` calls authenticate as the App.
+2. Mints a GitHub App installation token (cached in `app_token.json`) and exports it as `GH_TOKEN` so direct API calls and the final `gh pr review` authenticate as the App.
 3. Lists open non-draft PRs in `REVIEWER_REPO`.
 4. Skips PRs authored by `BOT_LOGIN` (`<app-slug>[bot]`); also skips PRs authored by `REVIEWER_USER` if set.
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
 6. Applies the required-check gate.
 7. Downloads a PR-head source snapshot to `REVIEWER_STATE/worktrees/<repo>/current`.
 8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata, CI one-liner, changed paths, relevant guidance, diff, and the GitHub review formatting rule).
-9. Runs Gemini CLI headlessly from `REVIEWER_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, and MCP servers disabled for the review invocation.
+9. Runs Gemini CLI headlessly from `REVIEWER_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Posts a top-level GitHub review with `gh pr review`.
 12. Applies optional labels.
@@ -183,6 +187,32 @@ set -a
 . config/reviewer.env
 set +a
 scripts/reviewer/merge-gate.sh 123
+```
+
+Inspect GitHub App token setup:
+
+```bash
+scripts/reviewer/get-installation-token.sh discover OWNER/REPO
+scripts/reviewer/get-installation-token.sh token
+scripts/reviewer/get-installation-token.sh slug
+```
+
+`discover` only needs `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY_PATH`.
+`token` and `slug` also need `REVIEWER_APP_INSTALLATION_ID` and
+`REVIEWER_STATE` so the short-lived installation token can be cached. For
+one-off diagnostics before `reviewer.env` is fully populated, the underlying
+Node helper accepts direct flags:
+
+```bash
+node scripts/reviewer/lib/app-token.mjs discover OWNER/REPO \
+  --app-id APP_ID \
+  --key-path /var/lib/goobreview/example/app-key.pem
+
+node scripts/reviewer/lib/app-token.mjs token \
+  --app-id APP_ID \
+  --installation-id INSTALLATION_ID \
+  --key-path /var/lib/goobreview/example/app-key.pem \
+  --state /var/lib/goobreview/example
 ```
 
 ## Configuration Reference
@@ -305,6 +335,7 @@ voice, role, and focus — pick (or write) a file in
 - Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
 - Very large diffs may exceed useful Gemini context.
 - PR-head source snapshots are provided as read-only context under `REVIEWER_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot.
+- Google-account Gemini CLI auth is still an interactive, user-bound setup step. Gemini CLI's documented non-interactive auth modes are Gemini API key or Vertex AI; those do not preserve personal Google AI Pro/Ultra subscription entitlement.
 - The daemon does not inspect full CI logs; it gates on the configured required-check state.
 - The daemon does not create follow-up issues automatically.
 - The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.

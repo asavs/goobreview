@@ -20,6 +20,8 @@ LOG_FILE="$TMP_ROOT/test.log"
 # shellcheck disable=SC1091
 . "$LIB_DIR/gemini.sh"
 # shellcheck disable=SC1091
+. "$LIB_DIR/github-api.sh"
+# shellcheck disable=SC1091
 . "$LIB_DIR/output.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/prompt.sh"
@@ -264,18 +266,22 @@ JSON
 
   REPO="example/repo"
 
-  # shellcheck disable=SC2317 # Mocked gh is invoked indirectly by build_review_prompt.
-  gh() {
-    if [ "${1:-}" = "pr" ] && [ "${2:-}" = "diff" ]; then
-      if [ "${6:-}" = "--name-only" ]; then
-        printf 'client/src/auth.py\n'
-        return 0
-      fi
+  github_api_get() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999" ] && [ "${2:-}" = "application/vnd.github.diff" ]; then
       printf 'diff --git a/src/auth.py b/src/auth.py\n+++ b/src/auth.py\n@@ -1,0 +1,1 @@\n+def get_user_from_request(request): pass\n'
       return 0
     fi
-    if [ "${1:-}" = "pr" ] && [ "${2:-}" = "view" ]; then
-      printf '%s\n' '{"title":"Test auth change","body":"Author body","author":{"login":"alice"},"url":"https://github.com/example/repo/pull/999","baseRefName":"main","headRefName":"feature/auth","headRefOid":"abc123"}'
+    if [ "${1:-}" = "repos/example/repo/pulls/999" ]; then
+      printf '%s\n' '{"title":"Test auth change","body":"Author body","user":{"login":"alice"},"html_url":"https://github.com/example/repo/pull/999","base":{"ref":"main"},"head":{"ref":"feature/auth","sha":"abc123"}}'
+      return 0
+    fi
+
+    return 1
+  }
+
+  github_api_paginate_array() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999/files" ]; then
+      printf '%s\n' '{"filename":"client/src/auth.py"}'
       return 0
     fi
 
@@ -339,11 +345,20 @@ JSON
   mkdir -p "$worktree_dir"
   REPO="example/repo"
 
-  # shellcheck disable=SC2317 # Mocked gh is invoked indirectly by build_review_prompt.
-  gh() {
-    if [ "${1:-}" = "pr" ] && [ "${2:-}" = "diff" ]; then
+  github_api_get() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999" ] && [ "${2:-}" = "application/vnd.github.diff" ]; then
       return 1
     fi
+
+    return 1
+  }
+
+  github_api_paginate_array() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999/files" ]; then
+      printf '%s\n' '{"filename":"client/src/auth.py"}'
+      return 0
+    fi
+
     return 1
   }
 
@@ -398,6 +413,7 @@ test_gemini_invocation_isolates_review_context() {
     printf 'gh_token=%s\n' "${GH_TOKEN:-unset}"
     printf 'github_token=%s\n' "${GITHUB_TOKEN:-unset}"
     printf 'key_path=%s\n' "${REVIEWER_APP_PRIVATE_KEY_PATH:-unset}"
+    printf 'trust_workspace=%s\n' "${GEMINI_CLI_TRUST_WORKSPACE:-unset}"
     printf 'settings=%s\n' "$GEMINI_CLI_SYSTEM_SETTINGS_PATH"
   }
 
@@ -408,6 +424,7 @@ test_gemini_invocation_isolates_review_context() {
   assert_contains "gemini child gets no gh token" "gh_token=unset" <(printf '%s\n' "$output")
   assert_contains "gemini child gets no github token" "github_token=unset" <(printf '%s\n' "$output")
   assert_contains "gemini child gets no app key path" "key_path=unset" <(printf '%s\n' "$output")
+  assert_contains "gemini trusts isolated runtime workspace" "trust_workspace=true" <(printf '%s\n' "$output")
   assert_eq "gemini settings disables context filename" ".goobreview-gemini-context-disabled.md" "$(jq -r '.context.fileName' "$settings_path")"
   assert_eq "gemini settings attaches PR snapshot" "$worktree_dir" "$(jq -r '.context.includeDirectories[0]' "$settings_path")"
   assert_eq "gemini settings disables local env" "true" "$(jq -r '.advanced.ignoreLocalEnv' "$settings_path")"

@@ -31,6 +31,16 @@ gcloud compute instances create goobreview-1 \
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 ```
 
+To look for an existing GoobReview VM before creating anything, run the
+read-only discovery helper from the Cloud Shell checkout:
+
+```bash
+bash scripts/discover-vms.sh
+```
+
+It uses ordinary `gcloud compute instances list` calls across accessible
+projects and zones, filtering for likely GoobReview instance names.
+
 `e2-micro` (2 vCPU, 1 GB RAM) in `us-central1`, `us-west1`, or `us-east1` (excluding northern Virginia) is covered by GCP's always-free tier - one instance and 30 GB standard disk per month. Gemini CLI can spike past 1 GB during a review, so `scripts/setup-vm.sh` configures a 2 GB swap file by default; set `GOOBREVIEW_SWAP_SIZE=0` to skip if you're on a larger machine.
 
 Keep firewall exposure minimal. The reviewer needs outbound HTTPS and inbound SSH only.
@@ -59,7 +69,7 @@ For Ubuntu, follow the current official apt instructions from the GitHub CLI doc
 gh --version
 ```
 
-GoobReview does not call `gh auth login`. The reviewer authenticates as a GitHub App using a short-lived installation token minted at runtime from a private key; `gh` picks up the token via `GH_TOKEN`. See [github-app-setup.md](github-app-setup.md) for App registration.
+GoobReview does not call `gh auth login`. Setup, tuning, prompt rendering, and basic PR metadata reads use GitHub App-token API calls directly. Posting the final PR review still uses `gh pr review`, with `gh` picking up the short-lived installation token via `GH_TOKEN`. See [github-app-setup.md](github-app-setup.md) for App registration.
 
 ## Install Gemini CLI
 
@@ -82,7 +92,13 @@ cd /opt/goobreview/example
 gemini
 ```
 
-The Gemini CLI authentication docs describe individual Google account login and note that Google AI Pro or Google AI Ultra subscribers should use the Google account associated with that subscription.
+The Gemini CLI authentication docs describe three supported auth families:
+
+- **Sign in with Google** for individual Google accounts and Gemini Code Assist licenses. This is the path that preserves Google AI Pro or Google AI Ultra subscription entitlement; use the Google account associated with that subscription.
+- **Gemini API key** for headless setup through `GEMINI_API_KEY`. This is suitable for automation but uses API-key quota and billing, not personal Google AI Pro/Ultra subscription quota.
+- **Vertex AI** through Application Default Credentials, a service account JSON key, or a Google Cloud API key, plus `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`. This is suitable for enterprise or production automation but uses Vertex AI quota and billing, not personal Google AI Pro/Ultra subscription quota.
+
+GoobReview's default path intentionally uses Sign in with Google. Do not copy Google auth files, service account JSON, API keys, or other Gemini credentials into the repo or checkout. If you choose API key or Vertex AI mode instead, keep those credentials in the VM user's shell environment, systemd environment, or another VM-side secret store.
 
 Exit Gemini with:
 
@@ -96,7 +112,7 @@ Verify headless mode from the same checkout:
 printf 'say hi in three words' | timeout 60s gemini -m auto -p ""
 ```
 
-If this prompts for authorization, reports an untrusted workspace, or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_STATE/gemini-runtime` with the PR-head source snapshot attached as read-only workspace context; if the first dry run reports that runtime path as untrusted, `cd` into that path and run `gemini` once there too.
+If this prompts for authorization or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_STATE/gemini-runtime` with the PR-head source snapshot attached as read-only workspace context. For that isolated runtime call, GoobReview sets Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override and writes system settings that disable project context filename loading, local `.env` loading, shell tools, and MCP servers.
 
 ## Clone The Template
 
