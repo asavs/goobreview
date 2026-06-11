@@ -12,6 +12,7 @@ CONFIG_DIR="$REPO_ROOT/config"
 ENV_FILE="${REVIEWER_ENV_FILE:-$CONFIG_DIR/reviewer.env}"
 EDITOR_CMD="${EDITOR:-nano}"
 INNER_SH="$SCRIPT_DIR/configure-inner.sh"
+APP_TOKEN_SH="$SCRIPT_DIR/reviewer/get-installation-token.sh"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
 export OPS_LOG_PREFIX="configure"
@@ -25,6 +26,38 @@ maybe_edit() {
   if confirm "Open $(basename "$file") in $EDITOR_CMD now?"; then
     "$EDITOR_CMD" "$file"
   fi
+}
+
+discover_repo_from_app() {
+  local discovered repo_from_app installation_from_app
+
+  export REVIEWER_APP_ID="$app_id"
+  export REVIEWER_APP_PRIVATE_KEY_PATH="$key_path"
+  if [ -n "$installation_id" ]; then
+    export REVIEWER_APP_INSTALLATION_ID="$installation_id"
+  else
+    unset REVIEWER_APP_INSTALLATION_ID
+  fi
+
+  if discovered="$("$APP_TOKEN_SH" discover-target 2>&1)"; then
+    repo_from_app="$(printf '%s' "$discovered" | jq -r '.repo // empty')"
+    installation_from_app="$(printf '%s' "$discovered" | jq -r '.installation_id // empty')"
+    if [ -n "$repo_from_app" ]; then
+      repo="$repo_from_app"
+      if [ -z "$installation_id" ] && [ -n "$installation_from_app" ]; then
+        installation_id="$installation_from_app"
+      fi
+      log "Detected target repo from GitHub App installation: $repo"
+      if [ -n "$installation_from_app" ]; then
+        log "Detected installation ID: $installation_from_app"
+      fi
+      return 0
+    fi
+  else
+    log "Could not auto-detect target repo from the GitHub App installation: $discovered"
+  fi
+
+  return 1
 }
 
 personality_summary() {
@@ -56,6 +89,7 @@ personality_summary() {
 }
 
 ops_require_file "$INNER_SH" "This checkout looks incomplete."
+ops_require_executable "$APP_TOKEN_SH" "This checkout looks incomplete."
 ops_require_file "$CONFIG_DIR/reviewer.env.example" "This checkout looks incomplete."
 ops_require_command node "Run scripts/setup-vm.sh first."
 ops_require_command jq "Run scripts/setup-vm.sh first."
@@ -74,14 +108,6 @@ fi
 
 ops_copy_if_missing "$ENV_FILE" "$CONFIG_DIR/reviewer.env.example" || exit 1
 
-current_repo="$(ops_env_get "$ENV_FILE" REVIEWER_REPO)"
-if [ "$current_repo" = "owner/repo" ]; then
-  current_repo=""
-fi
-repo="$(ask 'Target GitHub repository (owner/repo)' "$current_repo")"
-ops_require_nonempty "REVIEWER_REPO" "$repo"
-ops_validate_owner_repo "$repo" REVIEWER_REPO
-
 ops_source_env "$ENV_FILE"
 ops_require_nonempty "REVIEWER_STATE" "${REVIEWER_STATE:-}" "Set it in $ENV_FILE."
 
@@ -93,7 +119,7 @@ PRs. If you haven't registered an App yet, see docs/github-app-setup.md
 and come back when you have:
   - The App ID (numeric)
   - The downloaded private key (.pem)
-  - The App installed on $repo
+  - The App installed on your target repository
 
 EOF
 
@@ -115,7 +141,24 @@ if [ "$key_path" = "paste" ]; then
 fi
 
 current_installation_id="$(ops_env_get "$ENV_FILE" REVIEWER_APP_INSTALLATION_ID)"
-installation_id="$(ask 'Installation ID (blank to auto-discover)' "$current_installation_id")"
+installation_id="$current_installation_id"
+if [ -n "$current_installation_id" ]; then
+  installation_id="$(ask 'Installation ID (blank to auto-discover)' "$current_installation_id")"
+fi
+
+current_repo="$(ops_env_get "$ENV_FILE" REVIEWER_REPO)"
+if [ "$current_repo" = "owner/repo" ]; then
+  current_repo=""
+fi
+repo="$current_repo"
+if [ -z "$repo" ]; then
+  discover_repo_from_app || true
+fi
+if [ -z "$repo" ]; then
+  repo="$(ask 'Target GitHub repository (owner/repo)' "$current_repo")"
+fi
+ops_require_nonempty "REVIEWER_REPO" "$repo"
+ops_validate_owner_repo "$repo" REVIEWER_REPO
 
 PERSONALITY_GALLERY="$CONFIG_DIR/personalities"
 gallery=()
