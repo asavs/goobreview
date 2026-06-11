@@ -76,7 +76,7 @@ If you can't run the helper server (no Cloud Shell, restrictive corporate GitHub
    ssh USER@HOST 'chmod 600 /var/lib/goobreview/example/app-key.pem'
    ```
 
-6. SSH to the VM and run `scripts/configure.sh`. Enter the App ID when prompted.
+6. Continue with the VM configure handoff in [docs/quickstart.md](quickstart.md#4-finish-setup-on-the-vm). Gemini should open the SSH session; you complete Gemini CLI sign-in and workspace trust, then it runs `scripts/configure.sh`.
 
 ## Troubleshooting
 

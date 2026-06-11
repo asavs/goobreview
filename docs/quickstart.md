@@ -14,12 +14,18 @@ It summarizes local config, dry-run/scheduler state, active GCloud project/billi
 
 ## 4. Finish Setup On The VM
 
-SSH to the VM, authenticate Gemini, and run the configure helper:
+Gemini should SSH to the VM, enter the checkout, and leave you at the Gemini
+CLI sign-in boundary:
 
 ```bash
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 cd /opt/goobreview/example
 gemini                # Google OAuth - sign in, trust this folder, then /quit
+```
+
+After you quit Gemini CLI, let the setup agent continue with:
+
+```bash
 scripts/configure.sh  # auto-detects target repo + installation ID when possible
 ```
 

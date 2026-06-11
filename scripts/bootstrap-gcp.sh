@@ -561,10 +561,14 @@ To finish:
      You can check setup state any time with:
        bash scripts/status.sh
 
-  2. SSH in, trust Gemini, and run configure.sh:
+  2. Let Gemini SSH in and land in the checkout:
        gcloud compute ssh $vm_name --zone=$zone
        cd /opt/goobreview/example
+
+     Then complete the Gemini CLI sign-in and trust boundary:
        gemini                # Google OAuth; trust this folder, /quit
+
+     After you quit Gemini CLI, let the setup agent continue:
        scripts/configure.sh  # App ID is pre-filled; auto-discovers installation ID
 
 Then continue with docs/quickstart.md from step 5 (dry run), then step 6 (scheduler).
