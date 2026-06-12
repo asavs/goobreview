@@ -533,6 +533,31 @@ test_pr_queue_skip_reasons() {
   pass "reviewable PR has no skip reason"
 }
 
+test_run_once_sync_failure_fails_closed() {
+  local state_dir env_file output status
+
+  state_dir="$TMP_ROOT/run-once-sync-failure"
+  mkdir -p "$state_dir"
+  env_file="$TMP_ROOT/run-once-sync-failure.env"
+  cat > "$env_file" <<EOF
+REVIEWER_STATE=$state_dir
+REVIEWER_SYNC_REPO_DIR=$TMP_ROOT/not-a-git-worktree
+EOF
+  mkdir -p "$TMP_ROOT/not-a-git-worktree"
+
+  status=0
+  output=$(REVIEWER_ENV_FILE="$env_file" bash "$REVIEWER_DIR/run-once.sh" 2>&1) || status=$?
+
+  if [ "$status" -eq 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "run-once exits nonzero when sync fails"
+  fi
+  pass "run-once exits nonzero when sync fails"
+  assert_contains "run-once reports review did not run" "review did not run" <(printf '%s\n' "$output")
+  assert_contains "run-once logs sync failure without review" "sync failed before reviewer tick; review did not run" "$state_dir/log.txt"
+  assert_not_contains "run-once does not enter live reviewer after sync failure" "missing REVIEWER_REPO" "$state_dir/log.txt"
+}
+
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
@@ -543,5 +568,6 @@ test_ci_states
 test_config_file_resolution
 test_private_key_permissions
 test_log_rotation
+test_run_once_sync_failure_fails_closed
 
 printf 'passed %s fixture assertions\n' "$pass_count"
