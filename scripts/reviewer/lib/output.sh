@@ -1,24 +1,46 @@
 #!/usr/bin/env bash
 # Gemini review-output parsing helpers. Keep the reviewer contract tiny:
-# one GitHub review event line, then normal markdown review text.
+# normal markdown review text, then one final GitHub review event line.
 
 review_verdict_event() {
-  local verdict_line
-
-  IFS= read -r verdict_line || true
-  # Accept CRLF and accidental surrounding whitespace, then enforce a strict token.
-  verdict_line=${verdict_line//$'\r'/}
-  verdict_line=${verdict_line#"${verdict_line%%[![:space:]]*}"}
-  verdict_line=${verdict_line%"${verdict_line##*[![:space:]]}"}
-
-  case "$verdict_line" in
-    APPROVE|REQUEST_CHANGES|COMMENT) printf '%s\n' "$verdict_line" ;;
-    *)                               return 1 ;;
-  esac
+  awk '
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      trimmed = line
+      sub(/^[[:space:]]+/, "", trimmed)
+      sub(/[[:space:]]+$/, "", trimmed)
+      if (trimmed != "") verdict = trimmed
+    }
+    END {
+      if (verdict == "APPROVE" || verdict == "REQUEST_CHANGES" || verdict == "COMMENT") {
+        print verdict
+        exit 0
+      }
+      exit 1
+    }
+  '
 }
 
-review_body_after_verdict() {
-  sed '1d'
+review_body_before_verdict() {
+  awk '
+    {
+      lines[NR] = $0
+      line = $0
+      sub(/\r$/, "", line)
+      trimmed = line
+      sub(/^[[:space:]]+/, "", trimmed)
+      sub(/[[:space:]]+$/, "", trimmed)
+      if (trimmed != "") {
+        last_nonempty = NR
+        verdict = trimmed
+      }
+    }
+    END {
+      if (verdict != "APPROVE" && verdict != "REQUEST_CHANGES" && verdict != "COMMENT") exit 1
+      for (i = 1; i < last_nonempty; i++) print lines[i]
+    }
+  '
 }
 
 secure_install_file() {
