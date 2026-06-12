@@ -669,6 +669,7 @@ JSON
   assert_contains "prompt caps commit subjects with a legible marker" "[goobreview: 1 additional commit subjects omitted after the first 2]" "$prompt_file"
   assert_not_contains "prompt omits commit subjects beyond the cap" "- Tidy imports" "$prompt_file"
   assert_contains "prompt includes CI one-liner" "CI: required GitHub Actions checks passed" "$prompt_file"
+  assert_contains "prompt aims review beyond CI coverage" "Focus your review on what automated checks cannot verify." "$prompt_file"
   assert_contains "prompt includes previous bot review section" "Previous Bot Review (Trusted Reviewer History)" "$prompt_file"
   assert_contains "prompt normalizes prior changes-requested event" "Previous review event: REQUEST_CHANGES" "$prompt_file"
   assert_contains "prompt includes previous bot review body" "Prior blocker from the bot." "$prompt_file"
