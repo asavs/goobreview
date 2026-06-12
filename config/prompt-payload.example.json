@@ -16,6 +16,7 @@
       "include_head_branch": true,
       "include_head_sha": true,
       "include_description": true,
+      "max_body_bytes": 12000,
       "example": "Title: Fix SpacetimeDB WebSocket protocol on HTTPS pages\nAuthor: asavschaeffer\nURL: https://github.com/owner/repo/pull/97\nBase: main\nHead: fix/wss\nHead SHA: abc123"
     },
     "commit_subjects": {
