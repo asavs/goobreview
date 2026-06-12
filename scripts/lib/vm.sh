@@ -39,7 +39,7 @@ vm_remote_dependency_probe() {
     else
       printf "checkout_present=false\n"
     fi
-    for cmd in git jq curl wget node gh gemini; do
+    for cmd in git jq curl wget node gemini; do
       if command -v "$cmd" >/dev/null 2>&1; then
         printf "%s=true\n" "$cmd"
       else

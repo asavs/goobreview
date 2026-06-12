@@ -86,20 +86,6 @@ else
   log "Node $(node -v) already installed"
 fi
 
-if ! command -v gh >/dev/null 2>&1; then
-  log "Installing GitHub CLI"
-  sudo mkdir -p -m 755 /etc/apt/keyrings
-  wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
-  sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-  sudo apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gh
-else
-  log "gh $(gh --version | head -n1 | awk '{print $3}') already installed"
-fi
-
 if ! command -v gemini >/dev/null 2>&1; then
   log "Installing Gemini CLI (npm global)"
   sudo npm install -g @google/gemini-cli
@@ -121,7 +107,6 @@ fi
 
 log "Versions:"
 git --version
-gh --version | head -n1
 node --version
 gemini --version 2>/dev/null || echo "gemini installed (version flag may require login)"
 

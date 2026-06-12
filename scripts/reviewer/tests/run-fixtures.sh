@@ -22,6 +22,8 @@ LOG_FILE="$TMP_ROOT/test.log"
 # shellcheck disable=SC1091
 . "$LIB_DIR/github-api.sh"
 # shellcheck disable=SC1091
+. "$LIB_DIR/github.sh"
+# shellcheck disable=SC1091
 . "$LIB_DIR/output.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/prompt.sh"
@@ -324,6 +326,32 @@ EOF
   fi
   pass "GitHub API non-retryable 404 fails"
   assert_eq "GitHub API does not retry non-retryable 404" "1" "$(cat "$curl_state")"
+}
+
+test_post_review_uses_rest_api() {
+  local captured_path captured_payload
+
+  REPO="example/repo"
+  LOG_FILE="$TMP_ROOT/post-review.log"
+  : > "$LOG_FILE"
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by post_review.
+  github_api_post_json() {
+    captured_path="$1"
+    captured_payload="$2"
+    printf '{"id": 1}\n'
+  }
+
+  post_review 17 REQUEST_CHANGES "Please fix this."
+
+  assert_eq "post_review posts to pull reviews REST endpoint" "repos/example/repo/pulls/17/reviews" "$captured_path"
+  assert_eq "post_review sends review event" "REQUEST_CHANGES" "$(printf '%s\n' "$captured_payload" | jq -r '.event')"
+  assert_eq "post_review sends review body" "Please fix this." "$(printf '%s\n' "$captured_payload" | jq -r '.body')"
+
+  if post_review 17 NOPE "bad" >/dev/null 2>&1; then
+    fail "post_review rejects invalid event"
+  fi
+  pass "post_review rejects invalid event"
 }
 
 
@@ -1349,6 +1377,7 @@ test_state_and_output_permissions
 test_pr_queue_skip_reasons
 test_gemini_invocation_isolates_review_context
 test_github_api_retries_and_logs
+test_post_review_uses_rest_api
 test_check_ci_paginates_required_check_runs
 test_check_runs_summary_reports_completion_and_truncation
 test_ci_states

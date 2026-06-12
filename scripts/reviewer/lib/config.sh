@@ -262,9 +262,6 @@ validate_reviewer_config() {
   require flock
   require node
   require tar
-  if [ -z "${DRY_RUN:-}" ] && [ -z "${RENDER_PROMPT_ONLY:-}" ]; then
-    require gh
-  fi
   if [ -z "${RENDER_PROMPT_ONLY:-}" ]; then
     require gemini
     require timeout

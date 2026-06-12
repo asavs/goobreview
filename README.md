@@ -67,7 +67,7 @@ config/                              Per-deployment files. *.example.* ships;
 scripts/
   bootstrap-gcp.sh                   Cloud Shell provisioner: creates the VM,
                                      runs setup-vm.sh on it.
-  setup-vm.sh                        Installs gh, Node, Gemini CLI, configures
+  setup-vm.sh                        Installs Node, Gemini CLI, configures
                                      swap; clones the template. Runs on the VM.
   register-app.sh                    GitHub App registration: runs
                                      lib/register-server.mjs, scps the key to
