@@ -24,6 +24,7 @@ DIFF_FILE_MAX_BYTES="${REVIEWER_DIFF_FILE_MAX_BYTES:-40000}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
+FAILURE_MAX_ATTEMPTS="${REVIEWER_FAILURE_MAX_ATTEMPTS:-3}"
 INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
 RUNTIME_OWNER="${USER:-$(id -u 2>/dev/null || printf user)}"
@@ -210,6 +211,26 @@ fi
 review_actions=0
 review_attempts=0
 
+record_review_failure_and_log() {
+  local num="$1"
+  local head_sha="$2"
+  local message="$3"
+  local attempts
+
+  if [ -z "$DRY_RUN" ] && [ -z "$RENDER_PROMPT_ONLY" ]; then
+    attempts=$(record_review_failure_attempt "$num" "$head_sha")
+    if [ "$FAILURE_MAX_ATTEMPTS" -eq 0 ]; then
+      log "$message, will retry next tick (failure cap disabled)"
+    elif [ "$attempts" -ge "$FAILURE_MAX_ATTEMPTS" ]; then
+      log "$message; reached failure cap ($attempts/$FAILURE_MAX_ATTEMPTS), skipping until the PR head changes"
+    else
+      log "$message, will retry next tick ($attempts/$FAILURE_MAX_ATTEMPTS)"
+    fi
+  else
+    log "$message, will retry next tick"
+  fi
+}
+
 while IFS=$'\t' read -r num author head_sha draft; do
   [ -n "${num:-}" ] || continue
   if skip_reason=$(reviewer_pr_skip_reason "$num" "$author" "$head_sha" "${draft:-false}" "$BOT_LOGIN" "$EXTRA_SKIP_USER" "$ONLY_PR" "$BOT_AUTHOR"); then
@@ -249,10 +270,18 @@ while IFS=$'\t' read -r num author head_sha draft; do
     log "Reached REVIEWER_MAX_ATTEMPTS=$MAX_ATTEMPTS after $review_attempts attempted review(s), stopping this tick"
     break
   fi
+
+  if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$FAILURE_MAX_ATTEMPTS" -gt 0 ]; then
+    failure_attempts=$(review_failure_attempt_count "$num" "$head_sha")
+    if [ "$failure_attempts" -ge "$FAILURE_MAX_ATTEMPTS" ]; then
+      log "PR #$num@$head_sha: review failures reached REVIEWER_FAILURE_MAX_ATTEMPTS=$FAILURE_MAX_ATTEMPTS; skipping until the PR head changes"
+      continue
+    fi
+  fi
   review_attempts=$((review_attempts + 1))
 
   if ! ci_state=$(REQUIRED_CHECKS_JSON="$EFFECTIVE_REQUIRED_CHECKS_JSON" bash "$SCRIPT_DIR/check-ci.sh" "$REPO" "$head_sha" "$REQUIRED_CHECKS_FILE" 2>>"$LOG_FILE"); then
-    log "PR #$num@$head_sha: failed to read CI check-runs, will retry next tick"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to read CI check-runs"
     continue
   fi
 
@@ -301,10 +330,11 @@ EOF
           continue
         fi
         if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body"; then
+          clear_review_failure_attempts "$num" "$head_sha"
           log "Posted REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
           review_actions=$((review_actions + 1))
         else
-          log "Failed to post REQUEST_CHANGES (CI failure) on PR #$num@$head_sha, will retry next tick"
+          record_review_failure_and_log "$num" "$head_sha" "Failed to post REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
         fi
         continue
       fi
@@ -330,13 +360,13 @@ EOF
 
   if ! review_worktree=$(prepare_review_worktree "$head_sha"); then
     rm -f "$prompt_tmp"
-    log "PR #$num@$head_sha: failed to prepare PR-head worktree, will retry next tick"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to prepare PR-head worktree"
     continue
   fi
 
   if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree"; then
     rm -f "$prompt_tmp"
-    log "PR #$num@$head_sha: failed to build Gemini prompt, will retry next tick"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to build Gemini prompt"
     continue
   fi
 
@@ -361,7 +391,7 @@ EOF
     fi
     set_gemini_quota_backoff "$gemini_err_tmp" || true
     rm -f "$prompt_tmp" "$gemini_err_tmp"
-    log "gemini failed for PR #$num, will retry next tick"
+    record_review_failure_and_log "$num" "$head_sha" "gemini failed for PR #$num@$head_sha"
     continue
   fi
   cat "$gemini_err_tmp" >> "$LOG_FILE"
@@ -438,10 +468,11 @@ EOF
   rm -f "$prompt_tmp" "$gemini_err_tmp"
 
   if post_review "$num" "$event" "$body"; then
+    clear_review_failure_attempts "$num" "$head_sha"
     apply_review_labels "$num" "$event" || log "PR #$num: failed to apply review labels"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
   else
-    log "Failed to post review on PR #$num@$head_sha, will retry next tick"
+    record_review_failure_and_log "$num" "$head_sha" "Failed to post review on PR #$num@$head_sha"
   fi
 done <<< "$PRS"
