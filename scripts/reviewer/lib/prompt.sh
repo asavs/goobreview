@@ -72,10 +72,10 @@ prompt_byte_count() {
 }
 
 validate_prompt_size() {
-  local prompt_file="$1"
+  local assembled_prompt_file="$1"
   local byte_count
 
-  byte_count=$(prompt_byte_count "$prompt_file")
+  byte_count=$(prompt_byte_count "$assembled_prompt_file")
   local max_prompt_bytes="${MAX_PROMPT_BYTES:-240000}"
 
   if [ "$byte_count" -gt "$max_prompt_bytes" ]; then
