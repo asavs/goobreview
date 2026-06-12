@@ -25,6 +25,8 @@ LOG_FILE="$TMP_ROOT/test.log"
 . "$LIB_DIR/output.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/prompt.sh"
+# shellcheck disable=SC1091
+. "$LIB_DIR/worktree.sh"
 
 pass_count=0
 
@@ -786,6 +788,49 @@ JSON
   unset MAX_PROMPT_BYTES DIFF_MAX_BYTES FILE_TREE_MAX_BYTES SELECTED_FILE_MAX_BYTES GUIDANCE_FILE_MAX_BYTES
 }
 
+test_symlink_snapshot_safety() {
+  local worktree_dir outside_file prompt_file output err_file
+
+  worktree_dir="$TMP_ROOT/worktree-symlink"
+  outside_file="$TMP_ROOT/outside-secret.txt"
+  prompt_file="$TMP_ROOT/prompt-symlink.md"
+  err_file="$TMP_ROOT/gemini-symlink.err"
+  mkdir -p "$worktree_dir/docs"
+  printf 'outside secret should not appear\n' > "$outside_file"
+  ln -s "$outside_file" "$worktree_dir/docs/GUIDELINES.md"
+
+  REPO="example/repo"
+  output=$(append_full_file_tree "$worktree_dir")
+  assert_contains "file tree represents symlink metadata" "docs/GUIDELINES.md -> $outside_file [symlink; target content not read]" <(printf '%s\n' "$output")
+
+  : > "$LOG_FILE"
+  output=$(append_file_from_worktree "$worktree_dir" "docs/GUIDELINES.md" 20)
+  assert_contains "selected symlink content is skipped" "[goobreview: skipped symlink; target content was not read]" <(printf '%s\n' "$output")
+  assert_not_contains "selected symlink does not dereference outside target" "outside secret" <(printf '%s\n' "$output")
+  assert_contains "symlink skip is logged" "Skipping PR-head snapshot file because it is a symlink: docs/GUIDELINES.md" "$LOG_FILE"
+
+  STATE_DIR="$TMP_ROOT/state-symlink"
+  RUNTIME_STATE_DIR="$TMP_ROOT/runtime-symlink"
+  GEMINI_TIMEOUT=60
+  GEMINI_MODEL=auto
+  mkdir -p "$STATE_DIR"
+  printf 'APPROVE\n' > "$prompt_file"
+  if run_gemini_review "$prompt_file" "$err_file" "$worktree_dir" >/dev/null; then
+    fail "gemini refuses snapshot containing symlinks"
+  fi
+  pass "gemini refuses snapshot containing symlinks"
+  assert_contains "gemini refusal explains symlink snapshot" "PR-head snapshot contains symlinks" "$err_file"
+
+  sanitize_review_worktree_symlinks "$worktree_dir"
+  if [ -L "$worktree_dir/docs/GUIDELINES.md" ]; then
+    fail "snapshot sanitizer removes symlink"
+  fi
+  pass "snapshot sanitizer removes symlink"
+  assert_contains "snapshot sanitizer leaves metadata stub" "symlink metadata only" "$worktree_dir/docs/GUIDELINES.md"
+  assert_contains "snapshot sanitizer records symlink target" "target: $outside_file" "$worktree_dir/docs/GUIDELINES.md"
+  assert_not_contains "snapshot sanitizer does not copy target content" "outside secret" "$worktree_dir/docs/GUIDELINES.md"
+}
+
 test_invalid_verdict_state() {
   local artifact count
 
@@ -1021,6 +1066,7 @@ test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
 test_prompt_context_budgets_truncate
+test_symlink_snapshot_safety
 test_invalid_verdict_state
 test_pr_queue_skip_reasons
 test_gemini_invocation_isolates_review_context

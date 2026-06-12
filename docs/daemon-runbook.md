@@ -178,7 +178,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 4. Skips PRs authored by `BOT_LOGIN` (`<app-slug>[bot]`); also skips PRs authored by `REVIEWER_USER` if set.
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
 6. Counts the PR against `REVIEWER_MAX_ATTEMPTS`, then applies the required-check gate.
-7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`.
+7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current` and neutralizes any symlinks into metadata stubs before prompt assembly or Gemini access.
 8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata, CI one-liner, changed paths, relevant guidance, diff, and the GitHub review formatting rule).
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
@@ -300,7 +300,7 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 - Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
 - Very large diffs may exceed useful Gemini context.
 - Prompt and dry-run artifact size limits are explicit runtime knobs; truncated context is marked in the prompt/artifact, and prompts that still exceed `REVIEWER_MAX_PROMPT_BYTES` fail before Gemini is called.
-- PR-head source snapshots are provided as read-only context under `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_RUNTIME_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot.
+- PR-head source snapshots are provided as read-only context under `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_RUNTIME_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot. Symlinks in PR-head snapshots are neutralized into metadata stubs, and any raw symlink that reaches prompt assembly or Gemini access is skipped/refused rather than dereferenced.
 - Google-account Gemini CLI auth is still an interactive, user-bound setup step. Gemini CLI's documented non-interactive auth modes are Gemini API key or Vertex AI; those do not preserve personal Google AI Pro/Ultra subscription entitlement.
 - The daemon does not inspect full CI logs; it gates on the configured required-check state.
 - The daemon does not create follow-up issues automatically.
