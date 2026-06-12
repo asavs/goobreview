@@ -494,13 +494,22 @@ test_prompt_payload_schema_validation() {
   assert_contains "prompt payload root error points to example config" "config/prompt-payload.example.json" "$TMP_ROOT/prompt-payload.err"
 
   cat > "$payload_file" <<'JSON'
-{"segments":{"selected_file_contents":{"enabled":true,"paths":["../secret.txt"]}}}
+{"segments":{"relevant_guidance":{"enabled":true,"rules":[{"when_changed_path_matches":["client/**"],"guidance_paths":["../secret.txt"]}]}}}
 JSON
   if ( validate_prompt_payload_config "$payload_file" ) >/dev/null 2>"$TMP_ROOT/prompt-payload.err"; then
     fail "prompt payload rejects parent traversal paths"
   fi
   pass "prompt payload rejects parent traversal paths"
-  assert_contains "prompt payload path error names selected file key" "segments.selected_file_contents.paths[]" "$TMP_ROOT/prompt-payload.err"
+  assert_contains "prompt payload path error names guidance path key" "segments.relevant_guidance.rules[].guidance_paths[]" "$TMP_ROOT/prompt-payload.err"
+
+  cat > "$payload_file" <<'JSON'
+{"segments":{"selected_file_contents":{"enabled":true,"paths":["README.md"]}}}
+JSON
+  if ( validate_prompt_payload_config "$payload_file" ) >/dev/null 2>"$TMP_ROOT/prompt-payload.err"; then
+    fail "prompt payload rejects removed prompt-stuffing segments"
+  fi
+  pass "prompt payload rejects removed prompt-stuffing segments"
+  assert_contains "prompt payload removed-segment error names the segment" "segments.selected_file_contents is not a known prompt segment" "$TMP_ROOT/prompt-payload.err"
 
   cat > "$payload_file" <<'JSON'
 {
@@ -573,7 +582,6 @@ test_prompt_assembly() {
     "changed_paths": {"enabled": true},
     "relevant_guidance": {
       "enabled": true,
-      "mode": "paths_only",
       "rules": [
         {
           "when_changed_path_matches": ["client/**"],
@@ -583,8 +591,6 @@ test_prompt_assembly() {
     },
     "source_snapshot_hint": {"enabled": true},
     "all_check_summary": {"enabled": false},
-    "full_file_tree": {"enabled": false},
-    "selected_file_contents": {"enabled": false},
     "diff": {"enabled": true},
     "response_format": {"enabled": true}
   }
@@ -665,8 +671,7 @@ JSON
   assert_contains "prompt includes request-changes policy" "Use REQUEST_CHANGES only for concrete issues that should block merge." "$prompt_file"
   assert_contains "prompt includes comment policy" "Use COMMENT when the review is informational." "$prompt_file"
   assert_contains "prompt includes GitHub file references" "Use file references such as \`path/to/file.ext:123\`." "$prompt_file"
-  assert_not_contains "prompt omits full file tree" "Full PR-Head File Tree" "$prompt_file"
-  assert_not_contains "prompt omits selected file contents" "Selected PR-Head File Contents" "$prompt_file"
+  assert_not_contains "prompt omits guidance file contents" "Client guidance." "$prompt_file"
   assert_not_contains "prompt omits all-check summary" "All Check Summary" "$prompt_file"
 }
 
@@ -691,8 +696,6 @@ test_prompt_failure_propagates() {
     "relevant_guidance": {"enabled": false},
     "source_snapshot_hint": {"enabled": false},
     "all_check_summary": {"enabled": false},
-    "full_file_tree": {"enabled": false},
-    "selected_file_contents": {"enabled": false},
     "diff": {"enabled": true},
     "response_format": {"enabled": true}
   }
@@ -793,8 +796,6 @@ test_prompt_context_budgets_truncate() {
     "changed_paths": {"enabled": true},
     "relevant_guidance": {
       "enabled": true,
-      "mode": "full_content",
-      "max_lines_per_file": 100,
       "rules": [
         {
           "when_changed_path_matches": ["client/**"],
@@ -804,30 +805,17 @@ test_prompt_context_budgets_truncate() {
     },
     "source_snapshot_hint": {"enabled": false},
     "all_check_summary": {"enabled": false},
-    "full_file_tree": {"enabled": true},
-    "selected_file_contents": {
-      "enabled": true,
-      "max_lines_per_file": 100,
-      "paths": ["README.md"]
-    },
     "diff": {"enabled": true},
     "response_format": {"enabled": true}
   }
 }
 JSON
-  mkdir -p "$worktree_dir/client" "$worktree_dir/src"
+  mkdir -p "$worktree_dir/client"
   printf '%080d\n' 1 > "$worktree_dir/client/GUIDELINES.md"
-  printf '%080d\n' 2 > "$worktree_dir/README.md"
-  printf 'x\n' > "$worktree_dir/src/a.txt"
-  printf 'x\n' > "$worktree_dir/src/b.txt"
-  printf 'x\n' > "$worktree_dir/src/c.txt"
 
   REPO="example/repo"
   MAX_PROMPT_BYTES=10000
   DIFF_MAX_BYTES=40
-  FILE_TREE_MAX_BYTES=20
-  SELECTED_FILE_MAX_BYTES=30
-  GUIDANCE_FILE_MAX_BYTES=30
 
   # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
   github_api_get() {
@@ -847,9 +835,8 @@ JSON
   build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"
 
   assert_contains "prompt budget omits over-budget diff files whole" "total diff budget of 40 bytes exhausted" "$prompt_file"
-  assert_contains "prompt budget truncates file tree" "[goobreview: full file tree truncated after 20 bytes]" "$prompt_file"
-  assert_contains "prompt budget truncates selected file content" "[goobreview: README.md content truncated after 30 bytes]" "$prompt_file"
-  assert_contains "prompt budget truncates guidance content" "[goobreview: client/GUIDELINES.md content truncated after 30 bytes]" "$prompt_file"
+  assert_contains "prompt keeps guidance as pointer despite snapshot content" "- client/GUIDELINES.md" "$prompt_file"
+  assert_not_contains "prompt never pastes guidance file contents" "00000000" "$prompt_file"
 
   MAX_PROMPT_BYTES=50
   if build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"; then
@@ -857,7 +844,7 @@ JSON
   fi
   pass "prompt global byte budget fails closed"
 
-  unset MAX_PROMPT_BYTES DIFF_MAX_BYTES FILE_TREE_MAX_BYTES SELECTED_FILE_MAX_BYTES GUIDANCE_FILE_MAX_BYTES
+  unset MAX_PROMPT_BYTES DIFF_MAX_BYTES
 }
 
 test_symlink_snapshot_safety() {
@@ -872,15 +859,6 @@ test_symlink_snapshot_safety() {
   ln -s "$outside_file" "$worktree_dir/docs/GUIDELINES.md"
 
   REPO="example/repo"
-  output=$(append_full_file_tree "$worktree_dir")
-  assert_contains "file tree represents symlink metadata" "docs/GUIDELINES.md -> $outside_file [symlink; target content not read]" <(printf '%s\n' "$output")
-
-  : > "$LOG_FILE"
-  output=$(append_file_from_worktree "$worktree_dir" "docs/GUIDELINES.md" 20)
-  assert_contains "selected symlink content is skipped" "[goobreview: skipped symlink; target content was not read]" <(printf '%s\n' "$output")
-  assert_not_contains "selected symlink does not dereference outside target" "outside secret" <(printf '%s\n' "$output")
-  assert_contains "symlink skip is logged" "Skipping PR-head snapshot file because it is a symlink: docs/GUIDELINES.md" "$LOG_FILE"
-
   STATE_DIR="$TMP_ROOT/state-symlink"
   RUNTIME_STATE_DIR="$TMP_ROOT/runtime-symlink"
   GEMINI_TIMEOUT=60

@@ -127,7 +127,7 @@ validate_prompt_payload_config() {
       obj(["segments"]),
       (
         (.segments | keys_unsorted[]) as $name
-        | if ["personality","pr_metadata","ci_status","previous_bot_review","changed_paths","relevant_guidance","source_snapshot_hint","all_check_summary","full_file_tree","selected_file_contents","diff","response_format"] | index($name)
+        | if ["personality","pr_metadata","ci_status","previous_bot_review","changed_paths","relevant_guidance","source_snapshot_hint","all_check_summary","diff","response_format"] | index($name)
           then .
           else fail("segments." + $name + " is not a known prompt segment")
           end
@@ -150,14 +150,7 @@ validate_prompt_payload_config() {
           else fail("segments.diff.omit_patch_paths must be an array of nonempty glob strings")
           end
       ),
-      optional_string_enum(["segments","relevant_guidance","mode"]; ["paths_only","full_content"]),
-      optional_uint(["segments","relevant_guidance","max_lines_per_file"]; 1; 5000),
-      optional_uint(["segments","selected_file_contents","max_lines_per_file"]; 1; 5000),
-      (
-        (.segments.selected_file_contents.paths // []) as $paths
-        | if ($paths | type) == "array" then . else fail("segments.selected_file_contents.paths must be an array") end
-        | $paths[]? | safe_path("segments.selected_file_contents.paths[]")
-      ),
+      optional_string_enum(["segments","relevant_guidance","mode"]; ["paths_only"]),
       (
         (.segments.relevant_guidance.rules // []) as $rules
         | if ($rules | type) == "array" then . else fail("segments.relevant_guidance.rules must be an array") end
@@ -258,9 +251,6 @@ validate_reviewer_config() {
   validate_positive_uint_env REVIEWER_MAX_ARTIFACT_BYTES "$MAX_ARTIFACT_BYTES"
   validate_positive_uint_env REVIEWER_DIFF_MAX_BYTES "$DIFF_MAX_BYTES"
   validate_positive_uint_env REVIEWER_DIFF_FILE_MAX_BYTES "$DIFF_FILE_MAX_BYTES"
-  validate_positive_uint_env REVIEWER_FILE_TREE_MAX_BYTES "$FILE_TREE_MAX_BYTES"
-  validate_positive_uint_env REVIEWER_SELECTED_FILE_MAX_BYTES "$SELECTED_FILE_MAX_BYTES"
-  validate_positive_uint_env REVIEWER_GUIDANCE_FILE_MAX_BYTES "$GUIDANCE_FILE_MAX_BYTES"
   validate_uint_env REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS "$INVALID_VERDICT_MAX_ATTEMPTS"
   validate_bool_env REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE "$ALLOW_REQUIRED_CHECKS_OVERRIDE"
   validate_bool_env REVIEWER_APPLY_LABELS "$APPLY_LABELS"

@@ -37,9 +37,7 @@
     },
     "relevant_guidance": {
       "enabled": true,
-      "description": "Configured guidance paths selected from changed paths. Use paths_only to keep the prompt lean, or full_content to paste matching PR-head docs with untrusted framing.",
-      "mode": "paths_only",
-      "max_lines_per_file": 220,
+      "description": "Configured guidance paths selected from changed paths, rendered as pointers only. Gemini can read the files on demand from the PR-head snapshot, so contents are never pasted into the prompt.",
       "rules": [
         {
           "when_changed_path_matches": ["client/**"],
@@ -65,24 +63,6 @@
       "enabled": false,
       "description": "Verbose GitHub check summary. Usually unnecessary because required checks gate Gemini before review.",
       "example": "Build client bundle\tpass\t31s"
-    },
-    "full_file_tree": {
-      "enabled": false,
-      "description": "All repository paths at the PR head SHA, generated from the untrusted read-only source snapshot.",
-      "example": "AGENTS.md\nclient/src/App.tsx\nserver/spacetimedb/src/lib.rs"
-    },
-    "selected_file_contents": {
-      "enabled": false,
-      "description": "Configured files copied from the untrusted PR-head source snapshot. This reproduces the older MOG-style context payload when enabled.",
-      "max_lines_per_file": 180,
-      "paths": [
-        "AGENTS.md",
-        "CONTRIBUTING.md",
-        "README.md",
-        "client/package.json",
-        ".github/workflows/ci.yml"
-      ],
-      "example": "First N lines of each configured file, fetched from the PR head."
     },
     "diff": {
       "enabled": true,
