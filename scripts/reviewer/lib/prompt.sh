@@ -176,12 +176,13 @@ append_ci_status() {
 
 append_previous_bot_review() {
   local head_sha="$1"
+  local previous_reviews_json="${2:-}"
   local max_body_bytes previous_review state event
 
-  [ -n "${PREVIOUS_BOT_REVIEWS_JSON:-}" ] || return 0
+  [ -n "$previous_reviews_json" ] || return 0
 
   max_body_bytes=$(prompt_segment_number previous_bot_review max_body_bytes 12000)
-  if ! previous_review=$(printf '%s\n' "$PREVIOUS_BOT_REVIEWS_JSON" |
+  if ! previous_review=$(printf '%s\n' "$previous_reviews_json" |
     jq -c --arg bot "${BOT_LOGIN:-}" --arg bot_author "${BOT_AUTHOR:-}" --arg head "$head_sha" '
       [
         .[]
@@ -396,6 +397,7 @@ build_review_prompt() {
   local head_sha="${4:-}"
   local worktree_dir="${5:-}"
   local pr_metadata_json="${6:-}"
+  local previous_bot_reviews_json="${7:-}"
   local changed_files_json guidance_paths_file status
 
   changed_files_json=$(mktemp)
@@ -425,7 +427,7 @@ build_review_prompt() {
     append_ci_status "$ci_state" "$num" "$head_sha" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ] && prompt_segment_enabled previous_bot_review; then
-    append_previous_bot_review "$head_sha" >>"$output_prompt_file" || status=1
+    append_previous_bot_review "$head_sha" "$previous_bot_reviews_json" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ] && prompt_segment_enabled changed_paths; then
     append_changed_paths "$changed_files_json" >>"$output_prompt_file" || status=1

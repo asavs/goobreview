@@ -547,7 +547,7 @@ test_log_rotation() {
 }
 
 test_prompt_assembly() {
-  local prompt_file worktree_dir pr_metadata_json
+  local prompt_file worktree_dir pr_metadata_json previous_bot_reviews_json
 
   prompt_file="$TMP_ROOT/prompt.md"
   worktree_dir="$TMP_ROOT/worktree"
@@ -604,7 +604,7 @@ JSON
   REPO="example/repo"
   BOT_LOGIN="goobreview[bot]"
   BOT_AUTHOR="app/goobreview"
-  PREVIOUS_BOT_REVIEWS_JSON='[
+  previous_bot_reviews_json='[
     {
       "user": {"login": "goobreview[bot]"},
       "commit_id": "old123",
@@ -643,7 +643,7 @@ JSON
     return 1
   }
 
-  build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir" "$pr_metadata_json"
+  build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir" "$pr_metadata_json" "$previous_bot_reviews_json"
 
   assert_order "prompt uses compressed canonical section order" "$prompt_file" \
     "## Role" \
