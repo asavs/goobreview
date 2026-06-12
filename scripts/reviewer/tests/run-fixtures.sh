@@ -693,6 +693,99 @@ JSON
   pass "prompt build failure is propagated"
 }
 
+test_prompt_context_budgets_truncate() {
+  local prompt_file worktree_dir
+
+  prompt_file="$TMP_ROOT/prompt-budget.md"
+  worktree_dir="$TMP_ROOT/worktree-budget"
+
+  PERSONALITY_FILE="$TMP_ROOT/personality-budget.md"
+  PROMPT_FILE="$TMP_ROOT/engine-budget.md"
+  PROMPT_PAYLOAD_FILE="$TMP_ROOT/prompt-payload-budget.json"
+  printf 'Role.\n' > "$PERSONALITY_FILE"
+  printf 'Format.\n' > "$PROMPT_FILE"
+  cat > "$PROMPT_PAYLOAD_FILE" <<'JSON'
+{
+  "segments": {
+    "personality": {"enabled": true},
+    "pr_metadata": {"enabled": false},
+    "ci_status": {"enabled": false},
+    "changed_paths": {"enabled": true},
+    "relevant_guidance": {
+      "enabled": true,
+      "mode": "full_content",
+      "max_lines_per_file": 100,
+      "rules": [
+        {
+          "when_changed_path_matches": ["client/**"],
+          "guidance_paths": ["client/GUIDELINES.md"]
+        }
+      ]
+    },
+    "source_snapshot_hint": {"enabled": false},
+    "all_check_summary": {"enabled": false},
+    "full_file_tree": {"enabled": true},
+    "selected_file_contents": {
+      "enabled": true,
+      "max_lines_per_file": 100,
+      "paths": ["README.md"]
+    },
+    "diff": {"enabled": true},
+    "response_format": {"enabled": true}
+  }
+}
+JSON
+  mkdir -p "$worktree_dir/client" "$worktree_dir/src"
+  printf '%080d\n' 1 > "$worktree_dir/client/GUIDELINES.md"
+  printf '%080d\n' 2 > "$worktree_dir/README.md"
+  printf 'x\n' > "$worktree_dir/src/a.txt"
+  printf 'x\n' > "$worktree_dir/src/b.txt"
+  printf 'x\n' > "$worktree_dir/src/c.txt"
+
+  REPO="example/repo"
+  MAX_PROMPT_BYTES=10000
+  DIFF_MAX_BYTES=40
+  FILE_TREE_MAX_BYTES=20
+  SELECTED_FILE_MAX_BYTES=30
+  GUIDANCE_FILE_MAX_BYTES=30
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
+  github_api_get() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999" ] && [ "${2:-}" = "application/vnd.github.diff" ]; then
+      printf '%s\n' 'diff --git a/client/app.js b/client/app.js'
+      printf '%080d\n' 3
+      return 0
+    fi
+
+    return 1
+  }
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
+  github_api_paginate_array() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999/files" ]; then
+      printf '%s\n' '{"filename":"client/app.js"}'
+      return 0
+    fi
+
+    return 1
+  }
+
+  build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"
+
+  assert_contains "prompt budget truncates diff" "[goobreview: diff truncated after 40 bytes]" "$prompt_file"
+  assert_contains "prompt budget truncates file tree" "[goobreview: full file tree truncated after 20 bytes]" "$prompt_file"
+  assert_contains "prompt budget truncates selected file content" "[goobreview: README.md content truncated after 30 bytes]" "$prompt_file"
+  assert_contains "prompt budget truncates guidance content" "[goobreview: client/GUIDELINES.md content truncated after 30 bytes]" "$prompt_file"
+
+  MAX_PROMPT_BYTES=50
+  if build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"; then
+    fail "prompt global byte budget fails closed"
+  fi
+  pass "prompt global byte budget fails closed"
+
+  unset MAX_PROMPT_BYTES DIFF_MAX_BYTES FILE_TREE_MAX_BYTES SELECTED_FILE_MAX_BYTES GUIDANCE_FILE_MAX_BYTES
+}
+
 test_invalid_verdict_state() {
   local artifact count
 
@@ -927,6 +1020,7 @@ EOF
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
+test_prompt_context_budgets_truncate
 test_invalid_verdict_state
 test_pr_queue_skip_reasons
 test_gemini_invocation_isolates_review_context

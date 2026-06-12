@@ -260,6 +260,8 @@ The reviewer reads three gitignored files under `config/`, each copied from a `*
 
 GitHub API calls are bounded by default. Shell-based REST calls use `REVIEWER_GITHUB_CONNECT_TIMEOUT` (default `10` seconds), `REVIEWER_GITHUB_MAX_TIME` (default `60` seconds), `REVIEWER_GITHUB_RETRIES` (default `2` retries for safe transient GET failures such as network errors, 5xx, 429, or rate-limit-like 403 responses), and `REVIEWER_GITHUB_RETRY_SLEEP` (default `1` second between attempts). The Node App-token helper uses `REVIEWER_GITHUB_FETCH_TIMEOUT` (default `60` seconds) as its fetch abort timeout. Failed GitHub API calls log the method, path, curl status, HTTP status, attempt count, and a short redacted response snippet so operators can distinguish auth/configuration errors from transient GitHub failures without leaking tokens. Check-run summaries include whether the fetched data is complete and whether the displayed rows were intentionally truncated; set `REVIEWER_CHECK_RUN_SUMMARY_LIMIT` (default `200`) to change the display limit without changing required-check gating.
 
+Prompt assembly is also bounded by default. `REVIEWER_DIFF_MAX_BYTES` (default `120000`), `REVIEWER_FILE_TREE_MAX_BYTES` (default `40000`), `REVIEWER_SELECTED_FILE_MAX_BYTES` (default `20000`), and `REVIEWER_GUIDANCE_FILE_MAX_BYTES` (default `20000`) cap high-volume prompt segments and insert an explicit `goobreview` truncation marker when content is omitted. After assembly, `REVIEWER_MAX_PROMPT_BYTES` (default `240000`) is a hard fail-closed budget checked before Gemini is invoked. Dry-run output is capped by `REVIEWER_MAX_ARTIFACT_BYTES` (default `1000000`) and marked when truncated.
+
 Live posting requires real deployment config. `scripts/reviewer/reviewer.sh` refuses live mode unless `config/prompt-payload.json` and `config/required-checks.json` exist, or `REVIEWER_PROMPT_PAYLOAD_FILE` and `REVIEWER_REQUIRED_CHECKS_FILE` explicitly point at valid files. Run `scripts/configure.sh` to create the local files from their `.example` siblings. Dry-run and prompt-rendering paths may still use the committed examples so first-run setup can inspect behavior before launching.
 
 Before enabling cron or another live daemon, run:
@@ -297,6 +299,7 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 
 - Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
 - Very large diffs may exceed useful Gemini context.
+- Prompt and dry-run artifact size limits are explicit runtime knobs; truncated context is marked in the prompt/artifact, and prompts that still exceed `REVIEWER_MAX_PROMPT_BYTES` fail before Gemini is called.
 - PR-head source snapshots are provided as read-only context under `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_RUNTIME_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot.
 - Google-account Gemini CLI auth is still an interactive, user-bound setup step. Gemini CLI's documented non-interactive auth modes are Gemini API key or Vertex AI; those do not preserve personal Google AI Pro/Ultra subscription entitlement.
 - The daemon does not inspect full CI logs; it gates on the configured required-check state.
