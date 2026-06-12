@@ -143,7 +143,6 @@ validate_prompt_payload_config() {
       ),
       (["include_title","include_author","include_url","include_base_branch","include_head_branch","include_head_sha","include_description"][] as $key | optional_bool(["segments","pr_metadata",$key])),
       optional_uint(["segments","pr_metadata","max_body_bytes"]; 1; 50000),
-      optional_string_enum(["segments","ci_status","mode"]; ["one_line","all_check_summary"]),
       optional_uint(["segments","commit_subjects","max_commits"]; 1; 500),
       optional_uint(["segments","previous_bot_review","max_body_bytes"]; 1; 50000),
       (
