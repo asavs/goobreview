@@ -177,13 +177,21 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 3. Lists open non-draft PRs in `REVIEWER_REPO`.
 4. Skips PRs authored by `BOT_LOGIN` (`<app-slug>[bot]`); also skips PRs authored by `REVIEWER_USER` if set.
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
-6. Applies the required-check gate.
+6. Counts the PR against `REVIEWER_MAX_ATTEMPTS`, then applies the required-check gate.
 7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`.
 8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata, CI one-liner, changed paths, relevant guidance, diff, and the GitHub review formatting rule).
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Posts a top-level GitHub review with `gh pr review`.
 12. Applies optional labels.
+
+Queued skips, attempted reviews, and posted reviews are separate counters.
+Drafts, self-authored PRs, PRs outside `REVIEWER_ONLY_PR`, and
+already-reviewed PR heads are queued skips and stay cheap. A PR becomes an
+attempted review when the daemon starts work that can spend API/model/runtime
+budget, such as CI reads, worktree preparation, prompt assembly, Gemini
+invocation, or posting. Posted reviews are the successful dry-run/render/post
+actions counted by `REVIEWER_MAX_PRS`.
 
 ## Operations
 
@@ -274,6 +282,7 @@ The engine prompt at `scripts/reviewer/review-prompt.md` only defines the parsed
 Env vars (set in `reviewer.env` or inline) beyond the required set:
 
 - `REVIEWER_APPLY_LABELS` — apply the helper labels after posting (default `1`; set `0` to disable). `scripts/reviewer/ensure-labels.sh` creates the labels; review posting never depends on them.
+- `REVIEWER_MAX_ATTEMPTS` — maximum non-skipped PRs to attempt in one tick. Defaults to `REVIEWER_MAX_PRS`. Reaching this limit logs `Reached REVIEWER_MAX_ATTEMPTS=...` and stops the tick.
 - `REVIEWER_IGNORE_GEMINI_BACKOFF` — set `1` to run even while a Gemini quota backoff (`gemini_backoff_until`) is active. `dry-run.sh` sets this automatically.
 - `REVIEWER_REQUIRED_CHECKS_JSON` + `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE=1` — override the required-check gate from the environment for one-off runs; both must be set, so a stray env var cannot loosen a production gate.
 - `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK` — emergency bypass for the live tick launch gate. Prefer rerunning `REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh` and `scripts/launch-check.sh`.
@@ -292,4 +301,4 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 - The daemon does not create follow-up issues automatically.
 - The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.
 - The checkout must stay clean. `sync-worktree.sh` refuses to update a dirty checkout; `run-once.sh` logs that failure and exits before reviewing unless `REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE=1` is set deliberately.
-- Each cron tick posts at most `REVIEWER_MAX_PRS` reviews, defaulting to one.
+- Each cron tick attempts at most `REVIEWER_MAX_ATTEMPTS` non-skipped PRs and posts at most `REVIEWER_MAX_PRS` reviews. Both default to one.
