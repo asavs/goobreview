@@ -127,7 +127,7 @@ validate_prompt_payload_config() {
       obj(["segments"]),
       (
         (.segments | keys_unsorted[]) as $name
-        | if ["personality","pr_metadata","ci_status","changed_paths","relevant_guidance","source_snapshot_hint","all_check_summary","full_file_tree","selected_file_contents","diff","response_format"] | index($name)
+        | if ["personality","pr_metadata","ci_status","previous_bot_review","changed_paths","relevant_guidance","source_snapshot_hint","all_check_summary","full_file_tree","selected_file_contents","diff","response_format"] | index($name)
           then .
           else fail("segments." + $name + " is not a known prompt segment")
           end
@@ -143,6 +143,7 @@ validate_prompt_payload_config() {
       ),
       (["include_title","include_author","include_url","include_base_branch","include_head_branch","include_head_sha","include_description"][] as $key | optional_bool(["segments","pr_metadata",$key])),
       optional_string_enum(["segments","ci_status","mode"]; ["one_line","all_check_summary"]),
+      optional_uint(["segments","previous_bot_review","max_body_bytes"]; 1; 50000),
       optional_string_enum(["segments","relevant_guidance","mode"]; ["paths_only","full_content"]),
       optional_uint(["segments","relevant_guidance","max_lines_per_file"]; 1; 5000),
       optional_uint(["segments","selected_file_contents","max_lines_per_file"]; 1; 5000),

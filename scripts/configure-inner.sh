@@ -62,6 +62,7 @@ apply_prompt_payload_profile() {
         | .segments.personality.enabled = true
         | .segments.pr_metadata.enabled = false
         | .segments.ci_status.enabled = false
+        | .segments.previous_bot_review.enabled = false
         | .segments.changed_paths.enabled = false
         | .segments.relevant_guidance.enabled = false
         | .segments.source_snapshot_hint.enabled = false
@@ -80,6 +81,7 @@ apply_prompt_payload_profile() {
         | .segments.pr_metadata.include_description = false
         | .segments.ci_status.enabled = true
         | .segments.ci_status.mode = "one_line"
+        | .segments.previous_bot_review.enabled = true
         | .segments.changed_paths.enabled = true
         | .segments.relevant_guidance.enabled = true
         | .segments.relevant_guidance.mode = "paths_only"
@@ -99,6 +101,7 @@ apply_prompt_payload_profile() {
         | .segments.pr_metadata.include_description = false
         | .segments.ci_status.enabled = true
         | .segments.ci_status.mode = "one_line"
+        | .segments.previous_bot_review.enabled = true
         | .segments.changed_paths.enabled = true
         | .segments.relevant_guidance.enabled = true
         | .segments.relevant_guidance.mode = "full_content"
@@ -118,6 +121,7 @@ apply_prompt_payload_profile() {
         | .segments.pr_metadata.include_description = true
         | .segments.ci_status.enabled = true
         | .segments.ci_status.mode = "one_line"
+        | .segments.previous_bot_review.enabled = true
         | .segments.changed_paths.enabled = true
         | .segments.relevant_guidance.enabled = true
         | .segments.relevant_guidance.mode = "full_content"

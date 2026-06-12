@@ -197,7 +197,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
 6. Counts the PR against `REVIEWER_MAX_ATTEMPTS`, then applies the required-check gate.
 7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current` and neutralizes any symlinks into metadata stubs before prompt assembly or Gemini access.
-8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata, CI one-liner, changed paths, relevant guidance, diff, and the GitHub review formatting rule).
+8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata, CI one-liner, previous bot review on the same PR, changed paths, relevant guidance, diff, and the GitHub review formatting rule).
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Posts a top-level GitHub review with `gh pr review`.

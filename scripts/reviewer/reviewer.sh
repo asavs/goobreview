@@ -224,13 +224,17 @@ while IFS=$'\t' read -r num author head_sha draft; do
     break
   fi
 
+  if ! bot_reviews_json=$(github_api_paginate_array "repos/$REPO/pulls/$num/reviews" 2>>"$LOG_FILE" |
+    jq -s --arg bot "$BOT_LOGIN" --arg bot_author "$BOT_AUTHOR" \
+      '[.[] | select(.user.login == $bot or .user.login == $bot_author)]'); then
+    log "PR #$num@$head_sha: failed to read existing reviews, will retry next tick"
+    continue
+  fi
+  PREVIOUS_BOT_REVIEWS_JSON="$bot_reviews_json"
+
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
-    if ! existing=$(github_api_paginate_array "repos/$REPO/pulls/$num/reviews" 2>>"$LOG_FILE" |
-      jq -s --arg bot "$BOT_LOGIN" --arg bot_author "$BOT_AUTHOR" --arg head "$head_sha" \
-        '[.[] | select((.user.login == $bot or .user.login == $bot_author) and .commit_id == $head)] | length'); then
-      log "PR #$num@$head_sha: failed to read existing reviews, will retry next tick"
-      continue
-    fi
+    existing=$(printf '%s\n' "$bot_reviews_json" |
+      jq --arg head "$head_sha" '[.[] | select(.commit_id == $head)] | length')
     case "$existing" in
       ''|*[!0-9]*)
         log "PR #$num@$head_sha: existing review query returned unexpected count '$existing', will retry next tick"
