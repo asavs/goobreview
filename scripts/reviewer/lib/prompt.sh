@@ -86,9 +86,14 @@ validate_prompt_size() {
 
 append_pr_metadata() {
   local num="$1"
+  local metadata_json="${2:-}"
   local metadata max_body_bytes
 
-  metadata=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE") || return 1
+  if [ -n "$metadata_json" ]; then
+    metadata="$metadata_json"
+  else
+    metadata=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE") || return 1
+  fi
   max_body_bytes=$(prompt_segment_number pr_metadata max_body_bytes 12000)
 
   prompt_section "PR Metadata (Untrusted PR Input)"
@@ -390,6 +395,7 @@ build_review_prompt() {
   local ci_state="${3:-unknown}"
   local head_sha="${4:-}"
   local worktree_dir="${5:-}"
+  local pr_metadata_json="${6:-}"
   local changed_files_json guidance_paths_file status
 
   changed_files_json=$(mktemp)
@@ -410,7 +416,7 @@ build_review_prompt() {
     cat "$PERSONALITY_FILE" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ] && prompt_segment_enabled pr_metadata; then
-    append_pr_metadata "$num" >>"$output_prompt_file" || status=1
+    append_pr_metadata "$num" "$pr_metadata_json" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ] && prompt_segment_enabled commit_subjects; then
     append_commit_subjects "$num" >>"$output_prompt_file" || status=1

@@ -547,7 +547,7 @@ test_log_rotation() {
 }
 
 test_prompt_assembly() {
-  local prompt_file worktree_dir
+  local prompt_file worktree_dir pr_metadata_json
 
   prompt_file="$TMP_ROOT/prompt.md"
   worktree_dir="$TMP_ROOT/worktree"
@@ -620,14 +620,10 @@ JSON
       "body": "Current-head review must not be included."
     }
   ]'
+  pr_metadata_json='{"title":"Test auth change","body":"Author body with extra author claims that should be capped.","user":{"login":"alice"},"html_url":"https://github.com/example/repo/pull/999","base":{"ref":"main"},"head":{"ref":"feature/auth","sha":"abc123"}}'
 
   # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
   github_api_get() {
-    if [ "${1:-}" = "repos/example/repo/pulls/999" ]; then
-      printf '%s\n' '{"title":"Test auth change","body":"Author body with extra author claims that should be capped.","user":{"login":"alice"},"html_url":"https://github.com/example/repo/pull/999","base":{"ref":"main"},"head":{"ref":"feature/auth","sha":"abc123"}}'
-      return 0
-    fi
-
     return 1
   }
 
@@ -647,7 +643,7 @@ JSON
     return 1
   }
 
-  build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"
+  build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir" "$pr_metadata_json"
 
   assert_order "prompt uses compressed canonical section order" "$prompt_file" \
     "## Role" \
@@ -1059,8 +1055,8 @@ test_pr_queue_skip_reasons() {
     {"number":4,"draft":false,"user":{"login":"reviewer"},"head":{"sha":"sha4"}}]'
   rows=$(printf '%s\n' "$pulls" | jq -c '.[]' | pull_request_queue_rows)
 
-  assert_contains "PR queue preserves draft rows" $'1\talice\tsha1\ttrue' <(printf '%s\n' "$rows")
-  assert_contains "PR queue defaults missing draft to false" $'3\tmaintainer\tsha3\tfalse' <(printf '%s\n' "$rows")
+  assert_contains "PR queue preserves draft rows" $'1\talice\tsha1\ttrue\t' <(printf '%s\n' "$rows")
+  assert_contains "PR queue defaults missing draft to false" $'3\tmaintainer\tsha3\tfalse\t' <(printf '%s\n' "$rows")
 
   reason=$(reviewer_pr_skip_reason 1 alice sha1 true 'goobreview[bot]' '' '')
   assert_eq "draft skip reason is explicit" "PR #1@sha1 is a draft, skipping until it is marked ready for review" "$reason"

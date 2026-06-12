@@ -231,8 +231,12 @@ record_review_failure_and_log() {
   fi
 }
 
-while IFS=$'\t' read -r num author head_sha draft; do
+while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
   [ -n "${num:-}" ] || continue
+  pr_metadata_json=""
+  if [ -n "${pr_json_b64:-}" ]; then
+    pr_metadata_json=$(printf '%s' "$pr_json_b64" | base64 -d) || pr_metadata_json=""
+  fi
   if skip_reason=$(reviewer_pr_skip_reason "$num" "$author" "$head_sha" "${draft:-false}" "$BOT_LOGIN" "$EXTRA_SKIP_USER" "$ONLY_PR" "$BOT_AUTHOR"); then
     log "$skip_reason"
     continue
@@ -364,7 +368,7 @@ EOF
     continue
   fi
 
-  if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree"; then
+  if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json"; then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to build Gemini prompt"
     continue

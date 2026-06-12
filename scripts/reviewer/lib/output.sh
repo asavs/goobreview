@@ -236,7 +236,7 @@ write_invalid_verdict_artifact() {
 # Keep draft state in-band so the main loop can log draft skips instead of
 # filtering them silently in jq.
 pull_request_queue_rows() {
-  jq -r '[.number, .user.login, .head.sha, (.draft // false)] | @tsv'
+  jq -r '[.number, .user.login, .head.sha, (.draft // false), (. | @base64)] | @tsv'
 }
 
 reviewer_pr_skip_reason() {
