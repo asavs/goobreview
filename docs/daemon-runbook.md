@@ -239,7 +239,7 @@ The reviewer reads three gitignored files under `config/`, each copied from a `*
 - **`config/prompt-payload.json`** (from `prompt-payload.example.json`) — which prompt segments Gemini receives. Each segment has an `enabled` flag, description, and example; the example file documents every segment. `configure.sh` offers `minimal`/`lean`/`guided`/`full` presets, with `lean` as the default. Inspect the assembled payload with `scripts/render-prompt.sh 123 --explain`.
 - **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
 
-When a file is missing, the daemon transparently falls back to the committed `.example` version, so a fresh checkout works for a dry run without any edits.
+Live posting requires real deployment config. `scripts/reviewer/reviewer.sh` refuses live mode unless `config/prompt-payload.json` and `config/required-checks.json` exist, or `REVIEWER_PROMPT_PAYLOAD_FILE` and `REVIEWER_REQUIRED_CHECKS_FILE` explicitly point at valid files. Run `scripts/configure.sh` to create the local files from their `.example` siblings. Dry-run and prompt-rendering paths may still use the committed examples so first-run setup can inspect behavior before launching.
 
 Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim and selected via `REVIEWER_PERSONALITY_FILE`. To try one in a dry run without editing config:
 
