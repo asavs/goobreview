@@ -3,6 +3,11 @@
 # shellcheck disable=SC2034
 set -euo pipefail
 
+if ! command -v flock >/dev/null 2>&1; then
+  printf 'SKIP: reviewer fixture suite needs flock (util-linux).\n'
+  exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REVIEWER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LIB_DIR="$REVIEWER_DIR/lib"
@@ -409,20 +414,14 @@ EOF
   assert_eq "check-ci finds required check beyond first page" "success" "$output"
   assert_eq "check-ci fetches second check-run page" "2" "$(cat "$count_file")"
 
-  python3 - <<'PY2' "$bin_dir/curl"
-from pathlib import Path
-path = Path(__import__('sys').argv[1])
-text = path.read_text()
-text = text.replace("""  *'page=2')
-    jq -n '{total_count: 101, check_runs: [{name: "late-check", status: "completed", conclusion: "success", started_at: "2026-05-21T00:01:00Z"}]}' > "$body_file"
-    printf '200'
-    ;;""", """  *'page=2')
-    printf 'GitHub unavailable on page 2\n' >&2
-    printf '503'
-    exit 0
-    ;;""")
-path.write_text(text)
-PY2
+  sed -i \
+    -e "/jq -n '{total_count: 101, check_runs: \\[{name: \"late-check\"/,/    ;;/c\\
+  *'page=2')\\
+    printf 'GitHub unavailable on page 2\\n' >&2\\
+    printf '503'\\
+    exit 0\\
+    ;;\\
+" "$bin_dir/curl"
   printf '0\n' > "$count_file"
   status=0
   GH_TOKEN='token' CHECK_CI_PAGE_COUNT="$count_file" PATH="$bin_dir:$PATH" bash "$REVIEWER_DIR/check-ci.sh" example/repo sha123 "$required_file" > /dev/null 2>"$log_file" || status=$?
