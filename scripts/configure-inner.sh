@@ -64,10 +64,8 @@ apply_prompt_payload_profile() {
         | .segments.commit_subjects.enabled = false
         | .segments.ci_status.enabled = false
         | .segments.previous_bot_review.enabled = false
-        | .segments.changed_paths.enabled = false
         | .segments.relevant_guidance.enabled = false
         | .segments.source_snapshot_hint.enabled = false
-        | .segments.all_check_summary.enabled = false
         | .segments.diff.enabled = true
         | .segments.response_format.enabled = true
       ' "$file" >"$tmp"
@@ -82,10 +80,8 @@ apply_prompt_payload_profile() {
         | .segments.ci_status.enabled = true
         | .segments.ci_status.mode = "one_line"
         | .segments.previous_bot_review.enabled = true
-        | .segments.changed_paths.enabled = true
         | .segments.relevant_guidance.enabled = true
         | .segments.source_snapshot_hint.enabled = true
-        | .segments.all_check_summary.enabled = false
         | .segments.diff.enabled = true
         | .segments.response_format.enabled = true
       ' "$file" >"$tmp"
@@ -98,12 +94,10 @@ apply_prompt_payload_profile() {
         | .segments.pr_metadata.include_description = true
         | .segments.commit_subjects.enabled = true
         | .segments.ci_status.enabled = true
-        | .segments.ci_status.mode = "one_line"
         | .segments.previous_bot_review.enabled = true
-        | .segments.changed_paths.enabled = true
         | .segments.relevant_guidance.enabled = true
         | .segments.source_snapshot_hint.enabled = true
-        | .segments.all_check_summary.enabled = true
+        | .segments.ci_status.mode = "all_check_summary"
         | .segments.diff.enabled = true
         | .segments.response_format.enabled = true
       ' "$file" >"$tmp"
