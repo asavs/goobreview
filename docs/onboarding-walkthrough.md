@@ -145,7 +145,7 @@ trust prompt, then return control to the setup agent for `scripts/configure.sh`.
    `REVIEWER_PERSONALITY_FILE`.
 6. **Required-checks** — copies `required-checks.example.json` → `required-checks.json`
    if missing, offers to edit.
-7. **Prompt payload profile** — picks one of `lean | minimal | guided | full | custom`,
+7. **Prompt payload profile** — picks one of `lean | minimal | full | custom`,
    applies it to `config/prompt-payload.json` (which controls which prompt segments
    are included). Offers to edit.
 8. **Labels** — offers to create helper labels (`agent-reviewed`,
@@ -202,9 +202,9 @@ cat /var/lib/goobreview/example/dry-pr-123.txt
   directly. Re-run `dry-run.sh`.
 - **Add a new personality:** drop a new `.md` in `config/personalities/`,
   then point `REVIEWER_PERSONALITY_FILE` at it.
-- **Change which segments go into the prompt** (CI status, file tree, diff,
-  etc.): edit `config/prompt-payload.json` directly, or re-run `configure.sh`
-  and pick a different profile.
+- **Change which segments go into the prompt** (CI status, commit subjects,
+  diff, etc.): edit `config/prompt-payload.json` directly, or re-run
+  `configure.sh` and pick a different profile.
 - **Render the prompt without invoking Gemini** (just see what would be sent):
   ```bash
   REVIEWER_RENDER_PROMPT_ONLY=1 REVIEWER_ONLY_PR=123 scripts/reviewer/reviewer.sh

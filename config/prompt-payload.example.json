@@ -28,7 +28,7 @@
       "enabled": true,
       "description": "One-line status after the required-check gate has passed. Failing or pending required checks block review before Gemini is called.",
       "mode": "one_line",
-      "example": "CI: required GitHub Actions checks passed for this PR head."
+      "example": "CI: required GitHub Actions checks passed for this PR head. Focus your review on what automated checks cannot verify."
     },
     "previous_bot_review": {
       "enabled": true,

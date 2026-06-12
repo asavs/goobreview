@@ -162,7 +162,7 @@ append_ci_status() {
   fi
 
   case "$ci_state" in
-    success) printf 'CI: required GitHub Actions checks passed for this PR head.\n' ;;
+    success) printf 'CI: required GitHub Actions checks passed for this PR head. Focus your review on what automated checks cannot verify.\n' ;;
     *) printf 'CI: required-check gate state is %s.\n' "$ci_state" ;;
   esac
 }
