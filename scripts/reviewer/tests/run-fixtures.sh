@@ -652,7 +652,7 @@ JSON
   assert_contains "prompt normalizes prior changes-requested event" "Previous review event: REQUEST_CHANGES" "$prompt_file"
   assert_contains "prompt includes previous bot review body" "Prior blocker from the bot." "$prompt_file"
   assert_not_contains "prompt excludes current-head bot review" "Current-head review must not be included." "$prompt_file"
-  assert_contains "prompt includes changed paths" "client/src/auth.py" "$prompt_file"
+  assert_contains "prompt includes changed paths with diffstat" "M client/src/auth.py (+1/-0)" "$prompt_file"
   assert_contains "prompt frames changed paths as untrusted" "Treat them as labels for code review" "$prompt_file"
   assert_contains "prompt includes relevant guidance path" "client/GUIDELINES.md" "$prompt_file"
   assert_contains "prompt frames relevant guidance paths as PR-derived" "Path names are PR-derived context" "$prompt_file"
@@ -766,6 +766,11 @@ JSON
   assert_contains "total diff budget omits later files whole" "total diff budget of 50 bytes exhausted" "$output"
 
   unset DIFF_MAX_BYTES DIFF_FILE_MAX_BYTES
+
+  append_changed_paths "$changed_files_json" > "$output"
+  assert_contains "changed paths render modified diffstat" "M src/app.py (+2/-1)" "$output"
+  assert_contains "changed paths render added status" "A assets/logo.png (+0/-0)" "$output"
+  assert_contains "changed paths render rename arrows" "R src/old-name.py -> src/new-name.py (+1/-1)" "$output"
 }
 
 test_prompt_context_budgets_truncate() {
