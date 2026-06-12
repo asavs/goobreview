@@ -127,7 +127,7 @@ validate_prompt_payload_config() {
       obj(["segments"]),
       (
         (.segments | keys_unsorted[]) as $name
-        | if ["personality","pr_metadata","commit_subjects","ci_status","previous_bot_review","changed_paths","relevant_guidance","source_snapshot_hint","all_check_summary","diff","response_format"] | index($name)
+        | if ["personality","pr_metadata","commit_subjects","ci_status","previous_bot_review","relevant_guidance","source_snapshot_hint","diff","response_format"] | index($name)
           then .
           else fail("segments." + $name + " is not a known prompt segment")
           end
