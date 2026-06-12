@@ -105,7 +105,7 @@ Once the dry run looks good:
 scripts/enable-cron.sh
 ```
 
-Installs a one-line crontab entry that rotates `cron.log` and runs `run-once.sh` every minute. It first runs `scripts/launch-check.sh`, which refuses to launch unless current live config matches the latest non-bypassed dry-run metadata and required checks are configured. Use `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1` only for an intentional emergency bypass. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
+Installs a one-line crontab entry that rotates `cron.log` and runs `run-once.sh` every minute. It first runs `scripts/launch-check.sh`, which refuses to launch unless current live config matches the latest non-bypassed dry-run metadata and required checks are configured. Live reviewer ticks run the same launch validation before posting. Use `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1` or `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1` only for intentional emergency bypasses. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
 
 Prefer systemd? See [docs/daemon-runbook.md#systemd-timer](daemon-runbook.md#systemd-timer).
 
