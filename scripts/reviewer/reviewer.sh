@@ -387,18 +387,28 @@ EOF
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "INVALID_VERDICT" "$review")
     write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review"
     rm -f "$prompt_tmp" "$gemini_err_tmp"
-    verdict_line=$(printf '%s' "$review" | sed -n '1p')
+    verdict_line=$(printf '%s' "$review" | awk '
+      {
+        line = $0
+        sub(/\r$/, "", line)
+        trimmed = line
+        sub(/^[[:space:]]+/, "", trimmed)
+        sub(/[[:space:]]+$/, "", trimmed)
+        if (trimmed != "") last = trimmed
+      }
+      END { print last }
+    ')
     if [ -z "$DRY_RUN" ]; then
       invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
       if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
-        log "PR #$num@$head_sha: gemini did not emit a valid first-line GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
+        log "PR #$num@$head_sha: gemini did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
       elif [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
-        log "PR #$num@$head_sha: gemini did not emit a valid first-line GitHub review event (got: $verdict_line); wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+        log "PR #$num@$head_sha: gemini did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
       else
-        log "PR #$num@$head_sha: gemini did not emit a valid first-line GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+        log "PR #$num@$head_sha: gemini did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
       fi
     else
-      log "PR #$num@$head_sha: gemini did not emit a valid first-line GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick"
+      log "PR #$num@$head_sha: gemini did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick"
     fi
     continue
   fi
@@ -406,7 +416,7 @@ EOF
     clear_invalid_verdict_attempts "$num" "$head_sha"
   fi
 
-  review_body=$(printf '%s' "$review" | review_body_after_verdict)
+  review_body=$(printf '%s' "$review" | review_body_before_verdict)
   body=$(cat <<EOF
 $review_body
 
