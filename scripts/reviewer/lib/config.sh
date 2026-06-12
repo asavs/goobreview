@@ -258,6 +258,7 @@ validate_reviewer_config() {
   validate_bool_env REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE "$ALLOW_REQUIRED_CHECKS_OVERRIDE"
   validate_bool_env REVIEWER_APPLY_LABELS "$APPLY_LABELS"
 
+  require base64
   require curl
   require flock
   require node
