@@ -24,5 +24,5 @@ fi
 if [ -n "${CHECK_RUNS_JSON:-}" ]; then
   printf '%s' "$CHECK_RUNS_JSON"
 else
-  github_api_get "repos/$REPO/commits/$HEAD_SHA/check-runs?filter=latest&per_page=100"
+  github_check_runs_json "$HEAD_SHA"
 fi | reviewer_ci_state_from_json "$required_checks_json"
