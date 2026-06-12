@@ -21,6 +21,53 @@ review_body_after_verdict() {
   sed '1d'
 }
 
+secure_install_file() {
+  local src="$1"
+  local dst="$2"
+
+  mkdir -p "$(dirname "$dst")"
+  cp "$src" "$dst" || return 1
+  chmod 600 "$dst" 2>/dev/null || {
+    rm -f "$dst"
+    return 1
+  }
+}
+
+artifact_secret_scan() {
+  local file="$1"
+  local pattern_file
+
+  if grep -Eq -- '-----BEGIN (RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----' "$file"; then
+    printf 'private key material\n'
+    return 1
+  fi
+
+  pattern_file=$(mktemp)
+  cat >"$pattern_file" <<'EOF'
+(^|[^A-Za-z0-9_])(GH_TOKEN|GITHUB_TOKEN|GITHUB_PAT|REVIEWER_APP_PRIVATE_KEY_PATH|GEMINI_API_KEY|GOOGLE_API_KEY|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_CLOUD_PROJECT|GCLOUD_PROJECT|CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AZURE_CLIENT_SECRET)[[:space:]]*[:=][[:space:]]*['"]?[^[:space:]'",]{3,}
+EOF
+
+  if grep -Eiq -f "$pattern_file" "$file"; then
+    rm -f "$pattern_file"
+    printf 'sensitive credential assignment\n'
+    return 1
+  fi
+  rm -f "$pattern_file"
+}
+
+install_secret_scanned_artifact() {
+  local src="$1"
+  local dst="$2"
+  local reason
+
+  if ! reason=$(artifact_secret_scan "$src"); then
+    rm -f "$dst"
+    log "Refusing to write artifact containing high-confidence secret material: $reason"
+    return 1
+  fi
+  secure_install_file "$src" "$dst" || return 1
+}
+
 invalid_verdict_attempts_file() {
   local num="$1"
   local head_sha="$2"

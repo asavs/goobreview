@@ -56,9 +56,8 @@ GEMINI_BACKOFF_FILE="$STATE_DIR/gemini_backoff_until"
 # shellcheck disable=SC1091
 . "$LIB_DIR/worktree.sh"
 
-mkdir -p "$STATE_DIR"
-mkdir -p "$RUNTIME_STATE_DIR"
-chmod 700 "$RUNTIME_STATE_DIR" 2>/dev/null || true
+ensure_owner_private_dir "runtime state" "$STATE_DIR"
+ensure_owner_private_dir "transient runtime state" "$RUNTIME_STATE_DIR"
 "$SCRIPT_DIR/rotate-log.sh" "$LOG_FILE" 2>/dev/null || true
 
 DEFAULT_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.json"
@@ -129,16 +128,21 @@ write_dry_run_artifact() {
     marker=$(printf '\n\n[goobreview: dry-run artifact truncated after %s bytes]\n' "$MAX_ARTIFACT_BYTES")
     marker_bytes=$(printf '%s' "$marker" | wc -c | tr -d ' ')
     if [ "$marker_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
-      printf '%s' "$marker" | head -c "$MAX_ARTIFACT_BYTES" >"$output_file"
+      printf '%s' "$marker" | head -c "$MAX_ARTIFACT_BYTES" >"$artifact_tmp.truncated"
+      install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || fatal "dry-run artifact failed secret-safety scan"
+      rm -f "$artifact_tmp.truncated"
       rm -f "$artifact_tmp"
       artifact_tmp=""
     else
       body_bytes=$((MAX_ARTIFACT_BYTES - marker_bytes))
-      head -c "$body_bytes" "$artifact_tmp" >"$output_file"
-      printf '%s' "$marker" >>"$output_file"
+      head -c "$body_bytes" "$artifact_tmp" >"$artifact_tmp.truncated"
+      printf '%s' "$marker" >>"$artifact_tmp.truncated"
+      install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || fatal "dry-run artifact failed secret-safety scan"
+      rm -f "$artifact_tmp.truncated"
     fi
   else
-    mv "$artifact_tmp" "$output_file"
+    install_secret_scanned_artifact "$artifact_tmp" "$output_file" || fatal "dry-run artifact failed secret-safety scan"
+    rm -f "$artifact_tmp"
     artifact_tmp=""
   fi
   [ -z "$artifact_tmp" ] || rm -f "$artifact_tmp"
@@ -170,7 +174,9 @@ write_dry_run_artifact() {
       prompt_payload_sha256: $prompt_payload_sha256,
       dry_run_bypass_ci: $dry_run_bypass_ci,
       required_checks: $required_checks
-    }' >"${output_file}.launch.json"
+    }' >"${output_file}.launch.json.tmp"
+  secure_install_file "${output_file}.launch.json.tmp" "${output_file}.launch.json" || fatal "failed to write dry-run launch metadata with mode 0600"
+  rm -f "${output_file}.launch.json.tmp"
   log "Dry run artifact written to $output_file"
 }
 
@@ -334,8 +340,7 @@ EOF
 
   if [ -n "$RENDER_PROMPT_ONLY" ]; then
     if [ -n "$PROMPT_OUT" ] && [ "$PROMPT_OUT" != "-" ]; then
-      mkdir -p "$(dirname "$PROMPT_OUT")"
-      cp "$prompt_tmp" "$PROMPT_OUT"
+      secure_install_file "$prompt_tmp" "$PROMPT_OUT" || fatal "failed to write prompt output with mode 0600: $PROMPT_OUT"
       log "Rendered prompt for PR #$num@$head_sha to $PROMPT_OUT"
     else
       cat "$prompt_tmp"

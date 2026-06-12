@@ -53,16 +53,20 @@ for cmd in curl jq node tar flock; do
   ops_require_command "$cmd" "Run scripts/setup-vm.sh first."
 done
 
-if [ -n "$explain" ] && [ -z "$output_file" ]; then
-  output_file="/tmp/goobreview-prompt-${pr_number}.md"
-fi
-
 CONFIG_DIR="$REPO_ROOT/config"
 PROMPT_PAYLOAD_FILE="${REVIEWER_PROMPT_PAYLOAD_FILE:-$CONFIG_DIR/prompt-payload.json}"
 if [ ! -f "$PROMPT_PAYLOAD_FILE" ] && [ -f "$CONFIG_DIR/prompt-payload.example.json" ]; then
   PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.example.json"
 fi
 ops_require_file "$PROMPT_PAYLOAD_FILE" "Run scripts/configure.sh first."
+
+if [ -n "$explain" ] && [ -z "$output_file" ]; then
+  state_dir="${REVIEWER_STATE:-$HOME/.goobreview}"
+  mkdir -p "$state_dir" || ops_die "Failed to create REVIEWER_STATE: $state_dir"
+  chmod 700 "$state_dir" 2>/dev/null || ops_die "Failed to set REVIEWER_STATE permissions to 0700: $state_dir"
+  output_file=$(mktemp "$state_dir/prompt-pr-${pr_number}.XXXXXX.md")
+  chmod 600 "$output_file" 2>/dev/null || ops_die "Failed to set prompt output permissions to 0600: $output_file"
+fi
 
 export REVIEWER_RENDER_PROMPT_ONLY=1
 export REVIEWER_MAX_PRS=1

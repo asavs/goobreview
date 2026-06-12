@@ -49,6 +49,35 @@ validate_bool_env() {
   esac
 }
 
+ensure_owner_private_dir() {
+  local label="$1"
+  local path="$2"
+  local mode
+
+  if [ -z "$path" ]; then
+    fatal "missing $label directory path"
+  fi
+
+  mkdir -p "$path" || fatal "failed to create $label directory: $path"
+  if [ ! -d "$path" ]; then
+    fatal "$label path is not a directory: $path"
+  fi
+  if [ ! -O "$path" ]; then
+    fatal "$label directory must be owned by the reviewer user: $path"
+  fi
+  chmod 700 "$path" 2>/dev/null || fatal "failed to set $label directory permissions to 0700: $path"
+
+  mode=$(stat -c '%a' "$path" 2>/dev/null || true)
+  case "$mode" in
+    ''|*[!0-7]*)
+      fatal "could not read $label directory permissions for $path"
+      ;;
+  esac
+  if [ $((8#$mode & 077)) -ne 0 ]; then
+    fatal "$label directory permissions must not grant group/other access: $path has mode $mode; run chmod 700"
+  fi
+}
+
 validate_prompt_payload_config() {
   local file="$1"
   local example="${EXAMPLE_PROMPT_PAYLOAD_FILE:-config/prompt-payload.example.json}"

@@ -99,6 +99,16 @@ assert_order() {
   pass "$name"
 }
 
+assert_file_mode() {
+  local name="$1"
+  local expected="$2"
+  local file="$3"
+  local actual
+
+  actual=$(stat -c '%a' "$file")
+  assert_eq "$name" "$expected" "$actual"
+}
+
 test_output_parser() {
   local valid approve expected_body
 
@@ -853,6 +863,78 @@ test_invalid_verdict_state() {
   assert_eq "invalid verdict attempts clear after valid output" "0" "$(invalid_verdict_attempt_count 17 abc123)"
 }
 
+test_artifact_secret_safety() {
+  local src dst normal_src normal_dst key_src
+
+  STATE_DIR="$TMP_ROOT/artifact-state"
+  mkdir -p "$STATE_DIR"
+  LOG_FILE="$TMP_ROOT/artifact-secret.log"
+  : > "$LOG_FILE"
+
+  src="$TMP_ROOT/secret-artifact.txt"
+  dst="$TMP_ROOT/secret-artifact.out"
+  cat > "$src" <<'EOF'
+GoobReview dry run
+GH_TOKEN=ghs_should_not_be_written
+GITHUB_TOKEN: github_pat_should_not_be_written
+REVIEWER_APP_PRIVATE_KEY_PATH=/var/lib/goobreview/example/app-key.pem
+GEMINI_API_KEY=gemini_should_not_be_written
+GOOGLE_APPLICATION_CREDENTIALS=/var/lib/goobreview/google.json
+AWS_SECRET_ACCESS_KEY=aws_should_not_be_written
+EOF
+  if install_secret_scanned_artifact "$src" "$dst"; then
+    fail "dry-run artifact secret assignments are rejected"
+  fi
+  pass "dry-run artifact secret assignments are rejected"
+  if [ -e "$dst" ]; then
+    fail "rejected dry-run artifact is not written"
+  fi
+  pass "rejected dry-run artifact is not written"
+  assert_contains "dry-run artifact rejection is logged" "Refusing to write artifact containing high-confidence secret material" "$LOG_FILE"
+
+  key_src="$TMP_ROOT/key-artifact.txt"
+  cat > "$key_src" <<'EOF'
+-----BEGIN PRIVATE KEY-----
+abc
+-----END PRIVATE KEY-----
+EOF
+  if artifact_secret_scan "$key_src" >/dev/null; then
+    fail "private key material is rejected"
+  fi
+  pass "private key material is rejected"
+
+  normal_src="$TMP_ROOT/normal-artifact.txt"
+  normal_dst="$TMP_ROOT/normal-artifact.out"
+  cat > "$normal_src" <<'EOF'
+diff --git a/README.md b/README.md
++ Document that GH_TOKEN and GITHUB_TOKEN are unset before Gemini runs.
++ Mention REVIEWER_APP_PRIVATE_KEY_PATH by name without printing its value.
+EOF
+  install_secret_scanned_artifact "$normal_src" "$normal_dst"
+  assert_contains "ordinary artifact text is preserved" "GH_TOKEN and GITHUB_TOKEN are unset" "$normal_dst"
+  assert_file_mode "accepted dry-run artifact is mode 0600" "600" "$normal_dst"
+}
+
+test_state_and_output_permissions() {
+  local state_dir output_src output_dst
+
+  state_dir="$TMP_ROOT/private-state"
+  mkdir -p "$state_dir"
+  chmod 755 "$state_dir"
+  STATE_DIR="$state_dir"
+  LOG_FILE="$TMP_ROOT/private-state.log"
+  : > "$LOG_FILE"
+
+  ensure_owner_private_dir "runtime state" "$state_dir"
+  assert_file_mode "state directory is repaired to 0700" "700" "$state_dir"
+
+  output_src="$TMP_ROOT/prompt-output-src.md"
+  output_dst="$TMP_ROOT/prompt-output.md"
+  printf 'prompt text\n' > "$output_src"
+  secure_install_file "$output_src" "$output_dst"
+  assert_file_mode "prompt output is mode 0600" "600" "$output_dst"
+}
+
 test_gemini_invocation_isolates_review_context() {
   local prompt_file err_file output worktree_dir settings_path
 
@@ -1068,6 +1150,8 @@ test_prompt_failure_propagates
 test_prompt_context_budgets_truncate
 test_symlink_snapshot_safety
 test_invalid_verdict_state
+test_artifact_secret_safety
+test_state_and_output_permissions
 test_pr_queue_skip_reasons
 test_gemini_invocation_isolates_review_context
 test_github_api_retries_and_logs
