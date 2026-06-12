@@ -430,6 +430,40 @@ test_checkout_unreachable_vm_does_not_fail_strict() {
   assert_contains "checkout unreachable VM strict passes" "strict_ok='true'" "$out"
 }
 
+source_setup_vm_helpers() {
+  GOOBREVIEW_SETUP_VM_TEST_HELPERS=1 . "$PREFLIGHT_DIR/../setup-vm.sh"
+}
+
+test_setup_vm_allows_reviewer_specific_paths() {
+  (
+    source_setup_vm_helpers
+    require_safe_owned_path GOOBREVIEW_CHECKOUT_DIR /opt/goobreview/example
+    require_safe_owned_path GOOBREVIEW_STATE_DIR /var/lib/goobreview/example
+    require_safe_owned_path GOOBREVIEW_CHECKOUT_DIR /srv/goobreview/reviewer-a
+  )
+  pass "setup-vm allows reviewer-specific checkout and state paths"
+}
+
+test_setup_vm_rejects_broad_chown_targets() {
+  local out="$TMP_ROOT/setup-vm-unsafe-path.txt"
+
+  if (
+    source_setup_vm_helpers
+    require_safe_owned_path GOOBREVIEW_CHECKOUT_DIR /opt
+  ) > "$out" 2>&1; then
+    fail "setup-vm rejects broad checkout chown target"
+  fi
+  assert_contains "setup-vm explains unsafe checkout path" "unsafe shared directory '/opt'" "$out"
+
+  if (
+    source_setup_vm_helpers
+    require_safe_owned_path GOOBREVIEW_STATE_DIR /var/lib
+  ) > "$out" 2>&1; then
+    fail "setup-vm rejects broad state chown target"
+  fi
+  assert_contains "setup-vm explains unsafe state path" "unsafe shared directory '/var/lib'" "$out"
+}
+
 test_no_active_project_lists_billing_ready_projects
 test_no_active_project_infers_billing_account_from_projects
 test_no_active_project_with_billing_account_but_no_billed_project
@@ -445,5 +479,7 @@ test_checkout_vm_aligned
 test_checkout_vm_diverged_fails_strict
 test_checkout_dirty_vm_fails_strict
 test_checkout_unreachable_vm_does_not_fail_strict
+test_setup_vm_allows_reviewer_specific_paths
+test_setup_vm_rejects_broad_chown_targets
 
 printf 'passed %s preflight fixture assertions\n' "$pass_count"

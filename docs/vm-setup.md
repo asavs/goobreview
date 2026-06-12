@@ -71,7 +71,15 @@ GOOBREVIEW_CHECKOUT_DIR="$PWD" bash scripts/setup-vm.sh
 ```
 
 The script is idempotent; rerun it when you need to repair missing tools or the
-default `/opt/goobreview/example` and `/var/lib/goobreview/example` layout.
+default `/opt/goobreview/example` and `/var/lib/goobreview/example` layout. It
+creates missing checkout/state directories, then changes ownership only for
+those target directories. It does not recursively chown parent directories such
+as `/opt/goobreview` or `/var/lib/goobreview`.
+
+When overriding `GOOBREVIEW_CHECKOUT_DIR` or `GOOBREVIEW_STATE_DIR`, use a
+reviewer-specific subdirectory. The installer rejects broad shared locations
+such as `/`, `/opt`, `/var`, `/var/lib`, `/tmp`, `/etc`, and `/usr` because a
+recursive ownership repair there would affect unrelated system files.
 
 ## Manual Package Reference
 
@@ -151,7 +159,7 @@ Use one stable checkout and state directory per reviewer identity:
 
 ```bash
 sudo mkdir -p /opt/goobreview/example /var/lib/goobreview/example
-sudo chown -R "$USER:$USER" /opt/goobreview /var/lib/goobreview
+sudo chown -R "$USER:$USER" /opt/goobreview/example /var/lib/goobreview/example
 git clone https://github.com/asavschaeffer/goobreview.git /opt/goobreview/example
 cd /opt/goobreview/example
 git checkout --detach origin/main

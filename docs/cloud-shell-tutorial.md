@@ -80,6 +80,10 @@ After you confirm, the script will:
 2. Wait for SSH to become reachable.
 3. Run `setup-vm.sh` on the VM, which installs the required tools, configures a 2 GB swap file, then clones the template into `/opt/goobreview/example`.
 
+`setup-vm.sh` repairs ownership only on the checkout and state directories it
+creates. Custom checkout/state paths must be reviewer-specific subdirectories;
+broad shared locations such as `/opt`, `/var`, `/tmp`, or `/etc` are rejected.
+
 When it finishes, you should have:
 
 - A running VM.

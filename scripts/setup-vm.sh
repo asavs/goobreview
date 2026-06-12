@@ -20,6 +20,21 @@ require_absolute_path() {
   esac
 }
 
+# Reject paths where a recursive ownership change would affect a system root or
+# broad shared directory instead of a reviewer-specific checkout/state tree.
+require_safe_owned_path() {
+  local name="$1" value="$2"
+  case "$value" in
+    /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var|/var/lib)
+      die "$name points at unsafe shared directory '$value'. Use a reviewer-specific subdirectory such as /opt/goobreview/example or /var/lib/goobreview/example."
+      ;;
+  esac
+}
+
+if [ "${GOOBREVIEW_SETUP_VM_TEST_HELPERS:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" = "root" ]; then
   die "Refusing to install for the root user. Re-run as a normal sudoer user, or set GOOBREVIEW_USER."
 fi
@@ -27,6 +42,8 @@ require_command sudo
 require_command apt-get
 require_absolute_path GOOBREVIEW_CHECKOUT_DIR "$CHECKOUT_DIR"
 require_absolute_path GOOBREVIEW_STATE_DIR "$STATE_DIR"
+require_safe_owned_path GOOBREVIEW_CHECKOUT_DIR "$CHECKOUT_DIR"
+require_safe_owned_path GOOBREVIEW_STATE_DIR "$STATE_DIR"
 if ! id -u "$TARGET_USER" >/dev/null 2>&1; then
   die "Target user '$TARGET_USER' does not exist. Set GOOBREVIEW_USER to a real login user."
 fi
@@ -91,8 +108,7 @@ fi
 
 log "Preparing $CHECKOUT_DIR and $STATE_DIR"
 sudo mkdir -p "$CHECKOUT_DIR" "$STATE_DIR"
-sudo chown -R "$TARGET_USER:$TARGET_USER" \
-  "$(dirname "$CHECKOUT_DIR")" "$(dirname "$STATE_DIR")"
+sudo chown -R "$TARGET_USER:$TARGET_USER" "$CHECKOUT_DIR" "$STATE_DIR"
 
 if [ ! -d "$CHECKOUT_DIR/.git" ]; then
   log "Cloning $REPO_URL into $CHECKOUT_DIR"
