@@ -922,6 +922,16 @@ test_invalid_verdict_state() {
 
   clear_invalid_verdict_attempts 17 abc123
   assert_eq "invalid verdict attempts clear after valid output" "0" "$(invalid_verdict_attempt_count 17 abc123)"
+
+  assert_eq "missing review failure count is zero" "0" "$(review_failure_attempt_count 17 abc123)"
+  count=$(record_review_failure_attempt 17 abc123)
+  assert_eq "review failure first attempt is recorded" "1" "$count"
+  count=$(record_review_failure_attempt 17 abc123)
+  assert_eq "review failure attempts increment per head" "2" "$count"
+  assert_eq "different head has separate review failure count" "0" "$(review_failure_attempt_count 17 def456)"
+
+  clear_review_failure_attempts 17 abc123
+  assert_eq "review failure attempts clear after success" "0" "$(review_failure_attempt_count 17 abc123)"
 }
 
 test_artifact_secret_safety() {
@@ -1209,6 +1219,128 @@ EOF
   assert_not_contains "attempt budget does not walk second PR" "PR #2@sha2: failed to read CI check-runs" "$state_dir/log.txt"
 }
 
+test_reviewer_failure_cap_skips_poisoned_pr() {
+  local state_dir runtime_dir test_reviewer env_file key_file bin_dir attempts_file status output
+
+  state_dir="$TMP_ROOT/failure-cap-state"
+  runtime_dir="$TMP_ROOT/failure-cap-runtime"
+  test_reviewer="$TMP_ROOT/failure-cap-reviewer"
+  bin_dir="$TMP_ROOT/failure-cap-bin"
+  attempts_file="$TMP_ROOT/failure-cap-ci-attempts"
+  mkdir -p "$state_dir" "$runtime_dir" "$bin_dir"
+  cp -R "$REVIEWER_DIR" "$test_reviewer"
+
+  cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  token) printf 'test-token\n' ;;
+  slug)  printf 'goobreview\n' ;;
+  *)     exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/get-installation-token.sh"
+
+  cat > "$test_reviewer/check-ci.sh" <<EOF
+#!/usr/bin/env bash
+count=\$(cat "$attempts_file" 2>/dev/null || printf 0)
+count=\$((count + 1))
+printf '%s\n' "\$count" > "$attempts_file"
+exit 1
+EOF
+  chmod +x "$test_reviewer/check-ci.sh"
+
+  cat > "$bin_dir/curl" <<'EOF'
+#!/usr/bin/env bash
+body_file=""
+url="${*: -1}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      body_file="$2"
+      shift 2
+      ;;
+    -D|-w)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+case "$url" in
+  *'/repos/example/repo/pulls?state=open&per_page=100&page=1')
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"}},{"number":2,"draft":false,"user":{"login":"bob"},"head":{"sha":"sha2"}}]' > "$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/'*'/reviews?per_page=100&page=1')
+    printf '%s\n' '[]' > "$body_file"
+    printf '200'
+    ;;
+  *)
+    printf 'unexpected curl URL: %s\n' "$url" >&2
+    printf '000'
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  cat > "$bin_dir/gemini" <<'EOF'
+#!/usr/bin/env bash
+printf 'Looks good.\nAPPROVE\n'
+EOF
+  chmod +x "$bin_dir/gemini"
+
+  cat > "$bin_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$bin_dir/gh"
+
+  key_file="$TMP_ROOT/failure-cap-key.pem"
+  printf 'key\n' > "$key_file"
+  chmod 600 "$key_file"
+
+  printf '## Role\nReview.\n' > "$TMP_ROOT/failure-cap-personality.md"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/failure-cap-engine.md"
+  cat > "$TMP_ROOT/failure-cap-payload.json" <<'JSON'
+{"segments":{"personality":{"enabled":true},"response_format":{"enabled":true}}}
+JSON
+  printf '["ci"]\n' > "$TMP_ROOT/failure-cap-required.json"
+  printf '1\n' > "$state_dir/review-failure-1-sha1.count"
+
+  env_file="$TMP_ROOT/failure-cap.env"
+  cat > "$env_file" <<EOF
+REVIEWER_REPO=example/repo
+REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1
+REVIEWER_STATE=$state_dir
+REVIEWER_RUNTIME_STATE=$runtime_dir
+REVIEWER_APP_ID=1
+REVIEWER_APP_INSTALLATION_ID=2
+REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/failure-cap-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/failure-cap-engine.md
+REVIEWER_PROMPT_PAYLOAD_FILE=$TMP_ROOT/failure-cap-payload.json
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/failure-cap-required.json
+REVIEWER_MAX_PRS=1
+REVIEWER_MAX_ATTEMPTS=1
+REVIEWER_FAILURE_MAX_ATTEMPTS=1
+EOF
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "failure cap fixture reviewer exits successfully"
+  fi
+  pass "failure cap fixture reviewer exits successfully"
+  assert_eq "failure cap skips poisoned first PR and attempts second" "1" "$(cat "$attempts_file")"
+  assert_contains "failure cap skip is logged" "PR #1@sha1: review failures reached REVIEWER_FAILURE_MAX_ATTEMPTS=1; skipping until the PR head changes" "$state_dir/log.txt"
+  assert_contains "second PR failure is recorded" "PR #2@sha2: failed to read CI check-runs; reached failure cap (1/1), skipping until the PR head changes" "$state_dir/log.txt"
+}
+
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
@@ -1230,5 +1362,6 @@ test_private_key_permissions
 test_log_rotation
 test_run_once_sync_failure_fails_closed
 test_reviewer_attempt_budget_stops_repeated_expensive_failures
+test_reviewer_failure_cap_skips_poisoned_pr
 
 printf 'passed %s fixture assertions\n' "$pass_count"

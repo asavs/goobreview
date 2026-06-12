@@ -103,6 +103,60 @@ invalid_verdict_attempts_file() {
   printf '%s/invalid-verdict-%s-%s.count\n' "$STATE_DIR" "$num" "$head_sha"
 }
 
+review_failure_attempts_file() {
+  local num="$1"
+  local head_sha="$2"
+
+  case "$num" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  case "$head_sha" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+
+  printf '%s/review-failure-%s-%s.count\n' "$STATE_DIR" "$num" "$head_sha"
+}
+
+review_failure_attempt_count() {
+  local file count
+
+  if ! file=$(review_failure_attempts_file "$1" "$2"); then
+    printf '0\n'
+    return 0
+  fi
+  if [ ! -f "$file" ]; then
+    printf '0\n'
+    return 0
+  fi
+  count=$(cat "$file" 2>/dev/null || printf 0)
+  case "$count" in
+    ''|*[!0-9]*) count=0 ;;
+  esac
+  printf '%s\n' "$count"
+}
+
+record_review_failure_attempt() {
+  local file tmp count
+
+  file=$(review_failure_attempts_file "$1" "$2")
+  count=$(review_failure_attempt_count "$1" "$2")
+  count=$((count + 1))
+
+  mkdir -p "$STATE_DIR"
+  tmp=$(mktemp "$STATE_DIR/review-failure-attempts.XXXXXX")
+  printf '%s\n' "$count" >"$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$file"
+  printf '%s\n' "$count"
+}
+
+clear_review_failure_attempts() {
+  local file
+
+  file=$(review_failure_attempts_file "$1" "$2") || return 0
+  rm -f "$file"
+}
+
 invalid_verdict_attempt_count() {
   local file count
 
