@@ -106,28 +106,13 @@ validate_prompt_payload_config() {
       | if $v == null or (($v | type) == "number" and ($v % 1 == 0) and $v >= $min and $v <= $max) then .
         else fail(($path | map(tostring) | join(".")) + " must be an integer from " + ($min | tostring) + " to " + ($max | tostring))
         end;
-    def safe_path($label):
-      if (type != "string") then fail($label + " must be a string")
-      elif . == "" then fail($label + " must not be empty")
-      elif startswith("/") then fail($label + " must be relative")
-      elif startswith("\\") then fail($label + " must be relative")
-      elif test("^[A-Za-z]:") then fail($label + " must be relative")
-      elif (split("/") | any(. == "..")) then fail($label + " must not contain parent traversal")
-      elif contains("\u0000") then fail($label + " must not contain NUL")
-      else .
-      end;
-    def string_array($path):
-      getpath($path) as $v
-      | if ($v | type) == "array" and ($v | length) > 0 and all($v[]; type == "string" and . != "") then .
-        else fail(($path | map(tostring) | join(".")) + " must be an array of nonempty strings")
-        end;
 
     . as $root
     | if type != "object" then fail("prompt payload root must be an object") else . end,
       obj(["segments"]),
       (
         (.segments | keys_unsorted[]) as $name
-        | if ["personality","pr_metadata","commit_subjects","ci_status","previous_bot_review","relevant_guidance","source_snapshot_hint","diff","response_format"] | index($name)
+        | if ["personality","pr_metadata","commit_subjects","ci_status","previous_bot_review","source_snapshot_hint","diff","response_format"] | index($name)
           then .
           else fail("segments." + $name + " is not a known prompt segment")
           end
@@ -145,23 +130,6 @@ validate_prompt_payload_config() {
       optional_uint(["segments","pr_metadata","max_body_bytes"]; 1; 50000),
       optional_uint(["segments","commit_subjects","max_commits"]; 1; 500),
       optional_uint(["segments","previous_bot_review","max_body_bytes"]; 1; 50000),
-      (
-        (.segments.diff.omit_patch_paths // []) as $pats
-        | if ($pats | type) == "array" and all($pats[]?; type == "string" and . != "") then .
-          else fail("segments.diff.omit_patch_paths must be an array of nonempty glob strings")
-          end
-      ),
-      optional_string_enum(["segments","relevant_guidance","mode"]; ["paths_only"]),
-      (
-        (.segments.relevant_guidance.rules // []) as $rules
-        | if ($rules | type) == "array" then . else fail("segments.relevant_guidance.rules must be an array") end
-        | $rules[]? as $rule
-        | if ($rule | type) == "object" then . else fail("segments.relevant_guidance.rules[] must be an object") end
-        | ($rule | keys_unsorted[]? as $key | if ["when_changed_path_matches","guidance_paths"] | index($key) then . else fail("segments.relevant_guidance.rules[] has unknown key " + $key) end)
-        | ($rule | string_array(["when_changed_path_matches"]))
-        | ($rule | string_array(["guidance_paths"]))
-        | ($rule.guidance_paths[]? | safe_path("segments.relevant_guidance.rules[].guidance_paths[]"))
-      ),
       true
   ' --arg example "$example" "$file" >/dev/null 2>"$err_file"; then
     local err

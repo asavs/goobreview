@@ -521,40 +521,13 @@ test_prompt_payload_schema_validation() {
   assert_contains "prompt payload root error points to example config" "config/prompt-payload.example.json" "$TMP_ROOT/prompt-payload.err"
 
   cat > "$payload_file" <<'JSON'
-{"segments":{"relevant_guidance":{"enabled":true,"rules":[{"when_changed_path_matches":["client/**"],"guidance_paths":["../secret.txt"]}]}}}
+{"segments":{"relevant_guidance":{"enabled":true,"rules":[{"when_changed_path_matches":["client/**"],"guidance_paths":["client/GUIDELINES.md"]}]}}}
 JSON
   if ( validate_prompt_payload_config "$payload_file" ) >/dev/null 2>"$TMP_ROOT/prompt-payload.err"; then
-    fail "prompt payload rejects parent traversal paths"
+    fail "prompt payload rejects removed guidance-rules segment"
   fi
-  pass "prompt payload rejects parent traversal paths"
-  assert_contains "prompt payload path error names guidance path key" "segments.relevant_guidance.rules[].guidance_paths[]" "$TMP_ROOT/prompt-payload.err"
-
-  cat > "$payload_file" <<'JSON'
-{"segments":{"selected_file_contents":{"enabled":true,"paths":["README.md"]}}}
-JSON
-  if ( validate_prompt_payload_config "$payload_file" ) >/dev/null 2>"$TMP_ROOT/prompt-payload.err"; then
-    fail "prompt payload rejects removed prompt-stuffing segments"
-  fi
-  pass "prompt payload rejects removed prompt-stuffing segments"
-  assert_contains "prompt payload removed-segment error names the segment" "segments.selected_file_contents is not a known prompt segment" "$TMP_ROOT/prompt-payload.err"
-
-  cat > "$payload_file" <<'JSON'
-{
-  "segments": {
-    "relevant_guidance": {
-      "enabled": true,
-      "rules": [
-        {"when_changed_path_matches": "client/**", "guidance_paths": ["client/GUIDELINES.md"]}
-      ]
-    }
-  }
-}
-JSON
-  if ( validate_prompt_payload_config "$payload_file" ) >/dev/null 2>"$TMP_ROOT/prompt-payload.err"; then
-    fail "prompt payload rejects malformed guidance rules"
-  fi
-  pass "prompt payload rejects malformed guidance rules"
-  assert_contains "prompt payload rule error names matcher key" "when_changed_path_matches" "$TMP_ROOT/prompt-payload.err"
+  pass "prompt payload rejects removed guidance-rules segment"
+  assert_contains "prompt payload removed-segment error names the segment" "segments.relevant_guidance is not a known prompt segment" "$TMP_ROOT/prompt-payload.err"
 
   cat > "$payload_file" <<'JSON'
 {"segments":{"personality":{"enabled":true},"response_format":{"enabled":true}}}
@@ -608,15 +581,6 @@ test_prompt_assembly() {
     "commit_subjects": {"enabled": true, "max_commits": 2},
     "ci_status": {"enabled": true},
     "previous_bot_review": {"enabled": true, "max_body_bytes": 12000},
-    "relevant_guidance": {
-      "enabled": true,
-      "rules": [
-        {
-          "when_changed_path_matches": ["client/**"],
-          "guidance_paths": ["client/GUIDELINES.md"]
-        }
-      ]
-    },
     "source_snapshot_hint": {"enabled": true},
     "diff": {"enabled": true},
     "response_format": {"enabled": true}
@@ -685,7 +649,6 @@ JSON
     "Commit Subjects" \
     "CI Status" \
     "Your Prior Review" \
-    "Relevant Guidance" \
     "Read-Only Source Snapshot" \
     "Changed files:" \
     "diff --git a/client/src/auth.py b/client/src/auth.py" \
@@ -709,8 +672,8 @@ JSON
   assert_contains "prompt includes previous bot review body" "Prior blocker from the bot." "$prompt_file"
   assert_not_contains "prompt excludes current-head bot review" "Current-head review must not be included." "$prompt_file"
   assert_contains "prompt includes changed paths with diffstat in diff section" "M client/src/auth.py (+1/-0)" "$prompt_file"
-  assert_contains "prompt includes relevant guidance path" "client/GUIDELINES.md" "$prompt_file"
-  assert_contains "prompt labels relevant guidance trust correctly" "Relevant Guidance (Trusted Deployment Configuration; Referenced Files Are Untrusted)" "$prompt_file"
+  assert_contains "prompt points the reviewer at repo convention docs" "AGENTS.md, CONTRIBUTING.md, or GUIDELINES.md" "$prompt_file"
+  assert_contains "prompt scopes convention docs to the nearest ancestor" "the one nearest a changed file governs it" "$prompt_file"
   assert_contains "prompt names the snapshot mount path" "The PR-head source tree is mounted read-only at: $worktree_dir" "$prompt_file"
   assert_contains "prompt explains snapshot path resolution" "resolve under that directory" "$prompt_file"
   assert_contains "prompt includes PR diff" "diff --git a/client/src/auth.py b/client/src/auth.py" "$prompt_file"
@@ -742,7 +705,6 @@ test_prompt_failure_propagates() {
     "personality": {"enabled": true},
     "pr_metadata": {"enabled": false},
     "ci_status": {"enabled": false},
-    "relevant_guidance": {"enabled": false},
     "source_snapshot_hint": {"enabled": false},
     "diff": {"enabled": true},
     "response_format": {"enabled": true}
@@ -769,16 +731,16 @@ JSON
 }
 
 test_diff_per_file_assembly() {
-  local changed_files_json output
+  local changed_files_json output worktree_dir
 
-  PROMPT_PAYLOAD_FILE="$TMP_ROOT/prompt-payload-per-file-diff.json"
-  cat > "$PROMPT_PAYLOAD_FILE" <<'JSON'
-{
-  "segments": {
-    "diff": {"enabled": true, "omit_patch_paths": ["vendor/**"]}
-  }
-}
-JSON
+  worktree_dir="$TMP_ROOT/worktree-per-file-diff"
+  mkdir -p "$worktree_dir"
+  cat > "$worktree_dir/.gitattributes" <<'ATTRS'
+# generated artifacts declared by the target repo
+vendor/** linguist-generated=true
+/dist/*.js linguist-generated
+docs/manual.md linguist-generated=false
+ATTRS
 
   changed_files_json="$TMP_ROOT/per-file-diff-files.json"
   cat > "$changed_files_json" <<'JSON'
@@ -786,36 +748,40 @@ JSON
 {"filename":"client/package-lock.json","status":"modified","additions":3801,"deletions":2950,"patch":"@@ huge lockfile churn @@"}
 {"filename":"assets/logo.png","status":"added","additions":0,"deletions":0}
 {"filename":"vendor/lib/dep.js","status":"added","additions":12,"deletions":0,"patch":"@@ -0,0 +1,12 @@\n+vendored"}
+{"filename":"dist/bundle.js","status":"modified","additions":7,"deletions":7,"patch":"@@ -1,7 +1,7 @@\n+bundled output"}
+{"filename":"docs/manual.md","status":"modified","additions":1,"deletions":0,"patch":"@@ -1,0 +1,1 @@\n+handwritten docs"}
 {"filename":"src/new-name.py","previous_filename":"src/old-name.py","status":"renamed","additions":1,"deletions":1,"patch":"@@ -5,1 +5,1 @@\n-a\n+b"}
 JSON
 
   DIFF_MAX_BYTES=120000
   DIFF_FILE_MAX_BYTES=40000
   output="$TMP_ROOT/per-file-diff-output.md"
-  append_diff "$changed_files_json" > "$output"
+  append_diff "$changed_files_json" "" "$worktree_dir" > "$output"
 
   assert_contains "per-file diff includes normal patch" "+another line" "$output"
   assert_contains "per-file diff emits git-style headers" "diff --git a/src/app.py b/src/app.py" "$output"
   assert_contains "per-file diff omits lockfile by basename pattern" "[goobreview: patch omitted (matches omit pattern package-lock.json); status modified, +3801/-2950]" "$output"
   assert_not_contains "per-file diff drops omitted lockfile patch content" "huge lockfile churn" "$output"
   assert_contains "per-file diff marks binary files without patches" "[goobreview: patch omitted (GitHub provided no text patch (binary or oversized file)); status added, +0/-0]" "$output"
-  assert_contains "per-file diff honors configured omit globs" "diff --git a/vendor/lib/dep.js b/vendor/lib/dep.js" "$output"
-  assert_contains "per-file diff names configured omit pattern" "matches omit pattern vendor/**" "$output"
-  assert_not_contains "per-file diff drops configured omit patch content" "+vendored" "$output"
+  assert_contains "per-file diff honors repo linguist-generated globs" "matches omit pattern vendor/**" "$output"
+  assert_not_contains "per-file diff drops repo-declared generated content" "+vendored" "$output"
+  assert_contains "per-file diff strips leading slash from gitattributes patterns" "matches omit pattern dist/*.js" "$output"
+  assert_not_contains "per-file diff drops slash-anchored generated content" "+bundled output" "$output"
+  assert_contains "per-file diff keeps files marked linguist-generated=false" "+handwritten docs" "$output"
   assert_contains "per-file diff renders rename headers" "diff --git a/src/old-name.py b/src/new-name.py" "$output"
   assert_contains "per-file diff explains snapshot recovery" "remains readable in the read-only source snapshot" "$output"
 
-  append_diff "$changed_files_json" 10 > "$output"
-  assert_contains "per-file diff marks GitHub file-list cap" "[goobreview: file list truncated by GitHub after 5 of 10]" "$output"
+  append_diff "$changed_files_json" 10 "$worktree_dir" > "$output"
+  assert_contains "per-file diff marks GitHub file-list cap" "[goobreview: file list truncated by GitHub after 7 of 10]" "$output"
 
   DIFF_FILE_MAX_BYTES=10
-  append_diff "$changed_files_json" > "$output"
+  append_diff "$changed_files_json" "" "$worktree_dir" > "$output"
   assert_contains "per-file budget omits oversized patch whole" "over the 10-byte per-file budget" "$output"
   assert_not_contains "per-file budget never cuts mid-hunk" "[goobreview: diff truncated" "$output"
 
   DIFF_FILE_MAX_BYTES=40000
   DIFF_MAX_BYTES=50
-  append_diff "$changed_files_json" > "$output"
+  append_diff "$changed_files_json" "" "$worktree_dir" > "$output"
   assert_contains "total diff budget keeps earliest fitting patch" "+another line" "$output"
   assert_contains "total diff budget omits later files whole" "total diff budget of 50 bytes exhausted" "$output"
 
@@ -844,15 +810,6 @@ test_prompt_context_budgets_truncate() {
     "personality": {"enabled": true},
     "pr_metadata": {"enabled": false},
     "ci_status": {"enabled": false},
-    "relevant_guidance": {
-      "enabled": true,
-      "rules": [
-        {
-          "when_changed_path_matches": ["client/**"],
-          "guidance_paths": ["client/GUIDELINES.md"]
-        }
-      ]
-    },
     "source_snapshot_hint": {"enabled": false},
     "diff": {"enabled": true},
     "response_format": {"enabled": true}
@@ -884,8 +841,7 @@ JSON
   build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"
 
   assert_contains "prompt budget omits over-budget diff files whole" "total diff budget of 40 bytes exhausted" "$prompt_file"
-  assert_contains "prompt keeps guidance as pointer despite snapshot content" "- client/GUIDELINES.md" "$prompt_file"
-  assert_not_contains "prompt never pastes guidance file contents" "00000000" "$prompt_file"
+  assert_not_contains "prompt never pastes snapshot file contents" "00000000" "$prompt_file"
 
   MAX_PROMPT_BYTES=50
   if build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"; then
