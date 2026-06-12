@@ -144,6 +144,12 @@ validate_prompt_payload_config() {
       (["include_title","include_author","include_url","include_base_branch","include_head_branch","include_head_sha","include_description"][] as $key | optional_bool(["segments","pr_metadata",$key])),
       optional_string_enum(["segments","ci_status","mode"]; ["one_line","all_check_summary"]),
       optional_uint(["segments","previous_bot_review","max_body_bytes"]; 1; 50000),
+      (
+        (.segments.diff.omit_patch_paths // []) as $pats
+        | if ($pats | type) == "array" and all($pats[]?; type == "string" and . != "") then .
+          else fail("segments.diff.omit_patch_paths must be an array of nonempty glob strings")
+          end
+      ),
       optional_string_enum(["segments","relevant_guidance","mode"]; ["paths_only","full_content"]),
       optional_uint(["segments","relevant_guidance","max_lines_per_file"]; 1; 5000),
       optional_uint(["segments","selected_file_contents","max_lines_per_file"]; 1; 5000),
@@ -251,6 +257,7 @@ validate_reviewer_config() {
   validate_positive_uint_env REVIEWER_MAX_PROMPT_BYTES "$MAX_PROMPT_BYTES"
   validate_positive_uint_env REVIEWER_MAX_ARTIFACT_BYTES "$MAX_ARTIFACT_BYTES"
   validate_positive_uint_env REVIEWER_DIFF_MAX_BYTES "$DIFF_MAX_BYTES"
+  validate_positive_uint_env REVIEWER_DIFF_FILE_MAX_BYTES "$DIFF_FILE_MAX_BYTES"
   validate_positive_uint_env REVIEWER_FILE_TREE_MAX_BYTES "$FILE_TREE_MAX_BYTES"
   validate_positive_uint_env REVIEWER_SELECTED_FILE_MAX_BYTES "$SELECTED_FILE_MAX_BYTES"
   validate_positive_uint_env REVIEWER_GUIDANCE_FILE_MAX_BYTES "$GUIDANCE_FILE_MAX_BYTES"

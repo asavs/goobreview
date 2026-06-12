@@ -86,8 +86,9 @@
     },
     "diff": {
       "enabled": true,
-      "description": "The untrusted PR diff. This should almost always stay enabled.",
-      "example": "diff --git a/client/src/environment.ts b/client/src/environment.ts"
+      "description": "The untrusted PR diff, assembled per file from the GitHub files API. Whole files over the per-file or total budget, lockfile/generated files, and files GitHub serves no text patch for are replaced with a marked omission instead of being cut mid-hunk; omitted files stay readable in the source snapshot. omit_patch_paths adds deployment-specific glob patterns to the built-in lockfile/minified list. This segment should almost always stay enabled.",
+      "omit_patch_paths": [],
+      "example": "diff --git a/client/src/environment.ts b/client/src/environment.ts\n@@ -1,3 +1,4 @@\ndiff --git a/package-lock.json b/package-lock.json\n[goobreview: patch omitted (matches omit pattern package-lock.json); status modified, +3801/-2950]"
     },
     "response_format": {
       "enabled": true,
