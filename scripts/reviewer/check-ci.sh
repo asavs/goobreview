@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# REPO is consumed by github_check_runs_json in the sourced GitHub API helper.
+# shellcheck disable=SC2034
 REPO="${1:?usage: check-ci.sh <owner/repo> <head-sha> [required-checks-file]}"
 HEAD_SHA="${2:?usage: check-ci.sh <owner/repo> <head-sha> [required-checks-file]}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,5 +26,5 @@ fi
 if [ -n "${CHECK_RUNS_JSON:-}" ]; then
   printf '%s' "$CHECK_RUNS_JSON"
 else
-  github_api_get "repos/$REPO/commits/$HEAD_SHA/check-runs?filter=latest&per_page=100"
+  github_check_runs_json "$HEAD_SHA"
 fi | reviewer_ci_state_from_json "$required_checks_json"

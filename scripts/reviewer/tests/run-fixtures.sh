@@ -55,7 +55,7 @@ assert_contains() {
   local needle="$2"
   local file="$3"
 
-  if ! grep -Fq "$needle" "$file"; then
+  if ! grep -Fq -- "$needle" "$file"; then
     printf 'missing expected text: %s\n' "$needle" >&2
     printf '%s\n' "--- $file ---" >&2
     sed -n '1,220p' "$file" >&2
@@ -69,7 +69,7 @@ assert_not_contains() {
   local needle="$2"
   local file="$3"
 
-  if grep -Fq "$needle" "$file"; then
+  if grep -Fq -- "$needle" "$file"; then
     printf 'unexpected text: %s\n' "$needle" >&2
     printf '%s\n' "--- $file ---" >&2
     sed -n '1,220p' "$file" >&2
@@ -207,6 +207,216 @@ test_ci_states() {
     fail "required check env override rejects non-array JSON"
   fi
   pass "required check env override rejects non-array JSON"
+}
+
+
+
+test_github_api_retries_and_logs() {
+  local bin_dir curl_state curl_args log_file output_file status old_path
+
+  bin_dir="$TMP_ROOT/github-api-bin"
+  curl_state="$TMP_ROOT/github-api-count"
+  curl_args="$TMP_ROOT/github-api-args"
+  log_file="$TMP_ROOT/github-api.log"
+  output_file="$TMP_ROOT/github-api.out"
+  mkdir -p "$bin_dir"
+  : > "$curl_args"
+
+  cat > "$bin_dir/curl" <<'EOF'
+#!/usr/bin/env bash
+body_file=""
+headers_file=""
+url="${*: -1}"
+printf '%s\n' "$*" >> "$GITHUB_API_TEST_ARGS"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      body_file="$2"
+      shift 2
+      ;;
+    -D)
+      headers_file="$2"
+      shift 2
+      ;;
+    -w)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+[ -n "$headers_file" ] && printf 'HTTP/2 200\n' > "$headers_file"
+count=$(cat "$GITHUB_API_TEST_COUNT" 2>/dev/null || printf 0)
+count=$((count + 1))
+printf '%s\n' "$count" > "$GITHUB_API_TEST_COUNT"
+case "$url" in
+  *retry*)
+    if [ "$count" -eq 1 ]; then
+      printf 'server error token=%s\n' "$GH_TOKEN" > "$body_file"
+      printf '500'
+      exit 0
+    fi
+    printf '{"ok":true}\n' > "$body_file"
+    printf '200'
+    exit 0
+    ;;
+  *missing*)
+    printf '{"message":"not found"}\n' > "$body_file"
+    printf '404'
+    exit 0
+    ;;
+  *)
+    printf 'unexpected url %s\n' "$url" >&2
+    printf '000'
+    exit 7
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  old_path="$PATH"
+  status=0
+  GH_TOKEN='secret-token' \
+  REVIEWER_GITHUB_RETRIES=1 \
+  REVIEWER_GITHUB_RETRY_SLEEP=0 \
+  REVIEWER_GITHUB_CONNECT_TIMEOUT=3 \
+  REVIEWER_GITHUB_MAX_TIME=9 \
+  GITHUB_API_TEST_COUNT="$curl_state" \
+  GITHUB_API_TEST_ARGS="$curl_args" \
+  PATH="$bin_dir:$old_path" \
+    bash -c '. scripts/reviewer/lib/github-api.sh; github_api_get "repos/example/repo/retry"' >"$output_file" 2>"$log_file" || status=$?
+  if [ "$status" -ne 0 ]; then
+    sed -n '1,120p' "$log_file" >&2
+    fail "GitHub API retry returns eventual success body"
+  fi
+  assert_eq "GitHub API retry returns eventual success body" '{"ok":true}' "$(cat "$output_file")"
+  assert_eq "GitHub API retry attempts once after transient status" "2" "$(cat "$curl_state")"
+  assert_contains "GitHub API retry log records HTTP status" "http=500" "$log_file"
+  assert_contains "GitHub API retry log redacts token snippets" "token=[REDACTED]" "$log_file"
+  assert_not_contains "GitHub API retry log does not leak token" "secret-token" "$log_file"
+  assert_contains "GitHub API curl uses connect timeout knob" "--connect-timeout 3" "$curl_args"
+  assert_contains "GitHub API curl uses max time knob" "--max-time 9" "$curl_args"
+
+  printf '0\n' > "$curl_state"
+  status=0
+  GH_TOKEN='secret-token' \
+  REVIEWER_GITHUB_RETRIES=3 \
+  REVIEWER_GITHUB_RETRY_SLEEP=0 \
+  GITHUB_API_TEST_COUNT="$curl_state" \
+  GITHUB_API_TEST_ARGS="$curl_args" \
+  PATH="$bin_dir:$old_path" \
+    bash -c '. scripts/reviewer/lib/github-api.sh; github_api_get "repos/example/repo/missing"' > /dev/null 2>"$log_file" || status=$?
+  if [ "$status" -eq 0 ]; then
+    fail "GitHub API non-retryable 404 fails"
+  fi
+  pass "GitHub API non-retryable 404 fails"
+  assert_eq "GitHub API does not retry non-retryable 404" "1" "$(cat "$curl_state")"
+}
+
+
+
+test_check_ci_paginates_required_check_runs() {
+  local bin_dir count_file required_file output log_file status
+
+  bin_dir="$TMP_ROOT/check-ci-page-bin"
+  count_file="$TMP_ROOT/check-ci-page-count"
+  required_file="$TMP_ROOT/check-ci-required.json"
+  log_file="$TMP_ROOT/check-ci-page.log"
+  mkdir -p "$bin_dir"
+  printf '["late-check"]\n' > "$required_file"
+
+  cat > "$bin_dir/curl" <<'EOF'
+#!/usr/bin/env bash
+body_file=""
+url="${*: -1}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      body_file="$2"
+      shift 2
+      ;;
+    -D|-w)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+count=$(cat "$CHECK_CI_PAGE_COUNT" 2>/dev/null || printf 0)
+count=$((count + 1))
+printf '%s\n' "$count" > "$CHECK_CI_PAGE_COUNT"
+case "$url" in
+  *'page=1')
+    jq -n '{total_count: 101, check_runs: [range(0;100) | {name: ("unrelated-" + tostring), status: "completed", conclusion: "success", started_at: "2026-05-21T00:00:00Z"}]}' > "$body_file"
+    printf '200'
+    ;;
+  *'page=2')
+    jq -n '{total_count: 101, check_runs: [{name: "late-check", status: "completed", conclusion: "success", started_at: "2026-05-21T00:01:00Z"}]}' > "$body_file"
+    printf '200'
+    ;;
+  *)
+    printf 'unexpected curl URL: %s\n' "$url" >&2
+    printf '000'
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  output=$(GH_TOKEN='token' CHECK_CI_PAGE_COUNT="$count_file" PATH="$bin_dir:$PATH" bash "$REVIEWER_DIR/check-ci.sh" example/repo sha123 "$required_file" 2>"$log_file")
+  assert_eq "check-ci finds required check beyond first page" "success" "$output"
+  assert_eq "check-ci fetches second check-run page" "2" "$(cat "$count_file")"
+
+  python3 - <<'PY2' "$bin_dir/curl"
+from pathlib import Path
+path = Path(__import__('sys').argv[1])
+text = path.read_text()
+text = text.replace("""  *'page=2')
+    jq -n '{total_count: 101, check_runs: [{name: "late-check", status: "completed", conclusion: "success", started_at: "2026-05-21T00:01:00Z"}]}' > "$body_file"
+    printf '200'
+    ;;""", """  *'page=2')
+    printf 'GitHub unavailable on page 2\n' >&2
+    printf '503'
+    exit 0
+    ;;""")
+path.write_text(text)
+PY2
+  printf '0\n' > "$count_file"
+  status=0
+  GH_TOKEN='token' CHECK_CI_PAGE_COUNT="$count_file" PATH="$bin_dir:$PATH" bash "$REVIEWER_DIR/check-ci.sh" example/repo sha123 "$required_file" > /dev/null 2>"$log_file" || status=$?
+  if [ "$status" -eq 0 ]; then
+    fail "check-ci fails when check-run pagination is incomplete"
+  fi
+  pass "check-ci fails when check-run pagination is incomplete"
+  assert_contains "check-ci pagination failure is distinct from missing checks" "required-check data is incomplete" "$log_file"
+
+  printf '0\n' > "$count_file"
+  status=0
+  CHECK_RUNS_JSON='{"total_count":101,"fetched_count":100,"pages_fetched":1,"complete":false,"check_runs":[]}' \
+    bash "$REVIEWER_DIR/check-ci.sh" example/repo sha123 "$required_file" > /dev/null 2>"$log_file" || status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "incomplete fixture JSON remains parseable as missing required checks"
+  fi
+  pass "incomplete fixture JSON remains parseable as missing required checks"
+}
+
+test_check_runs_summary_reports_completion_and_truncation() {
+  local output
+
+  REPO="example/repo"
+  REVIEWER_CHECK_RUN_SUMMARY_LIMIT=1
+  # Invoked indirectly by github_check_runs_summary.
+  # shellcheck disable=SC2317
+  github_check_runs_json() {
+    printf '%s\n' '{"total_count":2,"fetched_count":2,"pages_fetched":1,"complete":true,"check_runs":[{"name":"a","status":"completed","conclusion":"success"},{"name":"b","status":"completed","conclusion":"failure"}]}'
+  }
+  output=$(github_check_runs_summary sha123)
+  assert_contains "check-run summary reports complete data" "Check-run data: complete (fetched 2 of 2 across 1 page(s))" <(printf '%s\n' "$output")
+  assert_contains "check-run summary reports intentional truncation" "Showing first 1 of 2 check runs; summary intentionally truncated." <(printf '%s\n' "$output")
+  unset REVIEWER_CHECK_RUN_SUMMARY_LIMIT
+  unset -f github_check_runs_json
 }
 
 test_private_key_permissions() {
@@ -590,13 +800,30 @@ EOF
 
   cat > "$bin_dir/curl" <<'EOF'
 #!/usr/bin/env bash
+body_file=""
 url="${*: -1}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      body_file="$2"
+      shift 2
+      ;;
+    -D|-w)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 case "$url" in
   *'/repos/example/repo/pulls?state=open&per_page=100&page=1')
-    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"}},{"number":2,"draft":false,"user":{"login":"bob"},"head":{"sha":"sha2"}},{"number":3,"draft":false,"user":{"login":"carol"},"head":{"sha":"sha3"}}]'
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"}},{"number":2,"draft":false,"user":{"login":"bob"},"head":{"sha":"sha2"}},{"number":3,"draft":false,"user":{"login":"carol"},"head":{"sha":"sha3"}}]' > "$body_file"
+    printf '200'
     ;;
   *)
     printf 'unexpected curl URL: %s\n' "$url" >&2
+    printf '000'
     exit 1
     ;;
 esac
@@ -657,6 +884,9 @@ test_prompt_failure_propagates
 test_invalid_verdict_state
 test_pr_queue_skip_reasons
 test_gemini_invocation_isolates_review_context
+test_github_api_retries_and_logs
+test_check_ci_paginates_required_check_runs
+test_check_runs_summary_reports_completion_and_truncation
 test_ci_states
 test_config_file_resolution
 test_private_key_permissions

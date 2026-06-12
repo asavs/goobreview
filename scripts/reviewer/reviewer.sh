@@ -230,7 +230,11 @@ while IFS=$'\t' read -r num author head_sha draft; do
         log "PR #$num@$head_sha: dry run bypassing CI state=$ci_state"
         ci_state="dry-run-bypassed-$ci_state"
       else
-        log "PR #$num@$head_sha: CI not yet terminal (state=$ci_state), will retry next tick"
+        if [ "$ci_state" = "incomplete" ]; then
+          log "PR #$num@$head_sha: required checks are missing from complete GitHub check-run data (state=incomplete), will retry next tick"
+        else
+          log "PR #$num@$head_sha: CI not yet terminal (state=$ci_state), will retry next tick"
+        fi
         continue
       fi
       ;;
