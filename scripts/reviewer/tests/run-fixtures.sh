@@ -926,6 +926,49 @@ test_symlink_snapshot_safety() {
   assert_not_contains "snapshot sanitizer does not copy target content" "outside secret" "$worktree_dir/docs/GUIDELINES.md"
 }
 
+test_worktree_cache_keeps_per_head_slots() {
+  local source_dir tarball state_dir runtime_dir first second first_again fetches_file
+
+  source_dir="$TMP_ROOT/worktree-cache-source"
+  tarball="$TMP_ROOT/worktree-cache.tar.gz"
+  state_dir="$TMP_ROOT/worktree-cache-state"
+  runtime_dir="$TMP_ROOT/worktree-cache-runtime"
+  fetches_file="$TMP_ROOT/worktree-cache-fetches"
+  mkdir -p "$source_dir/repo-root" "$state_dir" "$runtime_dir"
+  printf 'cached\n' > "$source_dir/repo-root/README.md"
+  tar -czf "$tarball" -C "$source_dir" repo-root
+
+  REPO="example/repo"
+  STATE_DIR="$state_dir"
+  RUNTIME_STATE_DIR="$runtime_dir"
+  LOG_FILE="$TMP_ROOT/worktree-cache.log"
+  : > "$LOG_FILE"
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by prepare_review_worktree.
+  github_api_get() {
+    case "${1:-}" in
+      repos/example/repo/tarball/*)
+        count=$(cat "$fetches_file" 2>/dev/null || printf 0)
+        count=$((count + 1))
+        printf '%s\n' "$count" > "$fetches_file"
+        cat "$tarball"
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  }
+
+  first=$(prepare_review_worktree sha1)
+  second=$(prepare_review_worktree sha2)
+  first_again=$(prepare_review_worktree sha1)
+
+  assert_eq "worktree cache reuses first head slot" "$first" "$first_again"
+  assert_contains "worktree cache stores first head content" "cached" "$first/README.md"
+  assert_contains "worktree cache stores second head content" "cached" "$second/README.md"
+  assert_eq "worktree cache avoids re-fetching evicted heads" "2" "$(cat "$fetches_file")"
+}
+
 test_invalid_verdict_state() {
   local artifact count
 
@@ -1371,6 +1414,7 @@ test_prompt_failure_propagates
 test_diff_per_file_assembly
 test_prompt_context_budgets_truncate
 test_symlink_snapshot_safety
+test_worktree_cache_keeps_per_head_slots
 test_invalid_verdict_state
 test_artifact_secret_safety
 test_state_and_output_permissions

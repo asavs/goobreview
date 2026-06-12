@@ -28,20 +28,21 @@ sanitize_review_worktree_symlinks() {
 
 prepare_review_worktree() {
   local head_sha="$1"
-  local slug dir parent stamp tmp archive extracted current_head
+  local slug dir parent tmp archive extracted
 
   slug=$(review_worktree_slug)
   parent="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/worktrees/$slug"
-  dir="$parent/current"
-  stamp="$parent/current.head"
+  case "$head_sha" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  dir="$parent/heads/$head_sha"
 
-  current_head=$(cat "$stamp" 2>/dev/null || true)
-  if [ -d "$dir" ] && [ "$current_head" = "$head_sha" ]; then
+  if [ -d "$dir" ]; then
     printf '%s\n' "$dir"
     return 0
   fi
 
-  mkdir -p "$parent"
+  mkdir -p "$parent/heads"
   tmp=$(mktemp -d "$parent/tmp.XXXXXX")
   archive="$tmp/archive.tar.gz"
   extracted="$tmp/root"
@@ -59,13 +60,11 @@ prepare_review_worktree() {
 
   sanitize_review_worktree_symlinks "$extracted"
 
-  rm -rf "$dir"
   if ! mv "$extracted" "$dir" 2>>"$LOG_FILE"; then
     rm -rf "$tmp"
     return 1
   fi
 
-  printf '%s\n' "$head_sha" >"$stamp"
   rm -rf "$tmp"
   printf '%s\n' "$dir"
 }
