@@ -431,6 +431,7 @@ test_checkout_unreachable_vm_does_not_fail_strict() {
 }
 
 source_setup_vm_helpers() {
+  # shellcheck source=../../setup-vm.sh
   GOOBREVIEW_SETUP_VM_TEST_HELPERS=1 . "$PREFLIGHT_DIR/../setup-vm.sh"
 }
 

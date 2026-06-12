@@ -32,6 +32,7 @@ require_safe_owned_path() {
 }
 
 if [ "${GOOBREVIEW_SETUP_VM_TEST_HELPERS:-0}" = "1" ]; then
+  # shellcheck disable=SC2317
   return 0 2>/dev/null || exit 0
 fi
 
