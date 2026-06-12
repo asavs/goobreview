@@ -638,6 +638,7 @@ REVIEWER_MAX_ATTEMPTS=1
 EOF
 
   status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
   output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
 
   if [ "$status" -ne 0 ]; then
