@@ -191,7 +191,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 ## What The Reviewer Does
 
 1. Acquires a non-blocking `flock`.
-2. Mints a GitHub App installation token (cached in `app_token.json`) and exports it as `GH_TOKEN` so direct API calls and the final `gh pr review` authenticate as the App.
+2. Mints a GitHub App installation token (cached in `app_token.json`) and exports it as `GH_TOKEN` for GitHub API calls.
 3. Lists open non-draft PRs in `REVIEWER_REPO`.
 4. Skips PRs authored by `BOT_LOGIN` (`<app-slug>[bot]`); also skips PRs authored by `REVIEWER_USER` if set.
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
@@ -200,7 +200,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata with the author's description as claims to verify, commit subjects, CI one-liner, previous bot review on the same PR, changed paths with diffstat, guidance path pointers, the snapshot mount path, per-file diff with whole-file omission markers, and the GitHub review formatting rule).
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
-11. Posts a top-level GitHub review with `gh pr review`.
+11. Posts a top-level GitHub review through the GitHub REST API.
 12. Applies optional labels.
 
 Queued skips, attempted reviews, and posted reviews are separate counters.
@@ -241,6 +241,9 @@ set -a
 set +a
 scripts/reviewer/merge-gate.sh 123
 ```
+
+This optional operator helper uses GitHub CLI (`gh`); the reviewer daemon and
+VM setup path do not require it.
 
 Inspect GitHub App token setup:
 

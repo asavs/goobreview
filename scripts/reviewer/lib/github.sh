@@ -5,16 +5,15 @@ post_review() {
   local num="$1"
   local event="$2"
   local body="$3"
-  local flag
+  local payload
 
   case "$event" in
-    APPROVE)          flag="--approve" ;;
-    REQUEST_CHANGES)  flag="--request-changes" ;;
-    COMMENT)          flag="--comment" ;;
+    APPROVE|REQUEST_CHANGES|COMMENT) ;;
     *)                log "invalid review event: $event"; return 1 ;;
   esac
 
-  printf '%s' "$body" | gh pr review "$num" --repo "$REPO" "$flag" --body-file - >/dev/null 2>>"$LOG_FILE"
+  payload=$(jq -n --arg event "$event" --arg body "$body" '{event: $event, body: $body}')
+  github_api_post_json "repos/$REPO/pulls/$num/reviews" "$payload" >/dev/null
 }
 
 apply_review_labels() {

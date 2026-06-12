@@ -1,6 +1,6 @@
 # VM Setup
 
-Use this page for any non-Cloud-Shell install, or when you need to understand what `scripts/bootstrap-gcp.sh` and `scripts/setup-vm.sh` create for you. The VM needs `git`, `gh`, `jq`, `tar`, `flock`, `timeout`, Node/npm, and Gemini CLI. Ubuntu LTS is the easiest default.
+Use this page for any non-Cloud-Shell install, or when you need to understand what `scripts/bootstrap-gcp.sh` and `scripts/setup-vm.sh` create for you. The VM needs `git`, `jq`, `curl`, `wget`, `tar`, `flock`, `timeout`, Node/npm, and Gemini CLI. Ubuntu LTS is the easiest default.
 
 Minimum practical shape:
 
@@ -48,7 +48,7 @@ Keep firewall exposure minimal. The reviewer needs outbound HTTPS and inbound SS
 ## Install GoobReview Runtime
 
 After SSHing to the VM, the recommended manual path is to run the same installer
-the Cloud Shell bootstrap uses. It installs base packages, GitHub CLI, Node 20,
+the Cloud Shell bootstrap uses. It installs base packages, Node 20,
 Gemini CLI, the checkout, the state directory, and optional swap:
 
 ```bash
@@ -89,26 +89,11 @@ On Ubuntu, install the base packages first:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils
+sudo apt-get install -y git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils tar
 ```
 
 `flock` comes from `util-linux`; `timeout` comes from `coreutils`. Do not rely
 on Ubuntu's `nodejs` package on older LTS images; install Node 20 or newer.
-
-## Install GitHub CLI
-
-GitHub CLI's official install docs live in the `cli/cli` repository and GitHub Docs:
-
-- https://github.com/cli/cli/blob/trunk/docs/install_linux.md
-- https://docs.github.com/github-cli/github-cli/quickstart
-
-For Ubuntu, follow the current official apt instructions from the GitHub CLI docs. After installing:
-
-```bash
-gh --version
-```
-
-GoobReview does not call `gh auth login`. Setup, tuning, prompt rendering, and basic PR metadata reads use GitHub App-token API calls directly. Posting the final PR review still uses `gh pr review`, with `gh` picking up the short-lived installation token via `GH_TOKEN`. See [github-app-setup.md](github-app-setup.md) for App registration.
 
 ## Install Gemini CLI
 

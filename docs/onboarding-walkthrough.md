@@ -50,7 +50,7 @@ bash scripts/bootstrap-gcp.sh --project PROJECT_ID --zone us-central1-a --vm-nam
 5. Waits up to ~3min for SSH to come up.
 6. SSHes in and pipes `scripts/setup-vm.sh` (fetched from
    `raw.githubusercontent.com/<this-fork>/main/...`) into `bash`.
-7. `setup-vm.sh` installs: `git jq curl wget`, Node 20, `gh`, `@google/gemini-cli`,
+7. `setup-vm.sh` installs: `git jq curl wget`, Node 20, `@google/gemini-cli`,
    2GB swapfile, clones the repo into `/opt/goobreview/example`, creates state
    dir at `/var/lib/goobreview/example`.
 
