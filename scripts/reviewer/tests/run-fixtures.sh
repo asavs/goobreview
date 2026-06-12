@@ -225,10 +225,12 @@ test_private_key_permissions() {
 }
 
 test_config_file_resolution() {
-  local default_file="$TMP_ROOT/required-checks.json"
-  local example_file="$TMP_ROOT/required-checks.example.json"
-  local explicit_file="$TMP_ROOT/explicit-required-checks.json"
+  local config_dir="$TMP_ROOT/config-resolution"
+  local default_file="$config_dir/required-checks.json"
+  local example_file="$config_dir/required-checks.example.json"
+  local explicit_file="$config_dir/explicit-required-checks.json"
 
+  mkdir -p "$config_dir"
   printf '[]\n' > "$example_file"
   unset REVIEWER_REQUIRED_CHECKS_FILE
 
