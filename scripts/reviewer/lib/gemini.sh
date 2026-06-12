@@ -59,6 +59,12 @@ run_gemini_review() {
   local worktree_dir="$3"
   local runtime_dir settings_file context_file_name
 
+  if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
+    log "Refusing to invoke Gemini with symlinks present in PR-head snapshot: $worktree_dir"
+    printf 'PR-head snapshot contains symlinks; refusing Gemini invocation.\n' >"$err_file"
+    return 1
+  fi
+
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/gemini-runtime"
   settings_file="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/gemini-settings.json"
   context_file_name=".goobreview-gemini-context-disabled.md"

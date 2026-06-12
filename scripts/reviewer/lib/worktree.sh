@@ -6,6 +6,26 @@ review_worktree_slug() {
   printf '%s' "$REPO" | tr '/:' '__' | tr -c 'A-Za-z0-9._-' '_'
 }
 
+sanitize_review_worktree_symlinks() {
+  local dir="$1"
+  local link target rel tmp
+
+  [ -d "$dir" ] || return 0
+  while IFS= read -r -d '' link; do
+    rel="${link#"$dir"/}"
+    target=$(readlink "$link" 2>/dev/null || printf 'unreadable')
+    log "Neutralizing symlink in PR-head snapshot: $rel -> $target"
+    tmp=$(mktemp "$dir/.goobreview-symlink.XXXXXX")
+    {
+      printf 'goobreview: symlink metadata only; target content was not read.\n'
+      printf 'path: %s\n' "$rel"
+      printf 'target: %s\n' "$target"
+    } >"$tmp"
+    rm -f "$link"
+    mv "$tmp" "$link"
+  done < <(find "$dir" -type l -print0)
+}
+
 prepare_review_worktree() {
   local head_sha="$1"
   local slug dir parent stamp tmp archive extracted current_head
@@ -36,6 +56,8 @@ prepare_review_worktree() {
     rm -rf "$tmp"
     return 1
   fi
+
+  sanitize_review_worktree_symlinks "$extracted"
 
   rm -rf "$dir"
   if ! mv "$extracted" "$dir" 2>>"$LOG_FILE"; then
