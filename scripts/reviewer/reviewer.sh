@@ -133,9 +133,9 @@ write_dry_run_artifact() {
       rm -f "$artifact_tmp"
       artifact_tmp=""
     else
-    body_bytes=$((MAX_ARTIFACT_BYTES - marker_bytes))
-    head -c "$body_bytes" "$artifact_tmp" >"$output_file"
-    printf '%s' "$marker" >>"$output_file"
+      body_bytes=$((MAX_ARTIFACT_BYTES - marker_bytes))
+      head -c "$body_bytes" "$artifact_tmp" >"$output_file"
+      printf '%s' "$marker" >>"$output_file"
     fi
   else
     mv "$artifact_tmp" "$output_file"
