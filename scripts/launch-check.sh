@@ -23,17 +23,12 @@ ops_require_private_key "$REVIEWER_APP_PRIVATE_KEY_PATH"
 
 CONFIG_DIR="${REVIEWER_CONFIG_DIR:-$REPO_ROOT/config}"
 REQUIRED_CHECKS_FILE="${REVIEWER_REQUIRED_CHECKS_FILE:-$CONFIG_DIR/required-checks.json}"
-PROMPT_PAYLOAD_FILE="${REVIEWER_PROMPT_PAYLOAD_FILE:-$CONFIG_DIR/prompt-payload.json}"
 STATE_DIR="${REVIEWER_STATE:-/var/lib/goobreview/example}"
 
 ops_require_file "$REQUIRED_CHECKS_FILE" "Run scripts/configure.sh to create config/required-checks.json from config/required-checks.example.json, or set REVIEWER_REQUIRED_CHECKS_FILE."
-ops_require_file "$PROMPT_PAYLOAD_FILE" "Run scripts/configure.sh to create config/prompt-payload.json from config/prompt-payload.example.json, or set REVIEWER_PROMPT_PAYLOAD_FILE."
 
 if ! jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' "$REQUIRED_CHECKS_FILE" >/dev/null; then
   ops_die "Invalid required-check config in $REQUIRED_CHECKS_FILE. Use config/required-checks.example.json as the shape, then list the GitHub check names that gate live posting."
-fi
-if ! jq -e '.segments | type == "object"' "$PROMPT_PAYLOAD_FILE" >/dev/null; then
-  ops_die "Invalid prompt payload config in $PROMPT_PAYLOAD_FILE. Run scripts/configure.sh or compare with config/prompt-payload.example.json."
 fi
 
 required_count="$(jq 'length' "$REQUIRED_CHECKS_FILE")"
@@ -51,11 +46,9 @@ if [ -z "$latest_metadata" ]; then
 fi
 
 required_sha="$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')"
-prompt_sha="$(sha256sum "$PROMPT_PAYLOAD_FILE" | awk '{print $1}')"
 
 metadata_repo="$(jq -r '.repo // ""' "$latest_metadata")"
 metadata_required_sha="$(jq -r '.required_checks_sha256 // ""' "$latest_metadata")"
-metadata_prompt_sha="$(jq -r '.prompt_payload_sha256 // ""' "$latest_metadata")"
 metadata_bypass_ci="$(jq -r '.dry_run_bypass_ci // ""' "$latest_metadata")"
 metadata_required_count="$(jq '.required_checks | length' "$latest_metadata")"
 metadata_event="$(jq -r '.event // ""' "$latest_metadata")"
@@ -66,9 +59,6 @@ if [ "$metadata_repo" != "$REVIEWER_REPO" ]; then
 fi
 if [ "$metadata_required_sha" != "$required_sha" ]; then
   ops_die "required-check config changed after the latest dry run. Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh again."
-fi
-if [ "$metadata_prompt_sha" != "$prompt_sha" ]; then
-  ops_die "prompt-payload config changed after the latest dry run. Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh again."
 fi
 if [ "$metadata_required_count" -eq 0 ] && [ "${REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS:-0}" != "1" ]; then
   ops_die "Latest dry run did not exercise a required-check gate. Configure config/required-checks.json and run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh, or set REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS=1 intentionally."

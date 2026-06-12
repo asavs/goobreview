@@ -53,13 +53,6 @@ for cmd in curl jq node tar flock; do
   ops_require_command "$cmd" "Run scripts/setup-vm.sh first."
 done
 
-CONFIG_DIR="$REPO_ROOT/config"
-PROMPT_PAYLOAD_FILE="${REVIEWER_PROMPT_PAYLOAD_FILE:-$CONFIG_DIR/prompt-payload.json}"
-if [ ! -f "$PROMPT_PAYLOAD_FILE" ] && [ -f "$CONFIG_DIR/prompt-payload.example.json" ]; then
-  PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.example.json"
-fi
-ops_require_file "$PROMPT_PAYLOAD_FILE" "Run scripts/configure.sh first."
-
 if [ -n "$explain" ] && [ -z "$output_file" ]; then
   state_dir="${REVIEWER_STATE:-$HOME/.goobreview}"
   mkdir -p "$state_dir" || ops_die "Failed to create REVIEWER_STATE: $state_dir"
@@ -79,12 +72,8 @@ fi
 
 if [ -n "$explain" ]; then
   echo
-  echo "Included prompt segments from $PROMPT_PAYLOAD_FILE:"
-  jq -r '
-    .segments
-    | to_entries[]
-    | (if (.value.enabled == true) then "[x] " else "[ ] " end) + .key
-  ' "$PROMPT_PAYLOAD_FILE"
+  echo "Prompt composition is fixed in scripts/reviewer/lib/prompt.sh (build_review_prompt)."
+  echo "Deployment policy knobs live in config/reviewer.env: REVIEWER_INCLUDE_AUTHOR=${REVIEWER_INCLUDE_AUTHOR:-0}, REVIEWER_INCLUDE_DESCRIPTION=${REVIEWER_INCLUDE_DESCRIPTION:-1}, REVIEWER_INCLUDE_COMMIT_SUBJECTS=${REVIEWER_INCLUDE_COMMIT_SUBJECTS:-1}."
 fi
 
 if [ -n "$output_file" ]; then

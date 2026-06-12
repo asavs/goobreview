@@ -73,7 +73,6 @@ key_path=""
 state_dir="/var/lib/goobreview/example"
 personality_file=""
 required_checks="$CONFIG_DIR/required-checks.json"
-prompt_payload="$CONFIG_DIR/prompt-payload.json"
 
 if [ -f "$ENV_FILE" ]; then
   file_present=1
@@ -115,10 +114,6 @@ required_checks_ready=0
 if [ -f "$required_checks" ]; then
   required_checks_ready=1
 fi
-prompt_payload_ready=0
-if [ -f "$prompt_payload" ]; then
-  prompt_payload_ready=1
-fi
 
 gemini_auth=0
 if [ -d "$HOME/.gemini" ]; then
@@ -136,8 +131,8 @@ elif [ "$key_present" -ne 1 ] || [ "$key_readable" -ne 1 ]; then
   recommendation="Place the GitHub App private key at REVIEWER_APP_PRIVATE_KEY_PATH with mode 0600."
 elif [ "$personality_ready" -ne 1 ]; then
   recommendation="Select a valid config/personalities/*.md file with scripts/configure.sh."
-elif [ "$required_checks_ready" -ne 1 ] || [ "$prompt_payload_ready" -ne 1 ]; then
-  recommendation="Run scripts/configure.sh to create required-checks.json and prompt-payload.json."
+elif [ "$required_checks_ready" -ne 1 ]; then
+  recommendation="Run scripts/configure.sh to create required-checks.json."
 elif [ "$gemini_auth" -ne 1 ]; then
   recommendation="Run gemini once on the VM, sign in, trust this folder, then /quit."
 fi
@@ -155,7 +150,6 @@ if [ "$report" -eq 1 ]; then
   print_field "personality_file" "$personality_file"
   print_field "personality_file_present" "$(bool "$personality_ready")"
   print_field "required_checks_present" "$(bool "$required_checks_ready")"
-  print_field "prompt_payload_present" "$(bool "$prompt_payload_ready")"
   print_field "reviewer_state" "$state_dir"
   print_field "gemini_auth_present" "$(bool "$gemini_auth")"
   print_field "recommendation" "$recommendation"
@@ -173,7 +167,6 @@ private key present:    $(bool "$key_present")${key_path:+ ($key_path)}
 private key readable:   $(bool "$key_readable")
 personality valid:      $(bool "$personality_ready")${personality_file:+ ($personality_file)}
 required checks file:   $(bool "$required_checks_ready") ($required_checks)
-prompt payload file:    $(bool "$prompt_payload_ready") ($prompt_payload)
 Gemini auth dir:        $(bool "$gemini_auth") ($HOME/.gemini)
 
 Next: $recommendation

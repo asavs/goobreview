@@ -193,27 +193,6 @@ else
   log "Invalid choice; using existing/default personality: $chosen"
 fi
 
-cat <<EOF
-
-Prompt payload profiles:
-  1) lean     - compact metadata, CI one-liner, changed paths, guidance paths, diff
-  2) minimal  - personality, diff, response format only
-  3) full     - lean plus the verbose all-check summary
-  4) custom   - copy prompt-payload.json and edit every segment manually
-
-EOF
-profile_pick="$(ask 'Pick a prompt payload profile' '1')"
-case "$profile_pick" in
-  1|lean) payload_profile="lean" ;;
-  2|minimal) payload_profile="minimal" ;;
-  3|full) payload_profile="full" ;;
-  4|custom) payload_profile="custom" ;;
-  *)
-    log "Invalid profile choice; using lean."
-    payload_profile="lean"
-    ;;
-esac
-
 create_labels=0
 if confirm "Create the helper labels (agent-reviewed, agent-requested-changes, needs-human-decision) on $repo now?"; then
   create_labels=1
@@ -225,7 +204,6 @@ inner_args=(
   --app-id "$app_id"
   --key-path "$key_path"
   --personality "$chosen"
-  --payload-profile "$payload_profile"
 )
 if [ -n "$installation_id" ]; then
   inner_args+=(--installation-id "$installation_id")
@@ -244,7 +222,6 @@ if confirm "Open reviewer.env in $EDITOR_CMD to review other settings?"; then
 fi
 
 maybe_edit "$CONFIG_DIR/required-checks.json"
-maybe_edit "$CONFIG_DIR/prompt-payload.json"
 
 log "Done. Next steps:"
 cat <<EOF
@@ -260,7 +237,7 @@ cat <<EOF
   scripts/tune.sh             # edit active files, then optionally dry-run
   scripts/tune.sh 123         # tune against a specific PR
   #   - edit $chosen for voice/focus, if you picked a personality above
-  #   - edit config/prompt-payload.json for prompt segments
+  #   - edit REVIEWER_INCLUDE_* in config/reviewer.env for blinding policy
   #   - re-run scripts/dry-run.sh until the artifact looks right
 
   # When the dry run looks good, enable the scheduler:

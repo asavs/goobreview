@@ -19,7 +19,6 @@ app_id=""
 installation_id=""
 key_path=""
 personality=""
-payload_profile="lean"
 create_labels=0
 allow_missing_gemini=0
 
@@ -41,78 +40,11 @@ Options:
                              auto-discover from --repo.
   --personality PATH         Personality file, relative to repo root or absolute.
                              Default: config/personalities/control.md.
-  --payload-profile NAME     lean, minimal, full, or custom. Default: lean.
   --create-labels           Create/update helper labels on the target repo.
   --allow-missing-gemini    Warn instead of failing when Gemini auth is missing.
   --env-file PATH           Override config/reviewer.env path.
   -h, --help                Show this help.
 EOF
-}
-
-apply_prompt_payload_profile() {
-  local file="$1"
-  local profile="$2"
-  local tmp
-
-  tmp=$(mktemp)
-  case "$profile" in
-    minimal)
-      jq '
-        .profile = "minimal"
-        | .segments.personality.enabled = true
-        | .segments.pr_metadata.enabled = false
-        | .segments.commit_subjects.enabled = false
-        | .segments.ci_status.enabled = false
-        | .segments.previous_bot_review.enabled = false
-        | .segments.relevant_guidance.enabled = false
-        | .segments.source_snapshot_hint.enabled = false
-        | .segments.diff.enabled = true
-        | .segments.response_format.enabled = true
-      ' "$file" >"$tmp"
-      ;;
-    lean)
-      jq '
-        .profile = "lean"
-        | .segments.personality.enabled = true
-        | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_description = true
-        | .segments.commit_subjects.enabled = true
-        | .segments.ci_status.enabled = true
-        | .segments.ci_status.mode = "one_line"
-        | .segments.previous_bot_review.enabled = true
-        | .segments.relevant_guidance.enabled = true
-        | .segments.source_snapshot_hint.enabled = true
-        | .segments.diff.enabled = true
-        | .segments.response_format.enabled = true
-      ' "$file" >"$tmp"
-      ;;
-    full)
-      jq '
-        .profile = "full"
-        | .segments.personality.enabled = true
-        | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_description = true
-        | .segments.commit_subjects.enabled = true
-        | .segments.ci_status.enabled = true
-        | .segments.previous_bot_review.enabled = true
-        | .segments.relevant_guidance.enabled = true
-        | .segments.source_snapshot_hint.enabled = true
-        | .segments.ci_status.mode = "all_check_summary"
-        | .segments.diff.enabled = true
-        | .segments.response_format.enabled = true
-      ' "$file" >"$tmp"
-      ;;
-    custom)
-      rm -f "$tmp"
-      return 0
-      ;;
-    *)
-      rm -f "$tmp"
-      ops_die "Unknown prompt payload profile: $profile"
-      ;;
-  esac
-
-  mv "$tmp" "$file"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -135,10 +67,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --personality)
       personality="${2:-}"
-      shift
-      ;;
-    --payload-profile)
-      payload_profile="${2:-}"
       shift
       ;;
     --create-labels)
@@ -168,7 +96,6 @@ ops_require_command gemini "Run scripts/setup-vm.sh first, then authenticate Gem
 ops_require_executable "$APP_TOKEN_SH" "This checkout looks incomplete."
 ops_require_file "$CONFIG_DIR/reviewer.env.example" "This checkout looks incomplete."
 ops_require_file "$CONFIG_DIR/required-checks.example.json" "This checkout looks incomplete."
-ops_require_file "$CONFIG_DIR/prompt-payload.example.json" "This checkout looks incomplete."
 
 if [ ! -d "$HOME/.gemini" ]; then
   if [ "$allow_missing_gemini" -eq 1 ]; then
@@ -256,10 +183,7 @@ esac
 ops_env_set "$ENV_FILE" REVIEWER_PERSONALITY_FILE "$personality"
 
 required_checks="$CONFIG_DIR/required-checks.json"
-prompt_payload="$CONFIG_DIR/prompt-payload.json"
 ops_copy_if_missing "$required_checks" "$CONFIG_DIR/required-checks.example.json" || exit 1
-ops_copy_if_missing "$prompt_payload" "$CONFIG_DIR/prompt-payload.example.json" || exit 1
-apply_prompt_payload_profile "$prompt_payload" "$payload_profile"
 
 if [ "$create_labels" -eq 1 ]; then
   ops_require_command curl "curl is needed for App-token label creation; setup-vm.sh installs it."
@@ -276,7 +200,6 @@ cat <<EOF
   repo:             $repo
   key path:         $key_path
   personality:      $personality
-  payload profile:  $payload_profile
 
 Next:
   scripts/status.sh

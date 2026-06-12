@@ -193,9 +193,6 @@ setup_launch_repo() {
   chmod +x "$repo/scripts/launch-check.sh"
 
   printf '["ci"]\n' > "$repo/config/required-checks.json"
-  cat > "$repo/config/prompt-payload.json" <<'JSON'
-{"segments":{"diff":{"enabled":true}}}
-JSON
   printf 'key\n' > "$repo/state/app-key.pem"
   chmod 600 "$repo/state/app-key.pem"
   cat > "$repo/config/reviewer.env" <<EOF
@@ -212,18 +209,16 @@ EOF
 write_launch_metadata() {
   local repo="$1" bypass="${2:-0}" owner_repo="${3:-owner/repo}"
   local out="$repo/state/dry-run-fixture.txt"
-  local required_sha prompt_sha
+  local required_sha
 
   printf 'dry run\n' > "$out"
   required_sha="$(sha256sum "$repo/config/required-checks.json" | awk '{print $1}')"
-  prompt_sha="$(sha256sum "$repo/config/prompt-payload.json" | awk '{print $1}')"
   jq -n \
     --arg repo "$owner_repo" \
     --arg dry_run_out "$out" \
     --arg required_checks_sha256 "$required_sha" \
-    --arg prompt_payload_sha256 "$prompt_sha" \
     --arg dry_run_bypass_ci "$bypass" \
-    '{repo:$repo,dry_run_out:$dry_run_out,required_checks_sha256:$required_checks_sha256,prompt_payload_sha256:$prompt_payload_sha256,dry_run_bypass_ci:$dry_run_bypass_ci,event:"APPROVE",required_checks:["ci"]}' \
+    '{repo:$repo,dry_run_out:$dry_run_out,required_checks_sha256:$required_checks_sha256,dry_run_bypass_ci:$dry_run_bypass_ci,event:"APPROVE",required_checks:["ci"]}' \
     > "$out.launch.json"
 }
 

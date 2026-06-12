@@ -1,6 +1,5 @@
 config/reviewer.env
 config/required-checks.json
-config/prompt-payload.json
 .goobreview-cloud-shell.env
 *.log
 .DS_Store
