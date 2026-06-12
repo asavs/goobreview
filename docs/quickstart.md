@@ -47,7 +47,7 @@ Add `--create-labels` only when you want the helper labels created. Add
 
 The most consequential choice is **which personality**: it defines the reviewer's role, voice, and focus areas. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.
 
-The second major choice is **prompt payload**. `lean` keeps reviews centered on the PR by sending compact metadata, a CI pass line, changed paths, relevant guidance paths, the diff, and the response format. `full` turns on the verbose streams, including author body, all-check summary, full file tree, and selected file contents.
+The second major choice is **prompt payload**. `lean` keeps reviews centered on the PR by sending compact metadata, a CI pass line, the bot's previous review on the same PR when one exists, changed paths, relevant guidance paths, the diff, and the response format. `full` turns on the verbose streams, including author body, all-check summary, full file tree, and selected file contents.
 
 Live posting will not fall back to example config. Before enabling the scheduler, make sure `config/required-checks.json` and `config/prompt-payload.json` exist, or set `REVIEWER_REQUIRED_CHECKS_FILE` and `REVIEWER_PROMPT_PAYLOAD_FILE` to valid deployment-specific files.
 

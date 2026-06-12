@@ -24,6 +24,12 @@
       "mode": "one_line",
       "example": "CI: required GitHub Actions checks passed for this PR head."
     },
+    "previous_bot_review": {
+      "enabled": true,
+      "description": "The bot's most recent prior GitHub review on the same PR, excluding the current head SHA. This lets Gemini check whether earlier concerns were addressed before changing verdicts.",
+      "max_body_bytes": 12000,
+      "example": "Previous commit: abc123\nPrevious review event: REQUEST_CHANGES\nReview body:\n[P1] Fix the unsafe fallback before merge."
+    },
     "changed_paths": {
       "enabled": true,
       "description": "Repository paths changed by the PR.",

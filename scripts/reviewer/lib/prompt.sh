@@ -137,6 +137,45 @@ append_ci_status() {
   esac
 }
 
+append_previous_bot_review() {
+  local head_sha="$1"
+  local max_body_bytes previous_review state event
+
+  [ -n "${PREVIOUS_BOT_REVIEWS_JSON:-}" ] || return 0
+
+  max_body_bytes=$(prompt_segment_number previous_bot_review max_body_bytes 12000)
+  if ! previous_review=$(printf '%s\n' "$PREVIOUS_BOT_REVIEWS_JSON" |
+    jq -c --arg bot "${BOT_LOGIN:-}" --arg bot_author "${BOT_AUTHOR:-}" --arg head "$head_sha" '
+      [
+        .[]
+        | select((.user.login == $bot or .user.login == $bot_author) and .commit_id != $head)
+        | select(.state == "CHANGES_REQUESTED" or .state == "APPROVED" or .state == "COMMENTED")
+      ]
+      | sort_by(.submitted_at // "")
+      | last // empty
+    '); then
+    return 1
+  fi
+  [ -n "$previous_review" ] || return 0
+
+  state=$(printf '%s\n' "$previous_review" | jq -r '.state // ""')
+  case "$state" in
+    CHANGES_REQUESTED) event="REQUEST_CHANGES" ;;
+    APPROVED) event="APPROVE" ;;
+    COMMENTED) event="COMMENT" ;;
+    *) event="$state" ;;
+  esac
+
+  prompt_section "Previous Bot Review (Trusted Reviewer History)"
+  printf 'This is your most recent prior GitHub review on this same PR, fetched from the reviews API. Use it to check whether earlier concerns were addressed on the new head SHA; do not repeat stale findings if the diff fixes them.\n\n'
+  printf 'Previous commit: %s\n' "$(printf '%s\n' "$previous_review" | jq -r '.commit_id // ""')"
+  printf 'Previous review event: %s\n' "$event"
+  printf 'Submitted at: %s\n' "$(printf '%s\n' "$previous_review" | jq -r '.submitted_at // ""')"
+  printf 'Review body:\n'
+  printf '%s\n' "$previous_review" | jq -r '.body // ""' |
+    append_bounded_stdin "$max_body_bytes" "previous bot review"
+}
+
 write_changed_paths() {
   local num="$1"
   local output_file="$2"
@@ -324,6 +363,9 @@ build_review_prompt() {
   fi
   if [ "$status" -eq 0 ] && prompt_segment_enabled ci_status; then
     append_ci_status "$ci_state" "$num" "$head_sha" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ] && prompt_segment_enabled previous_bot_review; then
+    append_previous_bot_review "$head_sha" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ] && prompt_segment_enabled changed_paths; then
     append_changed_paths "$changed_paths_file" >>"$output_prompt_file" || status=1

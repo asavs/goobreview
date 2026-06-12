@@ -9,7 +9,7 @@ GoobReview provisions a small VM into a durable reviewer-identity daemon that wa
 - Polls open, non-draft pull requests.
 - Skips PRs authored by the authenticated reviewer account.
 - Gates reviews on configured GitHub check-run names.
-- Sends configurable prompt segments to Gemini CLI: personality, compact PR metadata, CI status, changed paths, relevant guidance, diff, and output format by default.
+- Sends configurable prompt segments to Gemini CLI: personality, compact PR metadata, CI status, previous bot review, changed paths, relevant guidance, diff, and output format by default.
 - Runs Gemini from a daemon-owned runtime directory with the cached PR-head source snapshot attached as read-only context.
 - Can render the exact Gemini prompt text for a PR without posting or calling Gemini.
 - Posts one consolidated GitHub review.
@@ -39,7 +39,7 @@ The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `C
 Three ways to shape what your reviewer does, in order of impact:
 
 1. **`config/personalities/<name>.md`** - role, voice, focus areas. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`.
-2. **`config/prompt-payload.json`** - which prompt input streams Gemini receives: compact PR metadata, CI one-liner, changed paths, relevant guidance, full file tree, selected file contents, diff, and response format.
+2. **`config/prompt-payload.json`** - which prompt input streams Gemini receives: compact PR metadata, CI one-liner, previous bot review, changed paths, relevant guidance, full file tree, selected file contents, diff, and response format.
 3. **`config/required-checks.json`** - exact GitHub check-run names that must pass before Gemini is called.
 
 `scripts/configure.sh` walks you through copying the `.example` files and editing them. See [docs/daemon-runbook.md](docs/daemon-runbook.md#configuration-reference) for the full reference.
