@@ -210,7 +210,8 @@ EOF
 }
 
 write_launch_metadata() {
-  local repo="$1" bypass="${2:-0}" owner_repo="${3:-owner/repo}" out="$repo/state/dry-run-fixture.txt"
+  local repo="$1" bypass="${2:-0}" owner_repo="${3:-owner/repo}"
+  local out="$repo/state/dry-run-fixture.txt"
   local required_sha prompt_sha
 
   printf 'dry run\n' > "$out"
