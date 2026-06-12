@@ -26,8 +26,7 @@ secure_install_file() {
   local dst="$2"
 
   mkdir -p "$(dirname "$dst")"
-  cp "$src" "$dst" || return 1
-  chmod 600 "$dst" 2>/dev/null || {
+  install -m 600 "$src" "$dst" 2>/dev/null || {
     rm -f "$dst"
     return 1
   }
