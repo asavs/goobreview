@@ -32,8 +32,8 @@
     },
     "changed_paths": {
       "enabled": true,
-      "description": "Repository paths changed by the PR.",
-      "example": "client/src/App.tsx\nclient/src/environment.ts\nclient/src/environment.test.ts"
+      "description": "Repository paths changed by the PR, with git-style status letters and per-file +/- line counts from the GitHub files API.",
+      "example": "M client/src/App.tsx (+42/-7)\nA client/src/environment.test.ts (+120/-0)\nR src/old.ts -> src/new.ts (+3/-3)"
     },
     "relevant_guidance": {
       "enabled": true,
