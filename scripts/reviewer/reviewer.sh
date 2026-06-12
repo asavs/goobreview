@@ -28,6 +28,9 @@ LIB_DIR="$SCRIPT_DIR/lib"
 PROMPT_FILE="${REVIEWER_PROMPT:-$SCRIPT_DIR/review-prompt.md}"
 REPO_DIR="${REVIEWER_REPO_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 CONFIG_DIR="${REVIEWER_CONFIG_DIR:-$REPO_DIR/config}"
+LOG_FILE="$STATE_DIR/log.txt"
+LOCK_FILE="$STATE_DIR/lock"
+GEMINI_BACKOFF_FILE="$STATE_DIR/gemini_backoff_until"
 
 # shellcheck disable=SC1091
 . "$LIB_DIR/ci.sh"
@@ -46,16 +49,21 @@ CONFIG_DIR="${REVIEWER_CONFIG_DIR:-$REPO_DIR/config}"
 # shellcheck disable=SC1091
 . "$LIB_DIR/worktree.sh"
 
+mkdir -p "$STATE_DIR"
+mkdir -p "$RUNTIME_STATE_DIR"
+chmod 700 "$RUNTIME_STATE_DIR" 2>/dev/null || true
+"$SCRIPT_DIR/rotate-log.sh" "$LOG_FILE" 2>/dev/null || true
+
 DEFAULT_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.json"
-if [ ! -f "$DEFAULT_REQUIRED_CHECKS_FILE" ] && [ -f "$CONFIG_DIR/required-checks.example.json" ]; then
-  DEFAULT_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.example.json"
-fi
-REQUIRED_CHECKS_FILE="${REVIEWER_REQUIRED_CHECKS_FILE:-$DEFAULT_REQUIRED_CHECKS_FILE}"
+EXAMPLE_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.example.json"
 DEFAULT_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.json"
-if [ ! -f "$DEFAULT_PROMPT_PAYLOAD_FILE" ] && [ -f "$CONFIG_DIR/prompt-payload.example.json" ]; then
-  DEFAULT_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.example.json"
+EXAMPLE_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.example.json"
+ALLOW_EXAMPLE_CONFIG=0
+if [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; then
+  ALLOW_EXAMPLE_CONFIG=1
 fi
-PROMPT_PAYLOAD_FILE="${REVIEWER_PROMPT_PAYLOAD_FILE:-$DEFAULT_PROMPT_PAYLOAD_FILE}"
+REQUIRED_CHECKS_FILE="$(resolve_reviewer_config_file "required checks" REVIEWER_REQUIRED_CHECKS_FILE "$DEFAULT_REQUIRED_CHECKS_FILE" "$EXAMPLE_REQUIRED_CHECKS_FILE" "$ALLOW_EXAMPLE_CONFIG")"
+PROMPT_PAYLOAD_FILE="$(resolve_reviewer_config_file "prompt payload" REVIEWER_PROMPT_PAYLOAD_FILE "$DEFAULT_PROMPT_PAYLOAD_FILE" "$EXAMPLE_PROMPT_PAYLOAD_FILE" "$ALLOW_EXAMPLE_CONFIG")"
 PERSONALITY_FILE="${REVIEWER_PERSONALITY_FILE:-}"
 case "$PERSONALITY_FILE" in
   ''|/*) ;;
@@ -63,15 +71,6 @@ case "$PERSONALITY_FILE" in
 esac
 ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
 REVIEWER_RUNNER_NAME="${REVIEWER_RUNNER_NAME:-reviewer daemon}"
-
-LOG_FILE="$STATE_DIR/log.txt"
-LOCK_FILE="$STATE_DIR/lock"
-GEMINI_BACKOFF_FILE="$STATE_DIR/gemini_backoff_until"
-
-mkdir -p "$STATE_DIR"
-mkdir -p "$RUNTIME_STATE_DIR"
-chmod 700 "$RUNTIME_STATE_DIR" 2>/dev/null || true
-"$SCRIPT_DIR/rotate-log.sh" "$LOG_FILE" 2>/dev/null || true
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0

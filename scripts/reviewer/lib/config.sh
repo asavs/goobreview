@@ -64,6 +64,35 @@ validate_private_key_file() {
   fi
 }
 
+resolve_reviewer_config_file() {
+  local label="$1"
+  local env_name="$2"
+  local default_file="$3"
+  local example_file="$4"
+  local allow_example="$5"
+  local configured="${!env_name:-}"
+
+  if [ -n "$configured" ]; then
+    if [ -f "$configured" ]; then
+      printf '%s\n' "$configured"
+      return 0
+    fi
+    fatal "$env_name points at '$configured' but that file does not exist. Run scripts/configure.sh or point $env_name at a valid $label file."
+  fi
+
+  if [ -f "$default_file" ]; then
+    printf '%s\n' "$default_file"
+    return 0
+  fi
+
+  if [ "$allow_example" = "1" ] && [ -f "$example_file" ]; then
+    printf '%s\n' "$example_file"
+    return 0
+  fi
+
+  fatal "missing $label config: $default_file. Run scripts/configure.sh to create it from $example_file, or set $env_name to a valid file."
+}
+
 validate_reviewer_config() {
   require jq
 

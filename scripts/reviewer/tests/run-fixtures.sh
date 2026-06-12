@@ -224,6 +224,39 @@ test_private_key_permissions() {
   pass "private key mode with group/other bits is rejected"
 }
 
+test_config_file_resolution() {
+  local default_file="$TMP_ROOT/required-checks.json"
+  local example_file="$TMP_ROOT/required-checks.example.json"
+  local explicit_file="$TMP_ROOT/explicit-required-checks.json"
+
+  printf '[]\n' > "$example_file"
+  unset REVIEWER_REQUIRED_CHECKS_FILE
+
+  assert_eq "dry-run config resolution may use example fallback" "$example_file" \
+    "$(resolve_reviewer_config_file "required checks" REVIEWER_REQUIRED_CHECKS_FILE "$default_file" "$example_file" 1)"
+
+  if ( resolve_reviewer_config_file "required checks" REVIEWER_REQUIRED_CHECKS_FILE "$default_file" "$example_file" 0 ) >/dev/null 2>&1; then
+    fail "live config resolution rejects example fallback"
+  fi
+  pass "live config resolution rejects example fallback"
+
+  printf '["ci"]\n' > "$default_file"
+  assert_eq "live config resolution uses real default file" "$default_file" \
+    "$(resolve_reviewer_config_file "required checks" REVIEWER_REQUIRED_CHECKS_FILE "$default_file" "$example_file" 0)"
+
+  printf '["explicit"]\n' > "$explicit_file"
+  REVIEWER_REQUIRED_CHECKS_FILE="$explicit_file"
+  assert_eq "explicit config file is accepted" "$explicit_file" \
+    "$(resolve_reviewer_config_file "required checks" REVIEWER_REQUIRED_CHECKS_FILE "$default_file" "$example_file" 0)"
+
+  REVIEWER_REQUIRED_CHECKS_FILE="$TMP_ROOT/missing.json"
+  if ( resolve_reviewer_config_file "required checks" REVIEWER_REQUIRED_CHECKS_FILE "$default_file" "$example_file" 1 ) >/dev/null 2>&1; then
+    fail "explicit missing config file is rejected"
+  fi
+  pass "explicit missing config file is rejected"
+  unset REVIEWER_REQUIRED_CHECKS_FILE
+}
+
 test_log_rotation() {
   local log_file="$TMP_ROOT/rotate.log"
 
@@ -505,6 +538,7 @@ test_invalid_verdict_state
 test_pr_queue_skip_reasons
 test_gemini_invocation_isolates_review_context
 test_ci_states
+test_config_file_resolution
 test_private_key_permissions
 test_log_rotation
 

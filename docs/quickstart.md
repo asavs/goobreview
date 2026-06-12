@@ -49,6 +49,8 @@ The most consequential choice is **which personality**: it defines the reviewer'
 
 The second major choice is **prompt payload**. `lean` keeps reviews centered on the PR by sending compact metadata, a CI pass line, changed paths, relevant guidance paths, the diff, and the response format. `full` turns on the verbose streams, including author body, all-check summary, full file tree, and selected file contents.
 
+Live posting will not fall back to example config. Before enabling the scheduler, make sure `config/required-checks.json` and `config/prompt-payload.json` exist, or set `REVIEWER_REQUIRED_CHECKS_FILE` and `REVIEWER_PROMPT_PAYLOAD_FILE` to valid deployment-specific files.
+
 ## 5. Dry Run
 
 Still on the VM:
