@@ -158,22 +158,20 @@ append_commit_subjects() {
   rm -f "$subjects_file"
 }
 
+# CI results are deterministic GitHub-side facts: the PR ran its own checks
+# and GitHub holds the outcomes. Passing the check-run list lets the reviewer
+# see what automation already verified instead of taking anyone's word for it.
 append_ci_status() {
   local ci_state="$1"
-  local num="$2"
-  local head_sha="$3"
-  local mode
+  local head_sha="$2"
 
-  mode=$(prompt_segment_string ci_status mode one_line)
   prompt_section "CI Status"
-  if [ "$mode" = "all_check_summary" ]; then
-    printf 'Required-check gate state: %s\n\n' "$ci_state"
-    github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || true
-    return 0
-  fi
-
   case "$ci_state" in
-    success) printf 'CI: required GitHub Actions checks passed for this PR head. Focus your review on what automated checks cannot verify.\n' ;;
+    success)
+      printf 'Required GitHub Actions checks passed for this PR head. GitHub check runs for this commit (name, status, conclusion):\n\n'
+      github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || printf '[goobreview: check-run summary unavailable]\n'
+      printf '\nThese results are CI output reported by GitHub, not author claims. Do not re-verify what these checks already cover; focus review effort on what automation cannot check.\n'
+      ;;
     *) printf 'CI: required-check gate state is %s.\n' "$ci_state" ;;
   esac
 }
@@ -445,7 +443,7 @@ build_review_prompt() {
     append_commit_subjects "$num" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ] && prompt_segment_enabled ci_status; then
-    append_ci_status "$ci_state" "$num" "$head_sha" >>"$output_prompt_file" || status=1
+    append_ci_status "$ci_state" "$head_sha" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ] && prompt_segment_enabled previous_bot_review; then
     append_previous_bot_review "$head_sha" "$previous_bot_reviews_json" >>"$output_prompt_file" || status=1

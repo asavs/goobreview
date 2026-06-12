@@ -27,9 +27,8 @@
     },
     "ci_status": {
       "enabled": true,
-      "description": "One-line status after the required-check gate has passed. Failing or pending required checks block review before Gemini is called.",
-      "mode": "one_line",
-      "example": "CI: required GitHub Actions checks passed for this PR head. Focus your review on what automated checks cannot verify."
+      "description": "Gate state plus the GitHub check-run results for this head SHA, so the reviewer sees what automation already verified instead of taking the author's word for it. Failing or pending required checks still block review before Gemini is called.",
+      "example": "Required GitHub Actions checks passed for this PR head. GitHub check runs for this commit (name, status, conclusion):\nunit-tests\tcompleted\tsuccess"
     },
     "previous_bot_review": {
       "enabled": true,

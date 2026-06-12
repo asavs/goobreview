@@ -606,7 +606,7 @@ test_prompt_assembly() {
       "max_body_bytes": 12
     },
     "commit_subjects": {"enabled": true, "max_commits": 2},
-    "ci_status": {"enabled": true, "mode": "one_line"},
+    "ci_status": {"enabled": true},
     "previous_bot_review": {"enabled": true, "max_body_bytes": 12000},
     "relevant_guidance": {
       "enabled": true,
@@ -668,7 +668,15 @@ JSON
     return 1
   }
 
+  # shellcheck disable=SC2317 # Mocked check summary is invoked indirectly by append_ci_status.
+  github_check_runs_summary() {
+    printf 'unit-tests\tcompleted\tsuccess\n'
+  }
+
   build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir" "$pr_metadata_json" "$previous_bot_reviews_json"
+  # Restore the real GitHub API helpers shadowed by this test's mocks.
+  # shellcheck disable=SC1091
+  . "$LIB_DIR/github-api.sh"
 
   assert_order "prompt uses compressed canonical section order" "$prompt_file" \
     "## Role" \
@@ -692,8 +700,10 @@ JSON
   assert_not_contains "prompt keeps commit subjects to first lines" "Long body that must not appear." "$prompt_file"
   assert_contains "prompt caps commit subjects with a legible marker" "[goobreview: 1 additional commit subjects omitted after the first 2]" "$prompt_file"
   assert_not_contains "prompt omits commit subjects beyond the cap" "- Tidy imports" "$prompt_file"
-  assert_contains "prompt includes CI one-liner" "CI: required GitHub Actions checks passed" "$prompt_file"
-  assert_contains "prompt aims review beyond CI coverage" "Focus your review on what automated checks cannot verify." "$prompt_file"
+  assert_contains "prompt reports the required-check gate" "Required GitHub Actions checks passed for this PR head." "$prompt_file"
+  assert_contains "prompt includes GitHub check-run results" "$(printf 'unit-tests\tcompleted\tsuccess')" "$prompt_file"
+  assert_contains "prompt frames check results as CI output" "CI output reported by GitHub, not author claims" "$prompt_file"
+  assert_contains "prompt aims review beyond CI coverage" "focus review effort on what automation cannot check" "$prompt_file"
   assert_contains "prompt includes previous bot review section" "Your Prior Review (Own Output; May Quote Untrusted PR Content)" "$prompt_file"
   assert_contains "prompt normalizes prior changes-requested event" "Previous review event: REQUEST_CHANGES" "$prompt_file"
   assert_contains "prompt includes previous bot review body" "Prior blocker from the bot." "$prompt_file"
