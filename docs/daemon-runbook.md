@@ -90,7 +90,7 @@ scripts/render-prompt.sh 123 /tmp/goobreview-prompt.md
 Omit the output path to print the prompt to stdout. The PR must pass the
 configured required-check gate, because failing or pending CI means the
 daemon would not send a prompt to Gemini for that head commit.
-Add `--explain` to print the enabled prompt payload segments; when no
+Add `--explain` to print the active blinding-policy flags; when no
 output path is provided, the prompt is written to a `mktemp` file under
 `REVIEWER_STATE` with mode `0600`.
 
@@ -197,7 +197,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
 6. Counts the PR against `REVIEWER_MAX_ATTEMPTS`, then applies the required-check gate.
 7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current` and neutralizes any symlinks into metadata stubs before prompt assembly or Gemini access.
-8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata with the author's description as claims to verify, commit subjects, CI one-liner, previous bot review on the same PR, changed paths with diffstat, guidance path pointers, the snapshot mount path, per-file diff with whole-file omission markers, and the GitHub review formatting rule).
+8. Builds the prompt: personality, trust preamble, compact PR metadata with the author's description as claims to verify (author username blinded by default), commit subjects, GitHub check-run results, previous bot review on the same PR, the snapshot mount path with a pointer at the repo's own `AGENTS.md`/`CONTRIBUTING.md`/`GUIDELINES.md` conventions, the per-file diff with changed-file index and whole-file omission markers (lockfiles plus the repo's `.gitattributes` `linguist-generated` patterns), and the GitHub review formatting rule. Composition is fixed in `scripts/reviewer/lib/prompt.sh`; blinding policy and budgets come from `reviewer.env`.
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Posts a top-level GitHub review through the GitHub REST API.
@@ -273,17 +273,16 @@ node scripts/reviewer/lib/app-token.mjs token \
 
 ## Configuration Reference
 
-The reviewer reads three gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` writes them interactively, and the example files themselves carry the authoritative inline documentation:
+The reviewer reads two gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` writes them interactively, and the example files themselves carry the authoritative inline documentation:
 
-- **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_PERSONALITY_FILE` (no default — the daemon fails loudly when it is unset; `configure.sh` pre-selects `config/personalities/control.md`).
-- **`config/prompt-payload.json`** (from `prompt-payload.example.json`) — which prompt segments Gemini receives. Each segment has an `enabled` flag, description, and example; the example file documents every segment. `configure.sh` offers `minimal`/`lean`/`full` presets, with `lean` as the default. Inspect the assembled payload with `scripts/render-prompt.sh 123 --explain`.
+- **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_PERSONALITY_FILE` (no default — the daemon fails loudly when it is unset; `configure.sh` pre-selects `config/personalities/control.md`). Also carries the blinding policy: `REVIEWER_INCLUDE_AUTHOR` (default `0`), `REVIEWER_INCLUDE_DESCRIPTION` and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (default `1`).
 - **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon fetches all check-run pages for the PR head before deciding whether a required check is missing, waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
 
 GitHub API calls are bounded by default. Shell-based REST calls use `REVIEWER_GITHUB_CONNECT_TIMEOUT` (default `10` seconds), `REVIEWER_GITHUB_MAX_TIME` (default `60` seconds), `REVIEWER_GITHUB_RETRIES` (default `2` retries for safe transient GET failures such as network errors, 5xx, 429, or rate-limit-like 403 responses), and `REVIEWER_GITHUB_RETRY_SLEEP` (default `1` second between attempts). The Node App-token helper uses `REVIEWER_GITHUB_FETCH_TIMEOUT` (default `60` seconds) as its fetch abort timeout. Failed GitHub API calls log the method, path, curl status, HTTP status, attempt count, and a short redacted response snippet so operators can distinguish auth/configuration errors from transient GitHub failures without leaking tokens. Check-run summaries include whether the fetched data is complete and whether the displayed rows were intentionally truncated; set `REVIEWER_CHECK_RUN_SUMMARY_LIMIT` (default `200`) to change the display limit without changing required-check gating.
 
-Prompt assembly is also bounded by default. The diff degrades per file: `REVIEWER_DIFF_FILE_MAX_BYTES` (default `40000`) and `REVIEWER_DIFF_MAX_BYTES` (default `120000`) cap the per-file and total patch budgets, and a file over budget (or matching a lockfile/generated omit pattern, or served without a text patch by GitHub) is replaced whole by an explicit `goobreview` omission marker — never cut mid-hunk. Omitted files remain readable in the PR-head snapshot. After assembly, `REVIEWER_MAX_PROMPT_BYTES` (default `240000`) is a hard fail-closed budget checked before Gemini is invoked. Dry-run output is capped by `REVIEWER_MAX_ARTIFACT_BYTES` (default `1000000`) and marked when truncated.
+Prompt assembly is also bounded by default. The diff degrades per file: `REVIEWER_DIFF_FILE_MAX_BYTES` (default `40000`) and `REVIEWER_DIFF_MAX_BYTES` (default `120000`) cap the per-file and total patch budgets, and a file over budget (or matching a built-in lockfile pattern or the target repo's `.gitattributes` `linguist-generated` patterns, or served without a text patch by GitHub) is replaced whole by an explicit `goobreview` omission marker — never cut mid-hunk. Omitted files remain readable in the PR-head snapshot. After assembly, `REVIEWER_MAX_PROMPT_BYTES` (default `240000`) is a hard fail-closed budget checked before Gemini is invoked. Dry-run output is capped by `REVIEWER_MAX_ARTIFACT_BYTES` (default `1000000`) and marked when truncated.
 
-Live posting requires real deployment config. `scripts/reviewer/reviewer.sh` refuses live mode unless `config/prompt-payload.json` and `config/required-checks.json` exist, or `REVIEWER_PROMPT_PAYLOAD_FILE` and `REVIEWER_REQUIRED_CHECKS_FILE` explicitly point at valid files. Run `scripts/configure.sh` to create the local files from their `.example` siblings. Dry-run and prompt-rendering paths may still use the committed examples so first-run setup can inspect behavior before launching.
+Live posting requires real deployment config. `scripts/reviewer/reviewer.sh` refuses live mode unless `config/required-checks.json` exists, or `REVIEWER_REQUIRED_CHECKS_FILE` explicitly points at a valid file. Run `scripts/configure.sh` to create the local file from its `.example` sibling. Dry-run and prompt-rendering paths may still use the committed example so first-run setup can inspect behavior before launching.
 
 Before enabling cron or another live daemon, run:
 
@@ -292,7 +291,7 @@ REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
 scripts/launch-check.sh
 ```
 
-The first command writes the normal dry-run artifact and a sibling `.launch.json` file. The second confirms that the launch metadata still matches the current target repo, required-check config, and prompt-payload config.
+The first command writes the normal dry-run artifact and a sibling `.launch.json` file. The second confirms that the launch metadata still matches the current target repo and required-check config.
 
 Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim and selected via `REVIEWER_PERSONALITY_FILE`. To try one in a dry run without editing config:
 
