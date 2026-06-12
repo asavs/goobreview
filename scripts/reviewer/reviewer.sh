@@ -74,7 +74,7 @@ ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
 REVIEWER_RUNNER_NAME="${REVIEWER_RUNNER_NAME:-reviewer daemon}"
 
 if [ "${REVIEWER_LOCK_HELD:-0}" = "1" ]; then
-  : "${REVIEWER_LOCK_HELD:=1}"
+  flock -n 9 || fatal "REVIEWER_LOCK_HELD=1 but reviewer lock fd 9 is not held"
 else
   exec 9>"$LOCK_FILE"
   flock -n 9 || exit 0
