@@ -41,7 +41,7 @@ Options:
                              auto-discover from --repo.
   --personality PATH         Personality file, relative to repo root or absolute.
                              Default: config/personalities/control.md.
-  --payload-profile NAME     lean, minimal, guided, full, or custom. Default: lean.
+  --payload-profile NAME     lean, minimal, full, or custom. Default: lean.
   --create-labels           Create/update helper labels on the target repo.
   --allow-missing-gemini    Warn instead of failing when Gemini auth is missing.
   --env-file PATH           Override config/reviewer.env path.
@@ -67,8 +67,6 @@ apply_prompt_payload_profile() {
         | .segments.relevant_guidance.enabled = false
         | .segments.source_snapshot_hint.enabled = false
         | .segments.all_check_summary.enabled = false
-        | .segments.full_file_tree.enabled = false
-        | .segments.selected_file_contents.enabled = false
         | .segments.diff.enabled = true
         | .segments.response_format.enabled = true
       ' "$file" >"$tmp"
@@ -84,31 +82,8 @@ apply_prompt_payload_profile() {
         | .segments.previous_bot_review.enabled = true
         | .segments.changed_paths.enabled = true
         | .segments.relevant_guidance.enabled = true
-        | .segments.relevant_guidance.mode = "paths_only"
         | .segments.source_snapshot_hint.enabled = true
         | .segments.all_check_summary.enabled = false
-        | .segments.full_file_tree.enabled = false
-        | .segments.selected_file_contents.enabled = false
-        | .segments.diff.enabled = true
-        | .segments.response_format.enabled = true
-      ' "$file" >"$tmp"
-      ;;
-    guided)
-      jq '
-        .profile = "guided"
-        | .segments.personality.enabled = true
-        | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_description = false
-        | .segments.ci_status.enabled = true
-        | .segments.ci_status.mode = "one_line"
-        | .segments.previous_bot_review.enabled = true
-        | .segments.changed_paths.enabled = true
-        | .segments.relevant_guidance.enabled = true
-        | .segments.relevant_guidance.mode = "full_content"
-        | .segments.source_snapshot_hint.enabled = true
-        | .segments.all_check_summary.enabled = false
-        | .segments.full_file_tree.enabled = false
-        | .segments.selected_file_contents.enabled = false
         | .segments.diff.enabled = true
         | .segments.response_format.enabled = true
       ' "$file" >"$tmp"
@@ -124,11 +99,8 @@ apply_prompt_payload_profile() {
         | .segments.previous_bot_review.enabled = true
         | .segments.changed_paths.enabled = true
         | .segments.relevant_guidance.enabled = true
-        | .segments.relevant_guidance.mode = "full_content"
         | .segments.source_snapshot_hint.enabled = true
         | .segments.all_check_summary.enabled = true
-        | .segments.full_file_tree.enabled = true
-        | .segments.selected_file_contents.enabled = true
         | .segments.diff.enabled = true
         | .segments.response_format.enabled = true
       ' "$file" >"$tmp"

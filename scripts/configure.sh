@@ -198,18 +198,16 @@ cat <<EOF
 Prompt payload profiles:
   1) lean     - compact metadata, CI one-liner, changed paths, guidance paths, diff
   2) minimal  - personality, diff, response format only
-  3) guided   - lean plus full relevant guidance docs
-  4) full     - MOG-style verbose payload, including full tree and selected files
-  5) custom   - copy prompt-payload.json and edit every segment manually
+  3) full     - lean plus the verbose all-check summary
+  4) custom   - copy prompt-payload.json and edit every segment manually
 
 EOF
 profile_pick="$(ask 'Pick a prompt payload profile' '1')"
 case "$profile_pick" in
   1|lean) payload_profile="lean" ;;
   2|minimal) payload_profile="minimal" ;;
-  3|guided) payload_profile="guided" ;;
-  4|full) payload_profile="full" ;;
-  5|custom) payload_profile="custom" ;;
+  3|full) payload_profile="full" ;;
+  4|custom) payload_profile="custom" ;;
   *)
     log "Invalid profile choice; using lean."
     payload_profile="lean"
