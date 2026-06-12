@@ -145,16 +145,12 @@ trust prompt, then return control to the setup agent for `scripts/configure.sh`.
    `REVIEWER_PERSONALITY_FILE`.
 6. **Required-checks** — copies `required-checks.example.json` → `required-checks.json`
    if missing, offers to edit.
-7. **Prompt payload profile** — picks one of `lean | minimal | full | custom`,
-   applies it to `config/prompt-payload.json` (which controls which prompt segments
-   are included). Offers to edit.
-8. **Labels** — offers to create helper labels (`agent-reviewed`,
+7. **Labels** — offers to create helper labels (`agent-reviewed`,
    `agent-requested-changes`, `needs-human-decision`) on the target repo.
-9. Prints "next steps" pointing at `dry-run.sh` and `enable-cron.sh`.
+8. Prints "next steps" pointing at `dry-run.sh` and `enable-cron.sh`.
 
 **State after Phase 3:**
-- `config/reviewer.env`, `config/required-checks.json`, `config/prompt-payload.json`
-  all populated.
+- `config/reviewer.env` and `config/required-checks.json` populated.
 - Helper labels exist on target repo (if opted in).
 - Reviewer is fully configured but not yet running on a schedule.
 
@@ -202,9 +198,10 @@ cat /var/lib/goobreview/example/dry-pr-123.txt
   directly. Re-run `dry-run.sh`.
 - **Add a new personality:** drop a new `.md` in `config/personalities/`,
   then point `REVIEWER_PERSONALITY_FILE` at it.
-- **Change which segments go into the prompt** (CI status, commit subjects,
-  diff, etc.): edit `config/prompt-payload.json` directly, or re-run
-  `configure.sh` and pick a different profile.
+- **Change the blinding policy** (author username, PR description, commit
+  subjects): edit the `REVIEWER_INCLUDE_*` flags in `config/reviewer.env`.
+  The prompt composition itself is fixed; forks edit
+  `scripts/reviewer/lib/prompt.sh` to change the payload shape.
 - **Render the prompt without invoking Gemini** (just see what would be sent):
   ```bash
   REVIEWER_RENDER_PROMPT_ONLY=1 REVIEWER_ONLY_PR=123 scripts/reviewer/reviewer.sh
@@ -219,11 +216,12 @@ cat /var/lib/goobreview/example/dry-pr-123.txt
 **State after Phase 4:**
 - You have at least one dry-run artifact you're happy with.
 - `config/personalities/<file>.md` reflects the voice you want.
-- `config/prompt-payload.json` reflects the prompt shape you want.
+- The `REVIEWER_INCLUDE_*` flags in `config/reviewer.env` reflect the
+  blinding policy you want.
 
 **Friction notes:**
 - Dedicated `scripts/tune.sh` now wraps the loop of editing the active
-  personality/prompt payload and running another dry run.
+  personality/blinding policy and running another dry run.
 - No way to diff two dry-run artifacts to see "did my edit help?"
 - The split between "what the personality says" (markdown file) and "which
   personality is selected" (env var) means changing voice requires editing
@@ -295,7 +293,8 @@ scripts/enable-cron.sh
 | --- | --- |
 | What the reviewer "sounds like" | `config/personalities/<file>.md` |
 | Which personality is active | `REVIEWER_PERSONALITY_FILE` in `config/reviewer.env` |
-| Which prompt segments are included | `config/prompt-payload.json` |
+| Blinding policy (author, description, commit subjects) | `REVIEWER_INCLUDE_*` in `config/reviewer.env` |
+| The prompt payload shape itself | `scripts/reviewer/lib/prompt.sh` (fork-owned) |
 | The invariant review-event output contract | `scripts/reviewer/review-prompt.md` (rarely) |
 | Which CI checks are required before reviewing | `config/required-checks.json` |
 | Setup interactive flow | `scripts/configure.sh` |

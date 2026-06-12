@@ -31,25 +31,24 @@ scripts/configure.sh  # auto-detects target repo + installation ID when possible
 
 The `gemini` step is intentionally interactive when you want Google-account quota, including Google AI Pro or Ultra entitlement. Gemini CLI's documented non-interactive auth paths are `GEMINI_API_KEY` and Vertex AI credentials, which use API/Vertex quota and billing rather than personal subscription quota. Keep any Gemini API keys, Vertex credentials, or cached Google auth state out of this repo and checkout.
 
-`configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, walks you through personality and prompt-payload choices, and offers to create helper labels. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
+`configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, walks you through the personality choice, and offers to create helper labels. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
 
 ```bash
 scripts/configure-inner.sh \
   --app-id APP_ID \
   --key-path /var/lib/goobreview/example/app-key.pem \
-  --personality config/personalities/control.md \
-  --payload-profile lean
+  --personality config/personalities/control.md
 ```
 
 Add `--create-labels` only when you want the helper labels created. Add
 `--repo OWNER/REPO` if the App has access to multiple repos. Add
 `--installation-id ID` if you already know it; otherwise the script discovers it.
 
-The most consequential choice is **which personality**: it defines the reviewer's role, voice, and focus areas. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.
+The most consequential choice is **which personality**: it defines the reviewer's role and voice. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.
 
-The second major choice is **prompt payload**. `lean` keeps reviews centered on the PR by sending compact metadata, a CI pass line, the bot's previous review on the same PR when one exists, changed paths, relevant guidance paths, the diff, and the response format. `full` turns on the verbose streams, including author body, all-check summary, full file tree, and selected file contents.
+The second choice is the **blinding policy** in `config/reviewer.env`: `REVIEWER_INCLUDE_AUTHOR` (default `0` — the reviewer never learns the author's username), `REVIEWER_INCLUDE_DESCRIPTION`, and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (both default `1`, included as author claims to verify against the diff). The rest of the prompt — check-run results, the bot's previous review, the per-file diff, the snapshot pointer — is fixed; forks edit `scripts/reviewer/lib/prompt.sh` to change the shape.
 
-Live posting will not fall back to example config. Before enabling the scheduler, make sure `config/required-checks.json` and `config/prompt-payload.json` exist, or set `REVIEWER_REQUIRED_CHECKS_FILE` and `REVIEWER_PROMPT_PAYLOAD_FILE` to valid deployment-specific files.
+Live posting will not fall back to example config. Before enabling the scheduler, make sure `config/required-checks.json` exists, or set `REVIEWER_REQUIRED_CHECKS_FILE` to a valid deployment-specific file.
 
 ## 5. Dry Run
 
@@ -95,7 +94,7 @@ To iterate on voice or prompt shape, use the tuning wrapper:
 scripts/tune.sh 123
 ```
 
-It opens the active personality and prompt payload files, then offers to run another dry run.
+It opens the active personality file and `reviewer.env` (blinding policy, budgets), then offers to run another dry run.
 
 ## 6. Enable The Scheduler
 

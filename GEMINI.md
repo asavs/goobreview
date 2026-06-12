@@ -95,8 +95,8 @@ You cannot complete the GitHub browser steps for them.
 
 ## Phase 3 - Configure
 
-Goal: `reviewer.env`, App credentials, required checks, personality, and prompt
-payload are configured.
+Goal: `reviewer.env`, App credentials, required checks, and personality are
+configured.
 
 For humans, use:
 
@@ -111,8 +111,7 @@ scripts/configure-inner.sh \
   --repo OWNER/REPO \
   --app-id APP_ID \
   --key-path /var/lib/goobreview/example/app-key.pem \
-  --personality config/personalities/control.md \
-  --payload-profile lean
+  --personality config/personalities/control.md
 ```
 
 Add `--installation-id ID` only if discovery is not desired or has already been
@@ -146,7 +145,8 @@ scripts/dry-run.sh PR_NUMBER
 
 Artifacts are written under `$REVIEWER_STATE` as `dry-pr-<number>.txt` or
 `dry-run-<timestamp>.txt`. Summarize what the reviewer would post and ask the
-user whether to adjust personality or prompt payload before launch.
+user whether to adjust the personality or the `REVIEWER_INCLUDE_*` blinding
+flags in `reviewer.env` before launch.
 
 ## Phase 5 - Launch
 

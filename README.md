@@ -9,7 +9,7 @@ GoobReview provisions a small VM into a durable reviewer-identity daemon that wa
 - Polls open, non-draft pull requests.
 - Skips PRs authored by the authenticated reviewer account.
 - Gates reviews on configured GitHub check-run names.
-- Sends configurable prompt segments to Gemini CLI: personality, compact PR metadata with the author's description as claims to verify, commit subjects, CI status, previous bot review, changed paths with diffstat, guidance path pointers, per-file diff, and output format by default.
+- Sends a fixed, GitHub-native prompt to Gemini CLI: personality, compact PR metadata with the author's description as claims to verify, commit subjects, check-run results, previous bot review, per-file diff with a changed-file index, and output format. The author username is blinded by default; blinding policy is set in `reviewer.env`.
 - Runs Gemini from a daemon-owned runtime directory with the cached PR-head source snapshot attached as read-only context.
 - Can render the exact Gemini prompt text for a PR without posting or calling Gemini.
 - Posts one consolidated GitHub review.
@@ -38,9 +38,11 @@ The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `C
 
 Three ways to shape what your reviewer does, in order of impact:
 
-1. **`config/personalities/<name>.md`** - role, voice, focus areas. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`.
-2. **`config/prompt-payload.json`** - which prompt input streams Gemini receives: compact PR metadata, commit subjects, CI one-liner, previous bot review, changed paths with diffstat, guidance path pointers, snapshot mount hint, per-file diff, and response format.
+1. **`config/personalities/<name>.md`** - role and voice. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`.
+2. **`REVIEWER_INCLUDE_*` flags in `config/reviewer.env`** - blinding policy: whether the reviewer sees the author username (off by default), the PR description, and the commit subjects. The prompt composition itself is fixed; if you want a different payload shape, fork and edit `scripts/reviewer/lib/prompt.sh` - the fork is the customization system, same as the personality gallery.
 3. **`config/required-checks.json`** - exact GitHub check-run names that must pass before Gemini is called.
+
+The target repo shapes its own review context with conventions it likely already uses: `AGENTS.md` / `CONTRIBUTING.md` / `GUIDELINES.md` files are pointed out to the reviewer, and diffs for files marked `linguist-generated` in `.gitattributes` are omitted the same way GitHub's own Files Changed tab collapses them.
 
 `scripts/configure.sh` walks you through copying the `.example` files and editing them. See [docs/daemon-runbook.md](docs/daemon-runbook.md#configuration-reference) for the full reference.
 
@@ -58,8 +60,6 @@ config/                              Per-deployment files. *.example.* ships;
                                      linus.md, etc.). Pick one via
                                      REVIEWER_PERSONALITY_FILE in reviewer.env.
                                      The main thing you customize.
-  prompt-payload.example.json        Prompt input manifest. Each segment has
-                                     an enabled flag, description, and example.
   required-checks.example.json       GitHub check-run names that gate review posting.
   reviewer.env.example               Runtime env: target repo, App credentials,
                                      state dir, Gemini model.
