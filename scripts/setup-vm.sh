@@ -110,6 +110,7 @@ fi
 log "Preparing $CHECKOUT_DIR and $STATE_DIR"
 sudo mkdir -p "$CHECKOUT_DIR" "$STATE_DIR"
 sudo chown -R "$TARGET_USER:$TARGET_USER" "$CHECKOUT_DIR" "$STATE_DIR"
+sudo chmod 700 "$STATE_DIR"
 
 if [ ! -d "$CHECKOUT_DIR/.git" ]; then
   log "Cloning $REPO_URL into $CHECKOUT_DIR"

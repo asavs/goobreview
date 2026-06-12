@@ -23,7 +23,16 @@ sync.log                Checkout sync log.
 app_token.json          Cached App installation token + slug (refreshed when <5 min remain).
 app-key.pem             GitHub App private key (you provide; mode 0600).
 dry-pr-<number>.txt     Dry-run artifact with full Gemini prompt payload and response.
+*.txt.launch.json       Launch metadata from a dry run: repo, config hashes, required checks, and CI-bypass state.
 ```
+
+`REVIEWER_STATE` is created and repaired to mode `0700` by the reviewer.
+If the daemon cannot make it owner-only, it fails before reviewing. Files
+that may contain prompt, model, token-cache, or diagnostic material are
+written with mode `0600` by default, including dry-run artifacts,
+dry-run launch metadata, prompt render outputs, invalid-output artifacts,
+and App token cache files. Keep the state directory owned by the Unix user
+that runs the reviewer.
 
 PR-head source snapshots, Gemini's isolated working directory, and
 `gemini-settings.json` are written under `REVIEWER_RUNTIME_STATE`, which
@@ -55,6 +64,15 @@ For a numbered PR, the dry run writes
 - the exact Gemini prompt payload;
 - Gemini's full response, or stderr if Gemini failed.
 
+Dry-run artifacts are stored under `REVIEWER_STATE` by default and are
+installed with mode `0600`. Before writing the artifact, the reviewer scans
+the assembled content for high-confidence secret material such as private-key
+blocks and credential-style assignments for GitHub, Gemini, Google Cloud,
+AWS, Azure, and App key path variables. If such material is detected, the
+reviewer logs a clear refusal and does not write the artifact. The scan is
+intended to reject obvious secret values while still allowing ordinary PR
+diffs or docs that mention environment variable names without printing values.
+
 Dry runs do not post reviews, do not mark PRs reviewed, can target draft
 PRs by number, and bypass the required-CI gate by default so prompt
 configuration can be tested before CI is terminal. Set
@@ -73,7 +91,8 @@ Omit the output path to print the prompt to stdout. The PR must pass the
 configured required-check gate, because failing or pending CI means the
 daemon would not send a prompt to Gemini for that head commit.
 Add `--explain` to print the enabled prompt payload segments; when no
-output path is provided, the prompt is written to `/tmp/goobreview-prompt-<PR>.md`.
+output path is provided, the prompt is written to a `mktemp` file under
+`REVIEWER_STATE` with mode `0600`.
 
 ## Cron
 
@@ -89,9 +108,20 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 also rotates `log.txt` and `sync.log`; tune this with
 `REVIEWER_LOG_MAX_BYTES` and `REVIEWER_LOG_ROTATE_KEEP`.
 
-`run-once.sh` loads `config/reviewer.env`, syncs the template checkout, then runs one reviewer tick.
+`run-once.sh` loads `config/reviewer.env`, takes the reviewer lock, syncs
+the template checkout, then runs one reviewer tick under that same lock. If
+another scheduler invocation already holds the lock, the tick logs `sync
+skipped by lock` and exits without touching the checkout. If sync fails, the
+tick logs `sync failed before reviewer tick; review did not run` and exits
+before any review can be posted. A successful handoff logs `sync succeeded;
+review tick started`.
 
-`scripts/enable-cron.sh` refuses to install the cron entry until it finds at least one dry-run artifact (`dry-run-*.txt` or `dry-pr-*.txt`) in `$REVIEWER_STATE`. To bypass that deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN=1`.
+For emergency/manual operation only, set
+`REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE=1` to let `run-once.sh`
+continue from the current checkout after a sync failure. Leave it unset or
+`0` for scheduled live operation.
+
+`scripts/enable-cron.sh` runs `scripts/launch-check.sh` before installing the cron entry. Live `reviewer.sh` ticks run the same validation before posting. The launch check requires current live config files, matching dry-run launch metadata, nonempty required checks, and a dry run that used production CI gating (`REVIEWER_DRY_RUN_BYPASS_CI=0`). To bypass scheduler validation deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1`. To bypass live tick validation deliberately, set `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1`. Narrower launch-check bypasses are `REVIEWER_ALLOW_LAUNCH_WITH_BYPASSED_CI=1` and `REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS=1`.
 
 ## Systemd Timer
 
@@ -125,10 +155,9 @@ sudo systemctl edit --full goobreview.service   # adjust paths/user if needed
 sudo systemctl edit --full goobreview.timer
 ```
 
-The example service includes a dry-run artifact gate. It refuses to run until
-`$REVIEWER_STATE` contains `dry-run-*.txt` or `dry-pr-*.txt`; set
-`REVIEWER_ALLOW_ENABLE_SYSTEMD_WITHOUT_DRY_RUN=1` only for an intentional
-override.
+The example service includes a dry-run artifact gate. Prefer running
+`scripts/launch-check.sh` before enabling any live daemon path so systemd gets
+the same current-config validation as cron.
 
 ### Validate One Run
 
@@ -166,13 +195,21 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 3. Lists open non-draft PRs in `REVIEWER_REPO`.
 4. Skips PRs authored by `BOT_LOGIN` (`<app-slug>[bot]`); also skips PRs authored by `REVIEWER_USER` if set.
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
-6. Applies the required-check gate.
-7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`.
+6. Counts the PR against `REVIEWER_MAX_ATTEMPTS`, then applies the required-check gate.
+7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current` and neutralizes any symlinks into metadata stubs before prompt assembly or Gemini access.
 8. Builds a prompt from the enabled segments in `config/prompt-payload.json` (for example: personality, compact PR metadata, CI one-liner, changed paths, relevant guidance, diff, and the GitHub review formatting rule).
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Posts a top-level GitHub review with `gh pr review`.
 12. Applies optional labels.
+
+Queued skips, attempted reviews, and posted reviews are separate counters.
+Drafts, self-authored PRs, PRs outside `REVIEWER_ONLY_PR`, and
+already-reviewed PR heads are queued skips and stay cheap. A PR becomes an
+attempted review when the daemon starts work that can spend API/model/runtime
+budget, such as CI reads, worktree preparation, prompt assembly, Gemini
+invocation, or posting. Posted reviews are the successful dry-run/render/post
+actions counted by `REVIEWER_MAX_PRS`.
 
 ## Operations
 
@@ -237,9 +274,22 @@ The reviewer reads three gitignored files under `config/`, each copied from a `*
 
 - **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_PERSONALITY_FILE` (no default — the daemon fails loudly when it is unset; `configure.sh` pre-selects `config/personalities/control.md`).
 - **`config/prompt-payload.json`** (from `prompt-payload.example.json`) — which prompt segments Gemini receives. Each segment has an `enabled` flag, description, and example; the example file documents every segment. `configure.sh` offers `minimal`/`lean`/`guided`/`full` presets, with `lean` as the default. Inspect the assembled payload with `scripts/render-prompt.sh 123 --explain`.
-- **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
+- **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon fetches all check-run pages for the PR head before deciding whether a required check is missing, waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
 
-When a file is missing, the daemon transparently falls back to the committed `.example` version, so a fresh checkout works for a dry run without any edits.
+GitHub API calls are bounded by default. Shell-based REST calls use `REVIEWER_GITHUB_CONNECT_TIMEOUT` (default `10` seconds), `REVIEWER_GITHUB_MAX_TIME` (default `60` seconds), `REVIEWER_GITHUB_RETRIES` (default `2` retries for safe transient GET failures such as network errors, 5xx, 429, or rate-limit-like 403 responses), and `REVIEWER_GITHUB_RETRY_SLEEP` (default `1` second between attempts). The Node App-token helper uses `REVIEWER_GITHUB_FETCH_TIMEOUT` (default `60` seconds) as its fetch abort timeout. Failed GitHub API calls log the method, path, curl status, HTTP status, attempt count, and a short redacted response snippet so operators can distinguish auth/configuration errors from transient GitHub failures without leaking tokens. Check-run summaries include whether the fetched data is complete and whether the displayed rows were intentionally truncated; set `REVIEWER_CHECK_RUN_SUMMARY_LIMIT` (default `200`) to change the display limit without changing required-check gating.
+
+Prompt assembly is also bounded by default. `REVIEWER_DIFF_MAX_BYTES` (default `120000`), `REVIEWER_FILE_TREE_MAX_BYTES` (default `40000`), `REVIEWER_SELECTED_FILE_MAX_BYTES` (default `20000`), and `REVIEWER_GUIDANCE_FILE_MAX_BYTES` (default `20000`) cap high-volume prompt segments and insert an explicit `goobreview` truncation marker when content is omitted. After assembly, `REVIEWER_MAX_PROMPT_BYTES` (default `240000`) is a hard fail-closed budget checked before Gemini is invoked. Dry-run output is capped by `REVIEWER_MAX_ARTIFACT_BYTES` (default `1000000`) and marked when truncated.
+
+Live posting requires real deployment config. `scripts/reviewer/reviewer.sh` refuses live mode unless `config/prompt-payload.json` and `config/required-checks.json` exist, or `REVIEWER_PROMPT_PAYLOAD_FILE` and `REVIEWER_REQUIRED_CHECKS_FILE` explicitly point at valid files. Run `scripts/configure.sh` to create the local files from their `.example` siblings. Dry-run and prompt-rendering paths may still use the committed examples so first-run setup can inspect behavior before launching.
+
+Before enabling cron or another live daemon, run:
+
+```bash
+REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
+scripts/launch-check.sh
+```
+
+The first command writes the normal dry-run artifact and a sibling `.launch.json` file. The second confirms that the launch metadata still matches the current target repo, required-check config, and prompt-payload config.
 
 Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim and selected via `REVIEWER_PERSONALITY_FILE`. To try one in a dry run without editing config:
 
@@ -254,9 +304,12 @@ The engine prompt at `scripts/reviewer/review-prompt.md` only defines the parsed
 Env vars (set in `reviewer.env` or inline) beyond the required set:
 
 - `REVIEWER_APPLY_LABELS` — apply the helper labels after posting (default `1`; set `0` to disable). `scripts/reviewer/ensure-labels.sh` creates the labels; review posting never depends on them.
+- `REVIEWER_MAX_ATTEMPTS` — maximum non-skipped PRs to attempt in one tick. Defaults to `REVIEWER_MAX_PRS`. Reaching this limit logs `Reached REVIEWER_MAX_ATTEMPTS=...` and stops the tick.
 - `REVIEWER_IGNORE_GEMINI_BACKOFF` — set `1` to run even while a Gemini quota backoff (`gemini_backoff_until`) is active. `dry-run.sh` sets this automatically.
 - `REVIEWER_REQUIRED_CHECKS_JSON` + `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE=1` — override the required-check gate from the environment for one-off runs; both must be set, so a stray env var cannot loosen a production gate.
+- `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK` — emergency bypass for the live tick launch gate. Prefer rerunning `REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh` and `scripts/launch-check.sh`.
 - `REVIEWER_SYNC_REMOTE`, `REVIEWER_SYNC_BRANCH`, `REVIEWER_SYNC_LOG` — which remote/branch `sync-worktree.sh` tracks (default `origin`/`main`) and where it logs.
+- `REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE` — emergency/manual override; set to `1` only when you intentionally want a scheduler tick to run from the current checkout after sync fails. Default `0` fails closed.
 - `REVIEWER_ONLY_PR` — restrict a run (including `merge-gate.sh`) to a single PR number.
 - `REVIEWER_RUNTIME_STATE`, `REVIEWER_LOG_MAX_BYTES`, `REVIEWER_LOG_ROTATE_KEEP` — runtime dir and log rotation controls; see `config/reviewer.env.example`.
 
@@ -264,10 +317,11 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 
 - Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
 - Very large diffs may exceed useful Gemini context.
-- PR-head source snapshots are provided as read-only context under `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_RUNTIME_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot.
+- Prompt and dry-run artifact size limits are explicit runtime knobs; truncated context is marked in the prompt/artifact, and prompts that still exceed `REVIEWER_MAX_PROMPT_BYTES` fail before Gemini is called.
+- PR-head source snapshots are provided as read-only context under `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_RUNTIME_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot. Symlinks in PR-head snapshots are neutralized into metadata stubs, and any raw symlink that reaches prompt assembly or Gemini access is skipped/refused rather than dereferenced.
 - Google-account Gemini CLI auth is still an interactive, user-bound setup step. Gemini CLI's documented non-interactive auth modes are Gemini API key or Vertex AI; those do not preserve personal Google AI Pro/Ultra subscription entitlement.
 - The daemon does not inspect full CI logs; it gates on the configured required-check state.
 - The daemon does not create follow-up issues automatically.
 - The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.
-- The checkout must stay clean. `sync-worktree.sh` refuses to update a dirty checkout; `run-once.sh` logs that failure and continues one reviewer tick with the current checkout.
-- Each cron tick posts at most `REVIEWER_MAX_PRS` reviews, defaulting to one.
+- The checkout must stay clean. `sync-worktree.sh` refuses to update a dirty checkout; `run-once.sh` logs that failure and exits before reviewing unless `REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE=1` is set deliberately.
+- Each cron tick attempts at most `REVIEWER_MAX_ATTEMPTS` non-skipped PRs and posts at most `REVIEWER_MAX_PRS` reviews. Both default to one.

@@ -49,6 +49,8 @@ The most consequential choice is **which personality**: it defines the reviewer'
 
 The second major choice is **prompt payload**. `lean` keeps reviews centered on the PR by sending compact metadata, a CI pass line, changed paths, relevant guidance paths, the diff, and the response format. `full` turns on the verbose streams, including author body, all-check summary, full file tree, and selected file contents.
 
+Live posting will not fall back to example config. Before enabling the scheduler, make sure `config/required-checks.json` and `config/prompt-payload.json` exist, or set `REVIEWER_REQUIRED_CHECKS_FILE` and `REVIEWER_PROMPT_PAYLOAD_FILE` to valid deployment-specific files.
+
 ## 5. Dry Run
 
 Still on the VM:
@@ -71,7 +73,13 @@ For a specific PR, the artifact is written to:
 $REVIEWER_STATE/dry-pr-123.txt
 ```
 
-Dry runs can target draft PRs and previously reviewed PR heads. They also bypass the required-CI gate by default so you can test prompt behavior before CI has finished. Set `REVIEWER_DRY_RUN_BYPASS_CI=0` if you want dry runs to match production CI gating.
+Dry runs can target draft PRs and previously reviewed PR heads. They also bypass the required-CI gate by default so you can test prompt behavior before CI has finished. Before launching live scheduling, run at least one dry run with production CI gating enabled:
+
+```bash
+REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
+```
+
+This writes a sibling `.launch.json` metadata file that records the target repo, config hashes, required-check list, and whether CI was bypassed.
 
 To preview exactly what Gemini would receive without calling Gemini:
 
@@ -97,7 +105,7 @@ Once the dry run looks good:
 scripts/enable-cron.sh
 ```
 
-Installs a one-line crontab entry that rotates `cron.log` and runs `run-once.sh` every minute. It refuses to launch until at least one dry-run artifact exists in `$REVIEWER_STATE`; set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN=1` only when you intentionally want to bypass that guard. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
+Installs a one-line crontab entry that rotates `cron.log` and runs `run-once.sh` every minute. It first runs `scripts/launch-check.sh`, which refuses to launch unless current live config matches the latest non-bypassed dry-run metadata and required checks are configured. Live reviewer ticks run the same launch validation before posting. Use `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1` or `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1` only for intentional emergency bypasses. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
 
 Prefer systemd? See [docs/daemon-runbook.md#systemd-timer](daemon-runbook.md#systemd-timer).
 

@@ -17,7 +17,14 @@ GEMINI_TIMEOUT="${REVIEWER_GEMINI_TIMEOUT:-600}"
 GEMINI_MODEL="${REVIEWER_GEMINI_MODEL:-auto}"
 GEMINI_QUOTA_DEFAULT_BACKOFF="${REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF:-3600}"
 GEMINI_QUOTA_BACKOFF_PADDING="${REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING:-300}"
+MAX_PROMPT_BYTES="${REVIEWER_MAX_PROMPT_BYTES:-240000}"
+MAX_ARTIFACT_BYTES="${REVIEWER_MAX_ARTIFACT_BYTES:-1000000}"
+DIFF_MAX_BYTES="${REVIEWER_DIFF_MAX_BYTES:-120000}"
+FILE_TREE_MAX_BYTES="${REVIEWER_FILE_TREE_MAX_BYTES:-40000}"
+SELECTED_FILE_MAX_BYTES="${REVIEWER_SELECTED_FILE_MAX_BYTES:-20000}"
+GUIDANCE_FILE_MAX_BYTES="${REVIEWER_GUIDANCE_FILE_MAX_BYTES:-20000}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
+MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
 INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
@@ -28,6 +35,9 @@ LIB_DIR="$SCRIPT_DIR/lib"
 PROMPT_FILE="${REVIEWER_PROMPT:-$SCRIPT_DIR/review-prompt.md}"
 REPO_DIR="${REVIEWER_REPO_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 CONFIG_DIR="${REVIEWER_CONFIG_DIR:-$REPO_DIR/config}"
+LOG_FILE="$STATE_DIR/log.txt"
+LOCK_FILE="$STATE_DIR/lock"
+GEMINI_BACKOFF_FILE="$STATE_DIR/gemini_backoff_until"
 
 # shellcheck disable=SC1091
 . "$LIB_DIR/ci.sh"
@@ -46,16 +56,20 @@ CONFIG_DIR="${REVIEWER_CONFIG_DIR:-$REPO_DIR/config}"
 # shellcheck disable=SC1091
 . "$LIB_DIR/worktree.sh"
 
+ensure_owner_private_dir "runtime state" "$STATE_DIR"
+ensure_owner_private_dir "transient runtime state" "$RUNTIME_STATE_DIR"
+"$SCRIPT_DIR/rotate-log.sh" "$LOG_FILE" 2>/dev/null || true
+
 DEFAULT_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.json"
-if [ ! -f "$DEFAULT_REQUIRED_CHECKS_FILE" ] && [ -f "$CONFIG_DIR/required-checks.example.json" ]; then
-  DEFAULT_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.example.json"
-fi
-REQUIRED_CHECKS_FILE="${REVIEWER_REQUIRED_CHECKS_FILE:-$DEFAULT_REQUIRED_CHECKS_FILE}"
+EXAMPLE_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.example.json"
 DEFAULT_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.json"
-if [ ! -f "$DEFAULT_PROMPT_PAYLOAD_FILE" ] && [ -f "$CONFIG_DIR/prompt-payload.example.json" ]; then
-  DEFAULT_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.example.json"
+EXAMPLE_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.example.json"
+ALLOW_EXAMPLE_CONFIG=0
+if [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; then
+  ALLOW_EXAMPLE_CONFIG=1
 fi
-PROMPT_PAYLOAD_FILE="${REVIEWER_PROMPT_PAYLOAD_FILE:-$DEFAULT_PROMPT_PAYLOAD_FILE}"
+REQUIRED_CHECKS_FILE="$(resolve_reviewer_config_file "required checks" REVIEWER_REQUIRED_CHECKS_FILE "$DEFAULT_REQUIRED_CHECKS_FILE" "$EXAMPLE_REQUIRED_CHECKS_FILE" "$ALLOW_EXAMPLE_CONFIG")"
+PROMPT_PAYLOAD_FILE="$(resolve_reviewer_config_file "prompt payload" REVIEWER_PROMPT_PAYLOAD_FILE "$DEFAULT_PROMPT_PAYLOAD_FILE" "$EXAMPLE_PROMPT_PAYLOAD_FILE" "$ALLOW_EXAMPLE_CONFIG")"
 PERSONALITY_FILE="${REVIEWER_PERSONALITY_FILE:-}"
 case "$PERSONALITY_FILE" in
   ''|/*) ;;
@@ -64,20 +78,22 @@ esac
 ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
 REVIEWER_RUNNER_NAME="${REVIEWER_RUNNER_NAME:-reviewer daemon}"
 
-LOG_FILE="$STATE_DIR/log.txt"
-LOCK_FILE="$STATE_DIR/lock"
-GEMINI_BACKOFF_FILE="$STATE_DIR/gemini_backoff_until"
-
-mkdir -p "$STATE_DIR"
-mkdir -p "$RUNTIME_STATE_DIR"
-chmod 700 "$RUNTIME_STATE_DIR" 2>/dev/null || true
-"$SCRIPT_DIR/rotate-log.sh" "$LOG_FILE" 2>/dev/null || true
-
-exec 9>"$LOCK_FILE"
-flock -n 9 || exit 0
+if [ "${REVIEWER_LOCK_HELD:-0}" = "1" ]; then
+  flock -n 9 || fatal "REVIEWER_LOCK_HELD=1 but reviewer lock fd 9 is not held"
+else
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || exit 0
+fi
 
 validate_reviewer_config
 load_effective_required_checks_json >/dev/null
+if [ -z "$DRY_RUN" ] && [ -z "$RENDER_PROMPT_ONLY" ]; then
+  if [ "${REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK:-0}" = "1" ]; then
+    log "Skipping live launch validation because REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1"
+  elif ! bash "$REPO_DIR/scripts/launch-check.sh" >>"$LOG_FILE" 2>&1; then
+    fatal "live launch validation failed. Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh, inspect the artifact, then run scripts/launch-check.sh."
+  fi
+fi
 
 write_dry_run_artifact() {
   local num="$1"
@@ -86,10 +102,13 @@ write_dry_run_artifact() {
   local prompt_file="$4"
   local review_body="$5"
   local output_file="$DRY_RUN_OUT"
+  local required_checks_sha256 prompt_payload_sha256
+  local artifact_tmp artifact_bytes marker marker_bytes body_bytes
 
   [ -n "$output_file" ] || return 0
 
   mkdir -p "$(dirname "$output_file")"
+  artifact_tmp=$(mktemp "$STATE_DIR/dry-artifact.XXXXXX")
   {
     printf 'GoobReview dry run\n'
     printf 'Repository: %s\n' "$REPO"
@@ -98,12 +117,66 @@ write_dry_run_artifact() {
     printf 'Parsed review event: %s\n' "$event"
     printf 'Generated at: %s\n' "$(date -Is)"
     printf '\n===== GEMINI PROMPT PAYLOAD START =====\n'
-    cat "$prompt_file"
+    append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "dry-run prompt artifact"
     printf '\n===== GEMINI PROMPT PAYLOAD END =====\n'
     printf '\n===== GEMINI RESPONSE START =====\n'
-    printf '%s\n' "$review_body"
+    printf '%s\n' "$review_body" | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "dry-run response artifact"
     printf '===== GEMINI RESPONSE END =====\n'
-  } >"$output_file"
+  } >"$artifact_tmp"
+  artifact_bytes=$(wc -c <"$artifact_tmp" | tr -d ' ')
+  if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
+    marker=$(printf '\n\n[goobreview: dry-run artifact truncated after %s bytes]\n' "$MAX_ARTIFACT_BYTES")
+    marker_bytes=$(printf '%s' "$marker" | wc -c | tr -d ' ')
+    if [ "$marker_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
+      printf '%s' "$marker" | head -c "$MAX_ARTIFACT_BYTES" >"$artifact_tmp.truncated"
+      install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || fatal "dry-run artifact failed secret-safety scan"
+      rm -f "$artifact_tmp.truncated"
+      rm -f "$artifact_tmp"
+      artifact_tmp=""
+    else
+      body_bytes=$((MAX_ARTIFACT_BYTES - marker_bytes))
+      head -c "$body_bytes" "$artifact_tmp" >"$artifact_tmp.truncated"
+      printf '%s' "$marker" >>"$artifact_tmp.truncated"
+      install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || fatal "dry-run artifact failed secret-safety scan"
+      rm -f "$artifact_tmp.truncated"
+    fi
+  else
+    install_secret_scanned_artifact "$artifact_tmp" "$output_file" || fatal "dry-run artifact failed secret-safety scan"
+    rm -f "$artifact_tmp"
+    artifact_tmp=""
+  fi
+  [ -z "$artifact_tmp" ] || rm -f "$artifact_tmp"
+  required_checks_sha256=$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')
+  prompt_payload_sha256=$(sha256sum "$PROMPT_PAYLOAD_FILE" | awk '{print $1}')
+  jq -n \
+    --arg repo "$REPO" \
+    --arg pr "$num" \
+    --arg head_sha "$head_sha" \
+    --arg event "$event" \
+    --arg generated_at "$(date -Is)" \
+    --arg dry_run_out "$output_file" \
+    --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
+    --arg required_checks_sha256 "$required_checks_sha256" \
+    --arg prompt_payload_file "$PROMPT_PAYLOAD_FILE" \
+    --arg prompt_payload_sha256 "$prompt_payload_sha256" \
+    --arg dry_run_bypass_ci "${DRY_RUN_BYPASS_CI:-}" \
+    --argjson required_checks "$EFFECTIVE_REQUIRED_CHECKS_JSON" \
+    '{
+      repo: $repo,
+      pr: ($pr | tonumber),
+      head_sha: $head_sha,
+      event: $event,
+      generated_at: $generated_at,
+      dry_run_out: $dry_run_out,
+      required_checks_file: $required_checks_file,
+      required_checks_sha256: $required_checks_sha256,
+      prompt_payload_file: $prompt_payload_file,
+      prompt_payload_sha256: $prompt_payload_sha256,
+      dry_run_bypass_ci: $dry_run_bypass_ci,
+      required_checks: $required_checks
+    }' >"${output_file}.launch.json.tmp"
+  secure_install_file "${output_file}.launch.json.tmp" "${output_file}.launch.json" || fatal "failed to write dry-run launch metadata with mode 0600"
+  rm -f "${output_file}.launch.json.tmp"
   log "Dry run artifact written to $output_file"
 }
 
@@ -137,6 +210,7 @@ else
 fi
 
 review_actions=0
+review_attempts=0
 
 while IFS=$'\t' read -r num author head_sha draft; do
   [ -n "${num:-}" ] || continue
@@ -169,6 +243,12 @@ while IFS=$'\t' read -r num author head_sha draft; do
     fi
   fi
 
+  if [ "$review_attempts" -ge "$MAX_ATTEMPTS" ]; then
+    log "Reached REVIEWER_MAX_ATTEMPTS=$MAX_ATTEMPTS after $review_attempts attempted review(s), stopping this tick"
+    break
+  fi
+  review_attempts=$((review_attempts + 1))
+
   if ! ci_state=$(REQUIRED_CHECKS_JSON="$EFFECTIVE_REQUIRED_CHECKS_JSON" bash "$SCRIPT_DIR/check-ci.sh" "$REPO" "$head_sha" "$REQUIRED_CHECKS_FILE" 2>>"$LOG_FILE"); then
     log "PR #$num@$head_sha: failed to read CI check-runs, will retry next tick"
     continue
@@ -182,7 +262,11 @@ while IFS=$'\t' read -r num author head_sha draft; do
         log "PR #$num@$head_sha: dry run bypassing CI state=$ci_state"
         ci_state="dry-run-bypassed-$ci_state"
       else
-        log "PR #$num@$head_sha: CI not yet terminal (state=$ci_state), will retry next tick"
+        if [ "$ci_state" = "incomplete" ]; then
+          log "PR #$num@$head_sha: required checks are missing from complete GitHub check-run data (state=incomplete), will retry next tick"
+        else
+          log "PR #$num@$head_sha: CI not yet terminal (state=$ci_state), will retry next tick"
+        fi
         continue
       fi
       ;;
@@ -256,8 +340,7 @@ EOF
 
   if [ -n "$RENDER_PROMPT_ONLY" ]; then
     if [ -n "$PROMPT_OUT" ] && [ "$PROMPT_OUT" != "-" ]; then
-      mkdir -p "$(dirname "$PROMPT_OUT")"
-      cp "$prompt_tmp" "$PROMPT_OUT"
+      secure_install_file "$prompt_tmp" "$PROMPT_OUT" || fatal "failed to write prompt output with mode 0600: $PROMPT_OUT"
       log "Rendered prompt for PR #$num@$head_sha to $PROMPT_OUT"
     else
       cat "$prompt_tmp"
