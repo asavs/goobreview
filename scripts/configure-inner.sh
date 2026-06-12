@@ -61,6 +61,7 @@ apply_prompt_payload_profile() {
         .profile = "minimal"
         | .segments.personality.enabled = true
         | .segments.pr_metadata.enabled = false
+        | .segments.commit_subjects.enabled = false
         | .segments.ci_status.enabled = false
         | .segments.previous_bot_review.enabled = false
         | .segments.changed_paths.enabled = false
@@ -76,7 +77,8 @@ apply_prompt_payload_profile() {
         .profile = "lean"
         | .segments.personality.enabled = true
         | .segments.pr_metadata.enabled = true
-        | .segments.pr_metadata.include_description = false
+        | .segments.pr_metadata.include_description = true
+        | .segments.commit_subjects.enabled = true
         | .segments.ci_status.enabled = true
         | .segments.ci_status.mode = "one_line"
         | .segments.previous_bot_review.enabled = true
@@ -94,6 +96,7 @@ apply_prompt_payload_profile() {
         | .segments.personality.enabled = true
         | .segments.pr_metadata.enabled = true
         | .segments.pr_metadata.include_description = true
+        | .segments.commit_subjects.enabled = true
         | .segments.ci_status.enabled = true
         | .segments.ci_status.mode = "one_line"
         | .segments.previous_bot_review.enabled = true

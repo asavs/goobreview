@@ -8,15 +8,21 @@
     },
     "pr_metadata": {
       "enabled": true,
-      "description": "GitHub PR metadata. Each field is independently configurable. The description is author-provided and untrusted, so it is off by default.",
+      "description": "GitHub PR metadata. Each field is independently configurable. The description is included by default as the author's claims to verify against the diff (claim/code mismatches are review findings); set include_description to false for a blinded review.",
       "include_title": true,
       "include_author": true,
       "include_url": true,
       "include_base_branch": true,
       "include_head_branch": true,
       "include_head_sha": true,
-      "include_description": false,
+      "include_description": true,
       "example": "Title: Fix SpacetimeDB WebSocket protocol on HTTPS pages\nAuthor: asavschaeffer\nURL: https://github.com/owner/repo/pull/97\nBase: main\nHead: fix/wss\nHead SHA: abc123"
+    },
+    "commit_subjects": {
+      "enabled": true,
+      "description": "The author's commit subject lines from the GitHub commits API, framed as claims to verify against the diff. The snapshot tarball has no .git, so commit narrative only reaches Gemini through this segment. Disable for a blinded review.",
+      "max_commits": 50,
+      "example": "- Fix WebSocket protocol detection on HTTPS pages\n- Add regression test for wss fallback"
     },
     "ci_status": {
       "enabled": true,
