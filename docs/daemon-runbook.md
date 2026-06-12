@@ -90,7 +90,18 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 also rotates `log.txt` and `sync.log`; tune this with
 `REVIEWER_LOG_MAX_BYTES` and `REVIEWER_LOG_ROTATE_KEEP`.
 
-`run-once.sh` loads `config/reviewer.env`, syncs the template checkout, then runs one reviewer tick.
+`run-once.sh` loads `config/reviewer.env`, takes the reviewer lock, syncs
+the template checkout, then runs one reviewer tick under that same lock. If
+another scheduler invocation already holds the lock, the tick logs `sync
+skipped by lock` and exits without touching the checkout. If sync fails, the
+tick logs `sync failed before reviewer tick; review did not run` and exits
+before any review can be posted. A successful handoff logs `sync succeeded;
+review tick started`.
+
+For emergency/manual operation only, set
+`REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE=1` to let `run-once.sh`
+continue from the current checkout after a sync failure. Leave it unset or
+`0` for scheduled live operation.
 
 `scripts/enable-cron.sh` runs `scripts/launch-check.sh` before installing the cron entry. Live `reviewer.sh` ticks run the same validation before posting. The launch check requires current live config files, matching dry-run launch metadata, nonempty required checks, and a dry run that used production CI gating (`REVIEWER_DRY_RUN_BYPASS_CI=0`). To bypass scheduler validation deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1`. To bypass live tick validation deliberately, set `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1`. Narrower launch-check bypasses are `REVIEWER_ALLOW_LAUNCH_WITH_BYPASSED_CI=1` and `REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS=1`.
 
@@ -267,6 +278,7 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 - `REVIEWER_REQUIRED_CHECKS_JSON` + `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE=1` — override the required-check gate from the environment for one-off runs; both must be set, so a stray env var cannot loosen a production gate.
 - `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK` — emergency bypass for the live tick launch gate. Prefer rerunning `REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh` and `scripts/launch-check.sh`.
 - `REVIEWER_SYNC_REMOTE`, `REVIEWER_SYNC_BRANCH`, `REVIEWER_SYNC_LOG` — which remote/branch `sync-worktree.sh` tracks (default `origin`/`main`) and where it logs.
+- `REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE` — emergency/manual override; set to `1` only when you intentionally want a scheduler tick to run from the current checkout after sync fails. Default `0` fails closed.
 - `REVIEWER_ONLY_PR` — restrict a run (including `merge-gate.sh`) to a single PR number.
 - `REVIEWER_RUNTIME_STATE`, `REVIEWER_LOG_MAX_BYTES`, `REVIEWER_LOG_ROTATE_KEEP` — runtime dir and log rotation controls; see `config/reviewer.env.example`.
 
@@ -279,5 +291,5 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 - The daemon does not inspect full CI logs; it gates on the configured required-check state.
 - The daemon does not create follow-up issues automatically.
 - The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.
-- The checkout must stay clean. `sync-worktree.sh` refuses to update a dirty checkout; `run-once.sh` logs that failure and continues one reviewer tick with the current checkout.
+- The checkout must stay clean. `sync-worktree.sh` refuses to update a dirty checkout; `run-once.sh` logs that failure and exits before reviewing unless `REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE=1` is set deliberately.
 - Each cron tick posts at most `REVIEWER_MAX_PRS` reviews, defaulting to one.

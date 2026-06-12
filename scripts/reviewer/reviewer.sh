@@ -72,8 +72,12 @@ esac
 ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
 REVIEWER_RUNNER_NAME="${REVIEWER_RUNNER_NAME:-reviewer daemon}"
 
-exec 9>"$LOCK_FILE"
-flock -n 9 || exit 0
+if [ "${REVIEWER_LOCK_HELD:-0}" = "1" ]; then
+  : "${REVIEWER_LOCK_HELD:=1}"
+else
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || exit 0
+fi
 
 validate_reviewer_config
 load_effective_required_checks_json >/dev/null
