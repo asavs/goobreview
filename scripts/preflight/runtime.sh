@@ -90,6 +90,16 @@ latest_dry_run() {
     2>/dev/null | sort | tail -n 1
 }
 
+latest_launch_metadata() {
+  local state_dir="$1"
+  if [ -z "$state_dir" ] || [ ! -d "$state_dir" ]; then
+    printf ''
+    return
+  fi
+  find "$state_dir" -maxdepth 1 -type f \( -name 'dry-run-*.txt.launch.json' -o -name 'dry-pr-*.txt.launch.json' \) \
+    2>/dev/null | sort | tail -n 1
+}
+
 cron_installed() {
   local current marker
   marker="# GoobReview reviewer (managed by scripts/enable-cron.sh)"
@@ -118,7 +128,9 @@ fi
 
 dry_run_count="$(count_dry_runs "$state_dir")"
 latest_dry_run_path="$(latest_dry_run "$state_dir")"
+latest_launch_metadata_path="$(latest_launch_metadata "$state_dir")"
 latest_dry_run_mtime="$(file_mtime "$latest_dry_run_path")"
+latest_launch_metadata_mtime="$(file_mtime "$latest_launch_metadata_path")"
 cron_state="$(cron_installed)"
 log_file="$state_dir/log.txt"
 cron_log="$state_dir/cron.log"
@@ -130,12 +142,12 @@ sync_log_mtime="$(file_mtime "$sync_log")"
 recommendation="Run scripts/dry-run.sh and inspect the generated artifact before launching."
 if [ "$state_present" -ne 1 ]; then
   recommendation="Run scripts/configure.sh and scripts/dry-run.sh to create runtime state."
-elif [ "$dry_run_count" -eq 0 ]; then
-  recommendation="Run scripts/dry-run.sh and inspect the generated artifact before enabling cron."
+elif [ -z "$latest_launch_metadata_path" ]; then
+  recommendation="Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh and inspect the generated artifact before enabling cron."
 elif [ "$cron_state" = "true" ]; then
   recommendation="Scheduler appears installed; inspect logs under $state_dir."
 else
-  recommendation="Dry-run artifacts exist; run scripts/enable-cron.sh when ready."
+  recommendation="Launch metadata exists; run scripts/launch-check.sh, then scripts/enable-cron.sh when ready."
 fi
 
 if [ "$report" -eq 1 ]; then
@@ -144,6 +156,8 @@ if [ "$report" -eq 1 ]; then
   print_field "dry_run_count" "$dry_run_count"
   print_field "latest_dry_run" "$latest_dry_run_path"
   print_field "latest_dry_run_mtime" "$latest_dry_run_mtime"
+  print_field "latest_launch_metadata" "$latest_launch_metadata_path"
+  print_field "latest_launch_metadata_mtime" "$latest_launch_metadata_mtime"
   print_field "cron_installed" "$cron_state"
   print_field "log_file" "$log_file"
   print_field "log_mtime" "$log_mtime"
@@ -162,6 +176,8 @@ state dir:              $(bool "$state_present") ($state_dir)
 dry-run artifacts:      $dry_run_count
 latest dry-run:         ${latest_dry_run_path:-none}
 latest dry-run mtime:   ${latest_dry_run_mtime:-none}
+launch metadata:        ${latest_launch_metadata_path:-none}
+launch metadata mtime:  ${latest_launch_metadata_mtime:-none}
 cron installed:         $cron_state
 reviewer log mtime:     ${log_mtime:-none} ($log_file)
 cron log mtime:         ${cron_log_mtime:-none} ($cron_log)

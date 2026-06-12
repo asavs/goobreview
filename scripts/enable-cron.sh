@@ -11,6 +11,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${REVIEWER_ENV_FILE:-$REPO_ROOT/config/reviewer.env}"
 RUN_ONCE="$SCRIPT_DIR/reviewer/run-once.sh"
 ROTATE_LOG="$SCRIPT_DIR/reviewer/rotate-log.sh"
+LAUNCH_CHECK="$SCRIPT_DIR/launch-check.sh"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/ops.sh"
 export OPS_LOG_PREFIX="enable-cron"
@@ -19,6 +20,7 @@ ops_require_command crontab "Install cron before enabling the scheduler."
 ops_require_file "$ENV_FILE" "Run scripts/configure.sh first."
 ops_require_executable "$RUN_ONCE" "This checkout looks incomplete."
 ops_require_executable "$ROTATE_LOG" "This checkout looks incomplete."
+ops_require_executable "$LAUNCH_CHECK" "This checkout looks incomplete."
 if [ ! -x /usr/bin/bash ]; then
   ops_die "Missing /usr/bin/bash; cron line would not be runnable."
 fi
@@ -38,10 +40,10 @@ MARKER="# GoobReview reviewer (managed by scripts/enable-cron.sh)"
 LINE="* * * * * cd $(ops_shell_quote "$REPO_ROOT") && REVIEWER_ENV_FILE=$(ops_shell_quote "$ENV_FILE") /usr/bin/bash $(ops_shell_quote "$ROTATE_LOG") $(ops_shell_quote "$CRON_LOG") && REVIEWER_ENV_FILE=$(ops_shell_quote "$ENV_FILE") /usr/bin/bash $(ops_shell_quote "$RUN_ONCE") >> $(ops_shell_quote "$CRON_LOG") 2>&1"
 PATH_LINE="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-dry_run_count=$(find "$STATE_DIR" -maxdepth 1 -type f \( -name 'dry-run-*.txt' -o -name 'dry-pr-*.txt' \) \
-  2>/dev/null | wc -l | tr -d ' ')
-if [ "$dry_run_count" -eq 0 ] && [ "${REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN:-0}" != "1" ]; then
-  ops_die "No dry-run artifacts found in $STATE_DIR. Run scripts/dry-run.sh first, inspect the result, then re-run enable-cron.sh. To override intentionally, set REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN=1."
+if [ "${REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK:-0}" = "1" ]; then
+  ops_warn "Skipping launch validation because REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1."
+else
+  "$LAUNCH_CHECK"
 fi
 
 current="$(crontab -l 2>/dev/null || true)"

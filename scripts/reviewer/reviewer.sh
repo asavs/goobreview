@@ -85,6 +85,7 @@ write_dry_run_artifact() {
   local prompt_file="$4"
   local review_body="$5"
   local output_file="$DRY_RUN_OUT"
+  local required_checks_sha256 prompt_payload_sha256
 
   [ -n "$output_file" ] || return 0
 
@@ -103,6 +104,35 @@ write_dry_run_artifact() {
     printf '%s\n' "$review_body"
     printf '===== GEMINI RESPONSE END =====\n'
   } >"$output_file"
+  required_checks_sha256=$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')
+  prompt_payload_sha256=$(sha256sum "$PROMPT_PAYLOAD_FILE" | awk '{print $1}')
+  jq -n \
+    --arg repo "$REPO" \
+    --arg pr "$num" \
+    --arg head_sha "$head_sha" \
+    --arg event "$event" \
+    --arg generated_at "$(date -Is)" \
+    --arg dry_run_out "$output_file" \
+    --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
+    --arg required_checks_sha256 "$required_checks_sha256" \
+    --arg prompt_payload_file "$PROMPT_PAYLOAD_FILE" \
+    --arg prompt_payload_sha256 "$prompt_payload_sha256" \
+    --arg dry_run_bypass_ci "${DRY_RUN_BYPASS_CI:-}" \
+    --argjson required_checks "$EFFECTIVE_REQUIRED_CHECKS_JSON" \
+    '{
+      repo: $repo,
+      pr: ($pr | tonumber),
+      head_sha: $head_sha,
+      event: $event,
+      generated_at: $generated_at,
+      dry_run_out: $dry_run_out,
+      required_checks_file: $required_checks_file,
+      required_checks_sha256: $required_checks_sha256,
+      prompt_payload_file: $prompt_payload_file,
+      prompt_payload_sha256: $prompt_payload_sha256,
+      dry_run_bypass_ci: $dry_run_bypass_ci,
+      required_checks: $required_checks
+    }' >"${output_file}.launch.json"
   log "Dry run artifact written to $output_file"
 }
 
