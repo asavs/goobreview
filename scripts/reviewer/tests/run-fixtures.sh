@@ -469,6 +469,52 @@ test_config_file_resolution() {
   unset REVIEWER_REQUIRED_CHECKS_FILE
 }
 
+test_prompt_payload_schema_validation() {
+  local payload_file="$TMP_ROOT/prompt-payload-schema.json"
+
+  EXAMPLE_PROMPT_PAYLOAD_FILE="config/prompt-payload.example.json"
+
+  printf '[]\n' > "$payload_file"
+  if ( validate_prompt_payload_config "$payload_file" ) >/dev/null 2>"$TMP_ROOT/prompt-payload.err"; then
+    fail "prompt payload rejects invalid root type"
+  fi
+  pass "prompt payload rejects invalid root type"
+  assert_contains "prompt payload root error points to example config" "config/prompt-payload.example.json" "$TMP_ROOT/prompt-payload.err"
+
+  cat > "$payload_file" <<'JSON'
+{"segments":{"selected_file_contents":{"enabled":true,"paths":["../secret.txt"]}}}
+JSON
+  if ( validate_prompt_payload_config "$payload_file" ) >/dev/null 2>"$TMP_ROOT/prompt-payload.err"; then
+    fail "prompt payload rejects parent traversal paths"
+  fi
+  pass "prompt payload rejects parent traversal paths"
+  assert_contains "prompt payload path error names selected file key" "segments.selected_file_contents.paths[]" "$TMP_ROOT/prompt-payload.err"
+
+  cat > "$payload_file" <<'JSON'
+{
+  "segments": {
+    "relevant_guidance": {
+      "enabled": true,
+      "rules": [
+        {"when_changed_path_matches": "client/**", "guidance_paths": ["client/GUIDELINES.md"]}
+      ]
+    }
+  }
+}
+JSON
+  if ( validate_prompt_payload_config "$payload_file" ) >/dev/null 2>"$TMP_ROOT/prompt-payload.err"; then
+    fail "prompt payload rejects malformed guidance rules"
+  fi
+  pass "prompt payload rejects malformed guidance rules"
+  assert_contains "prompt payload rule error names matcher key" "when_changed_path_matches" "$TMP_ROOT/prompt-payload.err"
+
+  cat > "$payload_file" <<'JSON'
+{"segments":{"personality":{"enabled":true},"response_format":{"enabled":true}}}
+JSON
+  validate_prompt_payload_config "$payload_file"
+  pass "prompt payload accepts valid minimal config"
+}
+
 test_log_rotation() {
   local log_file="$TMP_ROOT/rotate.log"
 
@@ -889,6 +935,7 @@ test_check_ci_paginates_required_check_runs
 test_check_runs_summary_reports_completion_and_truncation
 test_ci_states
 test_config_file_resolution
+test_prompt_payload_schema_validation
 test_private_key_permissions
 test_log_rotation
 test_run_once_sync_failure_fails_closed
