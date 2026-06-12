@@ -26,6 +26,14 @@ dry-pr-<number>.txt     Dry-run artifact with full Gemini prompt payload and res
 *.txt.launch.json       Launch metadata from a dry run: repo, config hashes, required checks, and CI-bypass state.
 ```
 
+`REVIEWER_STATE` is created and repaired to mode `0700` by the reviewer.
+If the daemon cannot make it owner-only, it fails before reviewing. Files
+that may contain prompt, model, token-cache, or diagnostic material are
+written with mode `0600` by default, including dry-run artifacts,
+dry-run launch metadata, prompt render outputs, invalid-output artifacts,
+and App token cache files. Keep the state directory owned by the Unix user
+that runs the reviewer.
+
 PR-head source snapshots, Gemini's isolated working directory, and
 `gemini-settings.json` are written under `REVIEWER_RUNTIME_STATE`, which
 defaults to `${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/goobreview-runtime-$USER`.
@@ -56,6 +64,15 @@ For a numbered PR, the dry run writes
 - the exact Gemini prompt payload;
 - Gemini's full response, or stderr if Gemini failed.
 
+Dry-run artifacts are stored under `REVIEWER_STATE` by default and are
+installed with mode `0600`. Before writing the artifact, the reviewer scans
+the assembled content for high-confidence secret material such as private-key
+blocks and credential-style assignments for GitHub, Gemini, Google Cloud,
+AWS, Azure, and App key path variables. If such material is detected, the
+reviewer logs a clear refusal and does not write the artifact. The scan is
+intended to reject obvious secret values while still allowing ordinary PR
+diffs or docs that mention environment variable names without printing values.
+
 Dry runs do not post reviews, do not mark PRs reviewed, can target draft
 PRs by number, and bypass the required-CI gate by default so prompt
 configuration can be tested before CI is terminal. Set
@@ -74,7 +91,8 @@ Omit the output path to print the prompt to stdout. The PR must pass the
 configured required-check gate, because failing or pending CI means the
 daemon would not send a prompt to Gemini for that head commit.
 Add `--explain` to print the enabled prompt payload segments; when no
-output path is provided, the prompt is written to `/tmp/goobreview-prompt-<PR>.md`.
+output path is provided, the prompt is written to a `mktemp` file under
+`REVIEWER_STATE` with mode `0600`.
 
 ## Cron
 
