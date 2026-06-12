@@ -18,6 +18,7 @@ GEMINI_MODEL="${REVIEWER_GEMINI_MODEL:-auto}"
 GEMINI_QUOTA_DEFAULT_BACKOFF="${REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF:-3600}"
 GEMINI_QUOTA_BACKOFF_PADDING="${REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING:-300}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
+MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
 INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
@@ -177,6 +178,7 @@ else
 fi
 
 review_actions=0
+review_attempts=0
 
 while IFS=$'\t' read -r num author head_sha draft; do
   [ -n "${num:-}" ] || continue
@@ -208,6 +210,12 @@ while IFS=$'\t' read -r num author head_sha draft; do
       continue
     fi
   fi
+
+  if [ "$review_attempts" -ge "$MAX_ATTEMPTS" ]; then
+    log "Reached REVIEWER_MAX_ATTEMPTS=$MAX_ATTEMPTS after $review_attempts attempted review(s), stopping this tick"
+    break
+  fi
+  review_attempts=$((review_attempts + 1))
 
   if ! ci_state=$(REQUIRED_CHECKS_JSON="$EFFECTIVE_REQUIRED_CHECKS_JSON" bash "$SCRIPT_DIR/check-ci.sh" "$REPO" "$head_sha" "$REQUIRED_CHECKS_FILE" 2>>"$LOG_FILE"); then
     log "PR #$num@$head_sha: failed to read CI check-runs, will retry next tick"

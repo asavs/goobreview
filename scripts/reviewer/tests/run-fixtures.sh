@@ -558,6 +558,98 @@ EOF
   assert_not_contains "run-once does not enter live reviewer after sync failure" "missing REVIEWER_REPO" "$state_dir/log.txt"
 }
 
+test_reviewer_attempt_budget_stops_repeated_expensive_failures() {
+  local state_dir runtime_dir test_reviewer env_file key_file bin_dir attempts_file status output
+
+  state_dir="$TMP_ROOT/attempt-budget-state"
+  runtime_dir="$TMP_ROOT/attempt-budget-runtime"
+  test_reviewer="$TMP_ROOT/attempt-budget-reviewer"
+  bin_dir="$TMP_ROOT/attempt-budget-bin"
+  attempts_file="$TMP_ROOT/attempt-budget-ci-attempts"
+  mkdir -p "$state_dir" "$runtime_dir" "$bin_dir"
+  cp -R "$REVIEWER_DIR" "$test_reviewer"
+
+  cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  token) printf 'test-token\n' ;;
+  slug)  printf 'goobreview\n' ;;
+  *)     exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/get-installation-token.sh"
+
+  cat > "$test_reviewer/check-ci.sh" <<EOF
+#!/usr/bin/env bash
+count=\$(cat "$attempts_file" 2>/dev/null || printf 0)
+count=\$((count + 1))
+printf '%s\n' "\$count" > "$attempts_file"
+exit 1
+EOF
+  chmod +x "$test_reviewer/check-ci.sh"
+
+  cat > "$bin_dir/curl" <<'EOF'
+#!/usr/bin/env bash
+url="${*: -1}"
+case "$url" in
+  *'/repos/example/repo/pulls?state=open&per_page=100&page=1')
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"}},{"number":2,"draft":false,"user":{"login":"bob"},"head":{"sha":"sha2"}},{"number":3,"draft":false,"user":{"login":"carol"},"head":{"sha":"sha3"}}]'
+    ;;
+  *)
+    printf 'unexpected curl URL: %s\n' "$url" >&2
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  cat > "$bin_dir/gemini" <<'EOF'
+#!/usr/bin/env bash
+printf 'APPROVE\n'
+EOF
+  chmod +x "$bin_dir/gemini"
+
+  key_file="$TMP_ROOT/attempt-budget-key.pem"
+  printf 'key\n' > "$key_file"
+  chmod 600 "$key_file"
+
+  printf '## Role\nReview.\n' > "$TMP_ROOT/attempt-budget-personality.md"
+  printf 'First line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/attempt-budget-engine.md"
+  cat > "$TMP_ROOT/attempt-budget-payload.json" <<'JSON'
+{"segments":{"personality":{"enabled":true},"response_format":{"enabled":true}}}
+JSON
+  printf '["ci"]\n' > "$TMP_ROOT/attempt-budget-required.json"
+
+  env_file="$TMP_ROOT/attempt-budget.env"
+  cat > "$env_file" <<EOF
+REVIEWER_REPO=example/repo
+REVIEWER_DRY_RUN=1
+REVIEWER_STATE=$state_dir
+REVIEWER_RUNTIME_STATE=$runtime_dir
+REVIEWER_APP_ID=1
+REVIEWER_APP_INSTALLATION_ID=2
+REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/attempt-budget-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/attempt-budget-engine.md
+REVIEWER_PROMPT_PAYLOAD_FILE=$TMP_ROOT/attempt-budget-payload.json
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/attempt-budget-required.json
+REVIEWER_MAX_PRS=1
+REVIEWER_MAX_ATTEMPTS=1
+EOF
+
+  status=0
+  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "attempt budget fixture reviewer exits successfully"
+  fi
+  pass "attempt budget fixture reviewer exits successfully"
+  assert_eq "attempt budget stops after first expensive failure" "1" "$(cat "$attempts_file")"
+  assert_contains "attempt budget stop is logged" "Reached REVIEWER_MAX_ATTEMPTS=1 after 1 attempted review(s), stopping this tick" "$state_dir/log.txt"
+  assert_not_contains "attempt budget does not walk second PR" "PR #2@sha2: failed to read CI check-runs" "$state_dir/log.txt"
+}
+
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
@@ -569,5 +661,6 @@ test_config_file_resolution
 test_private_key_permissions
 test_log_rotation
 test_run_once_sync_failure_fails_closed
+test_reviewer_attempt_budget_stops_repeated_expensive_failures
 
 printf 'passed %s fixture assertions\n' "$pass_count"
