@@ -253,7 +253,6 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
     log "PR #$num@$head_sha: failed to read existing reviews, will retry next tick"
     continue
   fi
-  PREVIOUS_BOT_REVIEWS_JSON="$bot_reviews_json"
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
     existing=$(printf '%s\n' "$bot_reviews_json" |
@@ -368,7 +367,7 @@ EOF
     continue
   fi
 
-  if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json"; then
+  if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json"; then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to build Gemini prompt"
     continue
