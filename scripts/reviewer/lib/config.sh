@@ -59,22 +59,22 @@ validate_prompt_payload_config() {
     def fail($msg): error($msg + " (see " + $example + ")");
     def obj($path):
       getpath($path) as $v
-      | if ($v | type) == "object" then empty
+      | if ($v | type) == "object" then .
         else fail(($path | map(tostring) | join(".")) + " must be an object")
         end;
     def optional_bool($path):
       getpath($path) as $v
-      | if $v == null or ($v | type) == "boolean" then empty
+      | if $v == null or ($v | type) == "boolean" then .
         else fail(($path | map(tostring) | join(".")) + " must be a boolean")
         end;
     def optional_string_enum($path; $allowed):
       getpath($path) as $v
-      | if $v == null or (($v | type) == "string" and ($allowed | index($v))) then empty
+      | if $v == null or (($v | type) == "string" and ($allowed | index($v))) then .
         else fail(($path | map(tostring) | join(".")) + " must be one of: " + ($allowed | join(", ")))
         end;
     def optional_uint($path; $min; $max):
       getpath($path) as $v
-      | if $v == null or (($v | type) == "number" and ($v % 1 == 0) and $v >= $min and $v <= $max) then empty
+      | if $v == null or (($v | type) == "number" and ($v % 1 == 0) and $v >= $min and $v <= $max) then .
         else fail(($path | map(tostring) | join(".")) + " must be an integer from " + ($min | tostring) + " to " + ($max | tostring))
         end;
     def safe_path($label):
@@ -85,30 +85,30 @@ validate_prompt_payload_config() {
       elif test("^[A-Za-z]:") then fail($label + " must be relative")
       elif (split("/") | any(. == "..")) then fail($label + " must not contain parent traversal")
       elif contains("\u0000") then fail($label + " must not contain NUL")
-      else empty
+      else .
       end;
     def string_array($path):
       getpath($path) as $v
-      | if ($v | type) == "array" and ($v | length) > 0 and all($v[]; type == "string" and . != "") then empty
+      | if ($v | type) == "array" and ($v | length) > 0 and all($v[]; type == "string" and . != "") then .
         else fail(($path | map(tostring) | join(".")) + " must be an array of nonempty strings")
         end;
 
     . as $root
-    | if type != "object" then fail("prompt payload root must be an object") else empty end,
+    | if type != "object" then fail("prompt payload root must be an object") else . end,
       obj(["segments"]),
       (
         (.segments | keys_unsorted[]) as $name
         | if ["personality","pr_metadata","ci_status","changed_paths","relevant_guidance","source_snapshot_hint","all_check_summary","full_file_tree","selected_file_contents","diff","response_format"] | index($name)
-          then empty
+          then .
           else fail("segments." + $name + " is not a known prompt segment")
           end
       ),
       (
         .segments | to_entries[]
-        | if (.value | type) == "object" then empty
+        | if (.value | type) == "object" then .
           else fail("segments." + .key + " must be an object")
           end
-        | if (.value.enabled | type) == "boolean" then empty
+        | if (.value.enabled | type) == "boolean" then .
           else fail("segments." + .key + ".enabled must be a boolean")
           end
       ),
@@ -119,15 +119,15 @@ validate_prompt_payload_config() {
       optional_uint(["segments","selected_file_contents","max_lines_per_file"]; 1; 5000),
       (
         (.segments.selected_file_contents.paths // []) as $paths
-        | if ($paths | type) == "array" then empty else fail("segments.selected_file_contents.paths must be an array") end
+        | if ($paths | type) == "array" then . else fail("segments.selected_file_contents.paths must be an array") end
         | $paths[]? | safe_path("segments.selected_file_contents.paths[]")
       ),
       (
         (.segments.relevant_guidance.rules // []) as $rules
-        | if ($rules | type) == "array" then empty else fail("segments.relevant_guidance.rules must be an array") end
+        | if ($rules | type) == "array" then . else fail("segments.relevant_guidance.rules must be an array") end
         | $rules[]? as $rule
-        | if ($rule | type) == "object" then empty else fail("segments.relevant_guidance.rules[] must be an object") end
-        | ($rule | keys_unsorted[]? as $key | if ["when_changed_path_matches","guidance_paths"] | index($key) then empty else fail("segments.relevant_guidance.rules[] has unknown key " + $key) end)
+        | if ($rule | type) == "object" then . else fail("segments.relevant_guidance.rules[] must be an object") end
+        | ($rule | keys_unsorted[]? as $key | if ["when_changed_path_matches","guidance_paths"] | index($key) then . else fail("segments.relevant_guidance.rules[] has unknown key " + $key) end)
         | ($rule | string_array(["when_changed_path_matches"]))
         | ($rule | string_array(["guidance_paths"]))
         | ($rule.guidance_paths[]? | safe_path("segments.relevant_guidance.rules[].guidance_paths[]"))
