@@ -689,6 +689,8 @@ JSON
   assert_contains "prompt includes GitHub file references" "Use file references such as \`path/to/file.ext:123\`." "$prompt_file"
   assert_not_contains "prompt omits guidance file contents" "Client guidance." "$prompt_file"
   assert_not_contains "prompt omits all-check summary" "All Check Summary" "$prompt_file"
+
+  assert_contains "engine prompt instructs accounting for omissions" "Account for anything you did not see before approving" "$REVIEWER_DIR/review-prompt.md"
 }
 
 test_prompt_failure_propagates() {
