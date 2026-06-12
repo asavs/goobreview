@@ -17,6 +17,14 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const REFRESH_BEFORE_EXPIRY_SECONDS = 300;
+const GITHUB_FETCH_TIMEOUT_SECONDS = Number(process.env.REVIEWER_GITHUB_FETCH_TIMEOUT || 60);
+
+function githubFetchTimeoutMs() {
+  if (!Number.isFinite(GITHUB_FETCH_TIMEOUT_SECONDS) || GITHUB_FETCH_TIMEOUT_SECONDS <= 0) {
+    die(`REVIEWER_GITHUB_FETCH_TIMEOUT must be a positive number of seconds; got ${process.env.REVIEWER_GITHUB_FETCH_TIMEOUT}`);
+  }
+  return GITHUB_FETCH_TIMEOUT_SECONDS * 1000;
+}
 
 function die(msg) {
   process.stderr.write(`[app-token] ${msg}\n`);
@@ -186,8 +194,24 @@ function writeCache(token, expiresAtIso, slug) {
   writeFileSync(cachePath, JSON.stringify(data), { mode: 0o600 });
 }
 
+async function githubFetch(operation, url, options) {
+  const controller = new AbortController();
+  const timeoutMs = githubFetchTimeoutMs();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      die(`${operation} timed out after ${GITHUB_FETCH_TIMEOUT_SECONDS}s: ${url}`);
+    }
+    die(`${operation} failed before response: ${err && err.message ? err.message : String(err)}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function ghJson(url, jwt) {
-  const resp = await fetch(url, {
+  const resp = await githubFetch("GET GitHub JSON", url, {
     headers: {
       Authorization: `Bearer ${jwt}`,
       Accept: "application/vnd.github+json",
@@ -203,7 +227,7 @@ async function ghJson(url, jwt) {
 }
 
 async function ghJsonWithToken(url, token) {
-  const resp = await fetch(url, {
+  const resp = await githubFetch("GET GitHub installation JSON", url, {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github+json",
@@ -220,7 +244,7 @@ async function ghJsonWithToken(url, token) {
 
 async function mintInstallationToken(jwt, id) {
   const tokenUrl = `https://api.github.com/app/installations/${id}/access_tokens`;
-  const tokenResp = await fetch(tokenUrl, {
+  const tokenResp = await githubFetch("POST GitHub installation token", tokenUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${jwt}`,
