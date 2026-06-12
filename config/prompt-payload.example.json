@@ -56,8 +56,8 @@
     },
     "source_snapshot_hint": {
       "enabled": true,
-      "description": "Short reminder that Gemini has read-only tool access to the untrusted PR-head source snapshot.",
-      "example": "You may inspect the read-only PR-head source tree when adjacent files are needed to verify a concrete issue raised by the diff."
+      "description": "Tells Gemini where the untrusted PR-head source snapshot is mounted and that repo-relative paths in the prompt resolve under it. Without this the snapshot is hard to discover, because Gemini's working directory is intentionally empty.",
+      "example": "The PR-head source tree is mounted read-only at: /run/user/1000/goobreview-runtime/worktrees/owner__repo/current"
     },
     "all_check_summary": {
       "enabled": false,
