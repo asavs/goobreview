@@ -729,6 +729,65 @@ JSON
   pass "prompt build failure is propagated"
 }
 
+test_prompt_diff_too_large_is_logged() {
+  local prompt_file worktree_dir
+
+  prompt_file="$TMP_ROOT/prompt-diff-too-large.md"
+  worktree_dir="$TMP_ROOT/worktree-diff-too-large"
+  : > "$LOG_FILE"
+
+  PERSONALITY_FILE="$TMP_ROOT/personality-diff-too-large.md"
+  PROMPT_FILE="$TMP_ROOT/engine-diff-too-large.md"
+  PROMPT_PAYLOAD_FILE="$TMP_ROOT/prompt-payload-diff-too-large.json"
+  printf '## Role\nBe sharp.\n' > "$PERSONALITY_FILE"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+  cat > "$PROMPT_PAYLOAD_FILE" <<'JSON'
+{
+  "segments": {
+    "personality": {"enabled": false},
+    "pr_metadata": {"enabled": false},
+    "ci_status": {"enabled": false},
+    "changed_paths": {"enabled": true},
+    "relevant_guidance": {"enabled": false},
+    "source_snapshot_hint": {"enabled": false},
+    "all_check_summary": {"enabled": false},
+    "full_file_tree": {"enabled": false},
+    "selected_file_contents": {"enabled": false},
+    "diff": {"enabled": true},
+    "response_format": {"enabled": false}
+  }
+}
+JSON
+  mkdir -p "$worktree_dir"
+  REPO="example/repo"
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
+  github_api_get() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999" ] && [ "${2:-}" = "application/vnd.github.diff" ]; then
+      printf 'GitHub API GET repos/example/repo/pulls/999 failed (attempt 1/1, curl=0, http=406): <empty>; response: Diff is too large\n' >&2
+      return 1
+    fi
+
+    return 1
+  }
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by build_review_prompt.
+  github_api_paginate_array() {
+    if [ "${1:-}" = "repos/example/repo/pulls/999/files" ]; then
+      printf '%s\n' '{"filename":"client/src/auth.py"}'
+      return 0
+    fi
+
+    return 1
+  }
+
+  if build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir"; then
+    fail "prompt build fails when GitHub refuses large diff"
+  fi
+  pass "prompt build fails when GitHub refuses large diff"
+  assert_contains "large diff refusal is logged" "GitHub diff endpoint refused PR #999; diff may exceed GitHub API limits" "$LOG_FILE"
+}
+
 test_prompt_context_budgets_truncate() {
   local prompt_file worktree_dir
 
@@ -1175,6 +1234,7 @@ EOF
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
+test_prompt_diff_too_large_is_logged
 test_prompt_context_budgets_truncate
 test_symlink_snapshot_safety
 test_invalid_verdict_state
