@@ -26,6 +26,16 @@ validate_uint_env() {
   esac
 }
 
+validate_positive_uint_env() {
+  local name="$1"
+  local value="$2"
+
+  validate_uint_env "$name" "$value"
+  if [ "$value" -eq 0 ]; then
+    fatal "invalid $name: $value"
+  fi
+}
+
 validate_bool_env() {
   local name="$1"
   local value="$2"
@@ -208,6 +218,12 @@ validate_reviewer_config() {
   validate_uint_env REVIEWER_MAX_ATTEMPTS "$MAX_ATTEMPTS"
   validate_uint_env REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF "$GEMINI_QUOTA_DEFAULT_BACKOFF"
   validate_uint_env REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING "$GEMINI_QUOTA_BACKOFF_PADDING"
+  validate_positive_uint_env REVIEWER_MAX_PROMPT_BYTES "$MAX_PROMPT_BYTES"
+  validate_positive_uint_env REVIEWER_MAX_ARTIFACT_BYTES "$MAX_ARTIFACT_BYTES"
+  validate_positive_uint_env REVIEWER_DIFF_MAX_BYTES "$DIFF_MAX_BYTES"
+  validate_positive_uint_env REVIEWER_FILE_TREE_MAX_BYTES "$FILE_TREE_MAX_BYTES"
+  validate_positive_uint_env REVIEWER_SELECTED_FILE_MAX_BYTES "$SELECTED_FILE_MAX_BYTES"
+  validate_positive_uint_env REVIEWER_GUIDANCE_FILE_MAX_BYTES "$GUIDANCE_FILE_MAX_BYTES"
   validate_uint_env REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS "$INVALID_VERDICT_MAX_ATTEMPTS"
   validate_bool_env REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE "$ALLOW_REQUIRED_CHECKS_OVERRIDE"
   validate_bool_env REVIEWER_APPLY_LABELS "$APPLY_LABELS"

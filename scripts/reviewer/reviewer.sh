@@ -17,6 +17,12 @@ GEMINI_TIMEOUT="${REVIEWER_GEMINI_TIMEOUT:-600}"
 GEMINI_MODEL="${REVIEWER_GEMINI_MODEL:-auto}"
 GEMINI_QUOTA_DEFAULT_BACKOFF="${REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF:-3600}"
 GEMINI_QUOTA_BACKOFF_PADDING="${REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING:-300}"
+MAX_PROMPT_BYTES="${REVIEWER_MAX_PROMPT_BYTES:-240000}"
+MAX_ARTIFACT_BYTES="${REVIEWER_MAX_ARTIFACT_BYTES:-1000000}"
+DIFF_MAX_BYTES="${REVIEWER_DIFF_MAX_BYTES:-120000}"
+FILE_TREE_MAX_BYTES="${REVIEWER_FILE_TREE_MAX_BYTES:-40000}"
+SELECTED_FILE_MAX_BYTES="${REVIEWER_SELECTED_FILE_MAX_BYTES:-20000}"
+GUIDANCE_FILE_MAX_BYTES="${REVIEWER_GUIDANCE_FILE_MAX_BYTES:-20000}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
@@ -98,10 +104,12 @@ write_dry_run_artifact() {
   local review_body="$5"
   local output_file="$DRY_RUN_OUT"
   local required_checks_sha256 prompt_payload_sha256
+  local artifact_tmp artifact_bytes marker marker_bytes body_bytes
 
   [ -n "$output_file" ] || return 0
 
   mkdir -p "$(dirname "$output_file")"
+  artifact_tmp=$(mktemp "$STATE_DIR/dry-artifact.XXXXXX")
   {
     printf 'GoobReview dry run\n'
     printf 'Repository: %s\n' "$REPO"
@@ -110,12 +118,30 @@ write_dry_run_artifact() {
     printf 'Parsed review event: %s\n' "$event"
     printf 'Generated at: %s\n' "$(date -Is)"
     printf '\n===== GEMINI PROMPT PAYLOAD START =====\n'
-    cat "$prompt_file"
+    append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "dry-run prompt artifact"
     printf '\n===== GEMINI PROMPT PAYLOAD END =====\n'
     printf '\n===== GEMINI RESPONSE START =====\n'
-    printf '%s\n' "$review_body"
+    printf '%s\n' "$review_body" | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "dry-run response artifact"
     printf '===== GEMINI RESPONSE END =====\n'
-  } >"$output_file"
+  } >"$artifact_tmp"
+  artifact_bytes=$(wc -c <"$artifact_tmp" | tr -d ' ')
+  if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
+    marker=$(printf '\n\n[goobreview: dry-run artifact truncated after %s bytes]\n' "$MAX_ARTIFACT_BYTES")
+    marker_bytes=$(printf '%s' "$marker" | wc -c | tr -d ' ')
+    if [ "$marker_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
+      printf '%s' "$marker" | head -c "$MAX_ARTIFACT_BYTES" >"$output_file"
+      rm -f "$artifact_tmp"
+      artifact_tmp=""
+    else
+    body_bytes=$((MAX_ARTIFACT_BYTES - marker_bytes))
+    head -c "$body_bytes" "$artifact_tmp" >"$output_file"
+    printf '%s' "$marker" >>"$output_file"
+    fi
+  else
+    mv "$artifact_tmp" "$output_file"
+    artifact_tmp=""
+  fi
+  [ -z "$artifact_tmp" ] || rm -f "$artifact_tmp"
   required_checks_sha256=$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')
   prompt_payload_sha256=$(sha256sum "$PROMPT_PAYLOAD_FILE" | awk '{print $1}')
   jq -n \
