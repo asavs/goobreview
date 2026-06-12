@@ -78,67 +78,6 @@ ensure_owner_private_dir() {
   fi
 }
 
-validate_prompt_payload_config() {
-  local file="$1"
-  local example="${EXAMPLE_PROMPT_PAYLOAD_FILE:-config/prompt-payload.example.json}"
-  local err_file
-
-  err_file=$(mktemp)
-  if ! jq -e '
-    def fail($msg): error($msg + " (see " + $example + ")");
-    def obj($path):
-      getpath($path) as $v
-      | if ($v | type) == "object" then .
-        else fail(($path | map(tostring) | join(".")) + " must be an object")
-        end;
-    def optional_bool($path):
-      getpath($path) as $v
-      | if $v == null or ($v | type) == "boolean" then .
-        else fail(($path | map(tostring) | join(".")) + " must be a boolean")
-        end;
-    def optional_string_enum($path; $allowed):
-      getpath($path) as $v
-      | if $v == null or (($v | type) == "string" and ($allowed | index($v))) then .
-        else fail(($path | map(tostring) | join(".")) + " must be one of: " + ($allowed | join(", ")))
-        end;
-    def optional_uint($path; $min; $max):
-      getpath($path) as $v
-      | if $v == null or (($v | type) == "number" and ($v % 1 == 0) and $v >= $min and $v <= $max) then .
-        else fail(($path | map(tostring) | join(".")) + " must be an integer from " + ($min | tostring) + " to " + ($max | tostring))
-        end;
-
-    . as $root
-    | if type != "object" then fail("prompt payload root must be an object") else . end,
-      obj(["segments"]),
-      (
-        (.segments | keys_unsorted[]) as $name
-        | if ["personality","pr_metadata","commit_subjects","ci_status","previous_bot_review","source_snapshot_hint","diff","response_format"] | index($name)
-          then .
-          else fail("segments." + $name + " is not a known prompt segment")
-          end
-      ),
-      (
-        .segments | to_entries[]
-        | if (.value | type) == "object" then .
-          else fail("segments." + .key + " must be an object")
-          end
-        | if (.value.enabled | type) == "boolean" then .
-          else fail("segments." + .key + ".enabled must be a boolean")
-          end
-      ),
-      (["include_title","include_author","include_url","include_base_branch","include_head_branch","include_head_sha","include_description"][] as $key | optional_bool(["segments","pr_metadata",$key])),
-      optional_uint(["segments","pr_metadata","max_body_bytes"]; 1; 50000),
-      optional_uint(["segments","commit_subjects","max_commits"]; 1; 500),
-      optional_uint(["segments","previous_bot_review","max_body_bytes"]; 1; 50000),
-      true
-  ' --arg example "$example" "$file" >/dev/null 2>"$err_file"; then
-    local err
-    err=$(tr '\n' ' ' <"$err_file" | sed 's/^jq: error[^:]*: //; s/ at <top-level>.*$//')
-    rm -f "$err_file"
-    fatal "invalid prompt payload config in $file: ${err:-schema validation failed (see $example)}"
-  fi
-  rm -f "$err_file"
-}
 
 validate_private_key_file() {
   local path="$1"
@@ -207,11 +146,6 @@ validate_reviewer_config() {
   if [ ! -f "$PERSONALITY_FILE" ]; then
     fatal "REVIEWER_PERSONALITY_FILE points at '$PERSONALITY_FILE' which does not exist."
   fi
-  if [ -z "${PROMPT_PAYLOAD_FILE:-}" ] || [ ! -f "$PROMPT_PAYLOAD_FILE" ]; then
-    fatal "missing prompt payload config: ${PROMPT_PAYLOAD_FILE:-unset}"
-  fi
-  validate_prompt_payload_config "$PROMPT_PAYLOAD_FILE"
-
   validate_uint_env REVIEWER_MAX_PRS "$MAX_PRS"
   validate_uint_env REVIEWER_MAX_ATTEMPTS "$MAX_ATTEMPTS"
   validate_uint_env REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF "$GEMINI_QUOTA_DEFAULT_BACKOFF"
@@ -220,6 +154,12 @@ validate_reviewer_config() {
   validate_positive_uint_env REVIEWER_MAX_ARTIFACT_BYTES "$MAX_ARTIFACT_BYTES"
   validate_positive_uint_env REVIEWER_DIFF_MAX_BYTES "$DIFF_MAX_BYTES"
   validate_positive_uint_env REVIEWER_DIFF_FILE_MAX_BYTES "$DIFF_FILE_MAX_BYTES"
+  validate_positive_uint_env REVIEWER_DESCRIPTION_MAX_BYTES "$DESCRIPTION_MAX_BYTES"
+  validate_positive_uint_env REVIEWER_PREVIOUS_REVIEW_MAX_BYTES "$PREVIOUS_REVIEW_MAX_BYTES"
+  validate_positive_uint_env REVIEWER_COMMIT_SUBJECTS_MAX "$COMMIT_SUBJECTS_MAX"
+  validate_bool_env REVIEWER_INCLUDE_AUTHOR "$INCLUDE_AUTHOR"
+  validate_bool_env REVIEWER_INCLUDE_DESCRIPTION "$INCLUDE_DESCRIPTION"
+  validate_bool_env REVIEWER_INCLUDE_COMMIT_SUBJECTS "$INCLUDE_COMMIT_SUBJECTS"
   validate_uint_env REVIEWER_FAILURE_MAX_ATTEMPTS "$FAILURE_MAX_ATTEMPTS"
   validate_uint_env REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS "$INVALID_VERDICT_MAX_ATTEMPTS"
   validate_bool_env REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE "$ALLOW_REQUIRED_CHECKS_OVERRIDE"

@@ -1,35 +1,6 @@
 #!/usr/bin/env bash
 # Prompt assembly helpers for the reviewer daemon.
 
-prompt_segment_enabled() {
-  local segment="$1"
-  jq -e --arg segment "$segment" '.segments[$segment].enabled == true' "$PROMPT_PAYLOAD_FILE" >/dev/null
-}
-
-prompt_segment_string() {
-  local segment="$1"
-  local key="$2"
-  local default="$3"
-  jq -r --arg segment "$segment" --arg key "$key" --arg default "$default" \
-    '.segments[$segment][$key] // $default' "$PROMPT_PAYLOAD_FILE"
-}
-
-prompt_segment_number() {
-  local segment="$1"
-  local key="$2"
-  local default="$3"
-  jq -r --arg segment "$segment" --arg key "$key" --argjson default "$default" \
-    '.segments[$segment][$key] // $default' "$PROMPT_PAYLOAD_FILE"
-}
-
-prompt_segment_bool() {
-  local segment="$1"
-  local key="$2"
-  local default="$3"
-  jq -r --arg segment "$segment" --arg key "$key" --argjson default "$default" \
-    '.segments[$segment][$key] // $default' "$PROMPT_PAYLOAD_FILE"
-}
-
 prompt_section() {
   local title="$1"
   printf '\n---\n%s\n\n' "$title"
@@ -89,42 +60,34 @@ validate_prompt_size() {
   fi
 }
 
+# Title, branches, and head SHA always print: cheap deterministic identity.
+# The author username is blinded by default (identity is the classic source
+# of reviewer bias); the description is included by default as claims to
+# verify. Both are deployment policy via REVIEWER_INCLUDE_* in reviewer.env.
 append_pr_metadata() {
   local num="$1"
   local metadata_json="${2:-}"
-  local metadata max_body_bytes
+  local metadata
 
   if [ -n "$metadata_json" ]; then
     metadata="$metadata_json"
   else
     metadata=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE") || return 1
   fi
-  max_body_bytes=$(prompt_segment_number pr_metadata max_body_bytes 12000)
 
   prompt_section "PR Metadata (Untrusted PR Input)"
-  if [ "$(prompt_segment_bool pr_metadata include_title true)" = "true" ]; then
-    printf 'Title: %s\n' "$(printf '%s' "$metadata" | jq -r '.title // ""')"
-  fi
-  if [ "$(prompt_segment_bool pr_metadata include_author true)" = "true" ]; then
+  printf 'Title: %s\n' "$(printf '%s' "$metadata" | jq -r '.title // ""')"
+  if [ "${INCLUDE_AUTHOR:-0}" = "1" ]; then
     printf 'Author: %s\n' "$(printf '%s' "$metadata" | jq -r '.user.login // ""')"
   fi
-  if [ "$(prompt_segment_bool pr_metadata include_url true)" = "true" ]; then
-    printf 'URL: %s\n' "$(printf '%s' "$metadata" | jq -r '.html_url // ""')"
-  fi
-  if [ "$(prompt_segment_bool pr_metadata include_base_branch true)" = "true" ]; then
-    printf 'Base: %s\n' "$(printf '%s' "$metadata" | jq -r '.base.ref // ""')"
-  fi
-  if [ "$(prompt_segment_bool pr_metadata include_head_branch true)" = "true" ]; then
-    printf 'Head: %s\n' "$(printf '%s' "$metadata" | jq -r '.head.ref // ""')"
-  fi
-  if [ "$(prompt_segment_bool pr_metadata include_head_sha true)" = "true" ]; then
-    printf 'Head SHA: %s\n' "$(printf '%s' "$metadata" | jq -r '.head.sha // ""')"
-  fi
+  printf 'Base: %s\n' "$(printf '%s' "$metadata" | jq -r '.base.ref // ""')"
+  printf 'Head: %s\n' "$(printf '%s' "$metadata" | jq -r '.head.ref // ""')"
+  printf 'Head SHA: %s\n' "$(printf '%s' "$metadata" | jq -r '.head.sha // ""')"
 
-  if [ "$(prompt_segment_bool pr_metadata include_description true)" = "true" ]; then
+  if [ "${INCLUDE_DESCRIPTION:-1}" = "1" ]; then
     printf '\nAuthor-provided PR description. These are the author'\''s claims about the change, not evidence: verify them against the diff, and treat mismatches between claims and code as review findings.\n'
     printf '%s\n' "$metadata" | jq -r '.body // ""' |
-      append_bounded_stdin "$max_body_bytes" "PR description"
+      append_bounded_stdin "${DESCRIPTION_MAX_BYTES:-12000}" "PR description"
   fi
 }
 
@@ -133,9 +96,9 @@ append_pr_metadata() {
 # here. Framed as claims to verify, not as ground truth.
 append_commit_subjects() {
   local num="$1"
-  local max_commits subjects_file total
+  local max_commits="${COMMIT_SUBJECTS_MAX:-50}"
+  local subjects_file total
 
-  max_commits=$(prompt_segment_number commit_subjects max_commits 50)
   subjects_file=$(mktemp)
   if ! github_api_paginate_array "repos/$REPO/pulls/$num/commits" 2>>"$LOG_FILE" |
     jq -r '.commit.message | split("\n")[0]' >"$subjects_file"; then
@@ -179,11 +142,11 @@ append_ci_status() {
 append_previous_bot_review() {
   local head_sha="$1"
   local previous_reviews_json="${2:-}"
-  local max_body_bytes previous_review state event
+  local max_body_bytes="${PREVIOUS_REVIEW_MAX_BYTES:-12000}"
+  local previous_review state event
 
   [ -n "$previous_reviews_json" ] || return 0
 
-  max_body_bytes=$(prompt_segment_number previous_bot_review max_body_bytes 12000)
   if ! previous_review=$(printf '%s\n' "$previous_reviews_json" |
     jq -c --arg bot "${BOT_LOGIN:-}" --arg bot_author "${BOT_AUTHOR:-}" --arg head "$head_sha" '
       [
@@ -409,32 +372,35 @@ build_review_prompt() {
     ''|*[!0-9]*) expected_changed_files="" ;;
   esac
 
+  # The payload composition is fixed: forks that want a different shape edit
+  # this function. Deployment policy is limited to the REVIEWER_INCLUDE_*
+  # blinding flags and the byte/count budgets in reviewer.env.
   : >"$output_prompt_file"
-  if [ "$status" -eq 0 ] && prompt_segment_enabled personality; then
+  if [ "$status" -eq 0 ]; then
     cat "$PERSONALITY_FILE" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ]; then
     append_trust_preamble >>"$output_prompt_file" || status=1
   fi
-  if [ "$status" -eq 0 ] && prompt_segment_enabled pr_metadata; then
+  if [ "$status" -eq 0 ]; then
     append_pr_metadata "$num" "$pr_metadata_json" >>"$output_prompt_file" || status=1
   fi
-  if [ "$status" -eq 0 ] && prompt_segment_enabled commit_subjects; then
+  if [ "$status" -eq 0 ] && [ "${INCLUDE_COMMIT_SUBJECTS:-1}" = "1" ]; then
     append_commit_subjects "$num" >>"$output_prompt_file" || status=1
   fi
-  if [ "$status" -eq 0 ] && prompt_segment_enabled ci_status; then
+  if [ "$status" -eq 0 ]; then
     append_ci_status "$ci_state" "$head_sha" >>"$output_prompt_file" || status=1
   fi
-  if [ "$status" -eq 0 ] && prompt_segment_enabled previous_bot_review; then
+  if [ "$status" -eq 0 ]; then
     append_previous_bot_review "$head_sha" "$previous_bot_reviews_json" >>"$output_prompt_file" || status=1
   fi
-  if [ "$status" -eq 0 ] && prompt_segment_enabled source_snapshot_hint; then
+  if [ "$status" -eq 0 ]; then
     append_source_snapshot_hint "$worktree_dir" >>"$output_prompt_file" || status=1
   fi
-  if [ "$status" -eq 0 ] && prompt_segment_enabled diff; then
+  if [ "$status" -eq 0 ]; then
     append_diff "$changed_files_json" "$expected_changed_files" "$worktree_dir" >>"$output_prompt_file" || status=1
   fi
-  if [ "$status" -eq 0 ] && prompt_segment_enabled response_format; then
+  if [ "$status" -eq 0 ]; then
     append_response_format >>"$output_prompt_file" || status=1
   fi
 

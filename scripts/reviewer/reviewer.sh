@@ -21,6 +21,12 @@ MAX_PROMPT_BYTES="${REVIEWER_MAX_PROMPT_BYTES:-240000}"
 MAX_ARTIFACT_BYTES="${REVIEWER_MAX_ARTIFACT_BYTES:-1000000}"
 DIFF_MAX_BYTES="${REVIEWER_DIFF_MAX_BYTES:-120000}"
 DIFF_FILE_MAX_BYTES="${REVIEWER_DIFF_FILE_MAX_BYTES:-40000}"
+DESCRIPTION_MAX_BYTES="${REVIEWER_DESCRIPTION_MAX_BYTES:-12000}"
+PREVIOUS_REVIEW_MAX_BYTES="${REVIEWER_PREVIOUS_REVIEW_MAX_BYTES:-12000}"
+COMMIT_SUBJECTS_MAX="${REVIEWER_COMMIT_SUBJECTS_MAX:-50}"
+INCLUDE_AUTHOR="${REVIEWER_INCLUDE_AUTHOR:-0}"
+INCLUDE_DESCRIPTION="${REVIEWER_INCLUDE_DESCRIPTION:-1}"
+INCLUDE_COMMIT_SUBJECTS="${REVIEWER_INCLUDE_COMMIT_SUBJECTS:-1}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
@@ -61,14 +67,11 @@ ensure_owner_private_dir "transient runtime state" "$RUNTIME_STATE_DIR"
 
 DEFAULT_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.json"
 EXAMPLE_REQUIRED_CHECKS_FILE="$CONFIG_DIR/required-checks.example.json"
-DEFAULT_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.json"
-EXAMPLE_PROMPT_PAYLOAD_FILE="$CONFIG_DIR/prompt-payload.example.json"
 ALLOW_EXAMPLE_CONFIG=0
 if [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; then
   ALLOW_EXAMPLE_CONFIG=1
 fi
 REQUIRED_CHECKS_FILE="$(resolve_reviewer_config_file "required checks" REVIEWER_REQUIRED_CHECKS_FILE "$DEFAULT_REQUIRED_CHECKS_FILE" "$EXAMPLE_REQUIRED_CHECKS_FILE" "$ALLOW_EXAMPLE_CONFIG")"
-PROMPT_PAYLOAD_FILE="$(resolve_reviewer_config_file "prompt payload" REVIEWER_PROMPT_PAYLOAD_FILE "$DEFAULT_PROMPT_PAYLOAD_FILE" "$EXAMPLE_PROMPT_PAYLOAD_FILE" "$ALLOW_EXAMPLE_CONFIG")"
 PERSONALITY_FILE="${REVIEWER_PERSONALITY_FILE:-}"
 case "$PERSONALITY_FILE" in
   ''|/*) ;;
@@ -101,7 +104,7 @@ write_dry_run_artifact() {
   local prompt_file="$4"
   local review_body="$5"
   local output_file="$DRY_RUN_OUT"
-  local required_checks_sha256 prompt_payload_sha256
+  local required_checks_sha256
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
 
   [ -n "$output_file" ] || return 0
@@ -146,7 +149,6 @@ write_dry_run_artifact() {
   fi
   [ -z "$artifact_tmp" ] || rm -f "$artifact_tmp"
   required_checks_sha256=$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')
-  prompt_payload_sha256=$(sha256sum "$PROMPT_PAYLOAD_FILE" | awk '{print $1}')
   jq -n \
     --arg repo "$REPO" \
     --arg pr "$num" \
@@ -156,8 +158,6 @@ write_dry_run_artifact() {
     --arg dry_run_out "$output_file" \
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
-    --arg prompt_payload_file "$PROMPT_PAYLOAD_FILE" \
-    --arg prompt_payload_sha256 "$prompt_payload_sha256" \
     --arg dry_run_bypass_ci "${DRY_RUN_BYPASS_CI:-}" \
     --argjson required_checks "$EFFECTIVE_REQUIRED_CHECKS_JSON" \
     '{
@@ -169,8 +169,6 @@ write_dry_run_artifact() {
       dry_run_out: $dry_run_out,
       required_checks_file: $required_checks_file,
       required_checks_sha256: $required_checks_sha256,
-      prompt_payload_file: $prompt_payload_file,
-      prompt_payload_sha256: $prompt_payload_sha256,
       dry_run_bypass_ci: $dry_run_bypass_ci,
       required_checks: $required_checks
     }' >"${output_file}.launch.json.tmp"

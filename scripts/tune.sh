@@ -5,7 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${REVIEWER_ENV_FILE:-$REPO_ROOT/config/reviewer.env}"
-CONFIG_DIR="$REPO_ROOT/config"
 DRY_RUN_SH="$SCRIPT_DIR/dry-run.sh"
 EDITOR_CMD="${EDITOR:-nano}"
 # shellcheck disable=SC1091
@@ -28,19 +27,13 @@ case "$personality_file" in
   *) personality_path="$REPO_ROOT/$personality_file" ;;
 esac
 
-prompt_payload_file="${REVIEWER_PROMPT_PAYLOAD_FILE:-$CONFIG_DIR/prompt-payload.json}"
-case "$prompt_payload_file" in
-  /*) ;;
-  *) prompt_payload_file="$REPO_ROOT/$prompt_payload_file" ;;
-esac
-
 cat <<EOF
 GoobReview tuning
 =================
 
 Target repo:       $REVIEWER_REPO
 Personality file:  $personality_path
-Prompt payload:    $prompt_payload_file
+Blinding policy:   edit REVIEWER_INCLUDE_AUTHOR / REVIEWER_INCLUDE_DESCRIPTION / REVIEWER_INCLUDE_COMMIT_SUBJECTS in $ENV_FILE
 
 EOF
 
@@ -50,10 +43,8 @@ elif [ ! -f "$personality_path" ]; then
   ops_warn "Personality file not found: $personality_path"
 fi
 
-if [ -f "$prompt_payload_file" ] && ops_confirm "Edit prompt payload in $EDITOR_CMD?"; then
-  "$EDITOR_CMD" "$prompt_payload_file"
-elif [ ! -f "$prompt_payload_file" ]; then
-  ops_warn "Prompt payload file not found: $prompt_payload_file"
+if ops_confirm "Edit reviewer.env (blinding policy, budgets) in $EDITOR_CMD?"; then
+  "$EDITOR_CMD" "$ENV_FILE"
 fi
 
 if ops_confirm "Run a dry-run review now?"; then
