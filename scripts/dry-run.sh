@@ -26,7 +26,7 @@ ops_require_private_key "$REVIEWER_APP_PRIVATE_KEY_PATH"
 if [ ! -d "$HOME/.gemini" ]; then
   ops_die "Gemini CLI auth/trust state not found at $HOME/.gemini. Run 'gemini' once in this checkout, sign in, trust the folder, then /quit."
 fi
-for cmd in curl gemini jq node tar flock timeout; do
+for cmd in curl gemini jq node sha256sum tar flock timeout; do
   ops_require_command "$cmd" "Run scripts/setup-vm.sh first."
 done
 

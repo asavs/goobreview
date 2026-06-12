@@ -23,6 +23,7 @@ sync.log                Checkout sync log.
 app_token.json          Cached App installation token + slug (refreshed when <5 min remain).
 app-key.pem             GitHub App private key (you provide; mode 0600).
 dry-pr-<number>.txt     Dry-run artifact with full Gemini prompt payload and response.
+*.txt.launch.json       Launch metadata from a dry run: repo, config hashes, required checks, and CI-bypass state.
 ```
 
 PR-head source snapshots, Gemini's isolated working directory, and
@@ -91,7 +92,7 @@ also rotates `log.txt` and `sync.log`; tune this with
 
 `run-once.sh` loads `config/reviewer.env`, syncs the template checkout, then runs one reviewer tick.
 
-`scripts/enable-cron.sh` refuses to install the cron entry until it finds at least one dry-run artifact (`dry-run-*.txt` or `dry-pr-*.txt`) in `$REVIEWER_STATE`. To bypass that deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_DRY_RUN=1`.
+`scripts/enable-cron.sh` runs `scripts/launch-check.sh` before installing the cron entry. The launch check requires current live config files, matching dry-run launch metadata, nonempty required checks, and a dry run that used production CI gating (`REVIEWER_DRY_RUN_BYPASS_CI=0`). To bypass scheduler validation deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1`. Narrower launch-check bypasses are `REVIEWER_ALLOW_LAUNCH_WITH_BYPASSED_CI=1` and `REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS=1`.
 
 ## Systemd Timer
 
@@ -125,10 +126,9 @@ sudo systemctl edit --full goobreview.service   # adjust paths/user if needed
 sudo systemctl edit --full goobreview.timer
 ```
 
-The example service includes a dry-run artifact gate. It refuses to run until
-`$REVIEWER_STATE` contains `dry-run-*.txt` or `dry-pr-*.txt`; set
-`REVIEWER_ALLOW_ENABLE_SYSTEMD_WITHOUT_DRY_RUN=1` only for an intentional
-override.
+The example service includes a dry-run artifact gate. Prefer running
+`scripts/launch-check.sh` before enabling any live daemon path so systemd gets
+the same current-config validation as cron.
 
 ### Validate One Run
 
@@ -240,6 +240,15 @@ The reviewer reads three gitignored files under `config/`, each copied from a `*
 - **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
 
 Live posting requires real deployment config. `scripts/reviewer/reviewer.sh` refuses live mode unless `config/prompt-payload.json` and `config/required-checks.json` exist, or `REVIEWER_PROMPT_PAYLOAD_FILE` and `REVIEWER_REQUIRED_CHECKS_FILE` explicitly point at valid files. Run `scripts/configure.sh` to create the local files from their `.example` siblings. Dry-run and prompt-rendering paths may still use the committed examples so first-run setup can inspect behavior before launching.
+
+Before enabling cron or another live daemon, run:
+
+```bash
+REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
+scripts/launch-check.sh
+```
+
+The first command writes the normal dry-run artifact and a sibling `.launch.json` file. The second confirms that the launch metadata still matches the current target repo, required-check config, and prompt-payload config.
 
 Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim and selected via `REVIEWER_PERSONALITY_FILE`. To try one in a dry run without editing config:
 

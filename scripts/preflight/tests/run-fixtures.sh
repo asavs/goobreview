@@ -183,6 +183,49 @@ setup_checkout_repo() {
   printf '%s' "$repo"
 }
 
+setup_launch_repo() {
+  local name="$1" repo
+  repo="$TMP_ROOT/$name"
+
+  mkdir -p "$repo/scripts/lib" "$repo/config" "$repo/state"
+  cp "$PREFLIGHT_DIR/../launch-check.sh" "$repo/scripts/launch-check.sh"
+  cp "$PREFLIGHT_DIR/../lib/ops.sh" "$repo/scripts/lib/ops.sh"
+  chmod +x "$repo/scripts/launch-check.sh"
+
+  printf '["ci"]\n' > "$repo/config/required-checks.json"
+  cat > "$repo/config/prompt-payload.json" <<'JSON'
+{"segments":{"diff":{"enabled":true}}}
+JSON
+  printf 'key\n' > "$repo/state/app-key.pem"
+  chmod 600 "$repo/state/app-key.pem"
+  cat > "$repo/config/reviewer.env" <<EOF
+REVIEWER_REPO=owner/repo
+REVIEWER_APP_ID=123
+REVIEWER_APP_INSTALLATION_ID=456
+REVIEWER_APP_PRIVATE_KEY_PATH=$repo/state/app-key.pem
+REVIEWER_STATE=$repo/state
+EOF
+
+  printf '%s' "$repo"
+}
+
+write_launch_metadata() {
+  local repo="$1" bypass="${2:-0}" owner_repo="${3:-owner/repo}" out="$repo/state/dry-run-fixture.txt"
+  local required_sha prompt_sha
+
+  printf 'dry run\n' > "$out"
+  required_sha="$(sha256sum "$repo/config/required-checks.json" | awk '{print $1}')"
+  prompt_sha="$(sha256sum "$repo/config/prompt-payload.json" | awk '{print $1}')"
+  jq -n \
+    --arg repo "$owner_repo" \
+    --arg dry_run_out "$out" \
+    --arg required_checks_sha256 "$required_sha" \
+    --arg prompt_payload_sha256 "$prompt_sha" \
+    --arg dry_run_bypass_ci "$bypass" \
+    '{repo:$repo,dry_run_out:$dry_run_out,required_checks_sha256:$required_checks_sha256,prompt_payload_sha256:$prompt_payload_sha256,dry_run_bypass_ci:$dry_run_bypass_ci,event:"APPROVE",required_checks:["ci"]}' \
+    > "$out.launch.json"
+}
+
 write_vm_report_for_repo() {
   local repo="$1" out="$2" dirty="${3:-false}" head
 
@@ -220,6 +263,13 @@ run_checkout_preflight_with_vm() {
 
   PATH="$FAKE_BIN:$PATH" CHECKOUT_GCLOUD_FIXTURE="$fixture" CHECKOUT_VM_REPORT="$vm_report" \
     bash "$repo/scripts/preflight/checkout.sh" "$@" > "$out"
+}
+
+run_launch_check() {
+  local repo="$1" out="$2"
+  shift 2
+
+  (cd "$repo" && "$@" bash scripts/launch-check.sh) > "$out" 2>&1
 }
 
 assert_contains() {
@@ -430,6 +480,45 @@ test_checkout_unreachable_vm_does_not_fail_strict() {
   assert_contains "checkout unreachable VM strict passes" "strict_ok='true'" "$out"
 }
 
+test_launch_check_passes_matching_current_dry_run() {
+  local repo out
+  repo="$(setup_launch_repo launch-pass)"
+  out="$TMP_ROOT/launch-pass.out"
+  write_launch_metadata "$repo" 0
+
+  run_launch_check "$repo" "$out" env
+
+  assert_contains "launch check reports success" "Launch validation passed." "$out"
+  assert_contains "launch check reports CI bypass disabled" "CI bypass:           0" "$out"
+}
+
+test_launch_check_rejects_bypassed_ci_without_override() {
+  local repo out
+  repo="$(setup_launch_repo launch-bypass)"
+  out="$TMP_ROOT/launch-bypass.out"
+  write_launch_metadata "$repo" 1
+
+  if run_launch_check "$repo" "$out" env; then
+    fail "launch check rejects bypassed dry-run CI"
+  fi
+  assert_contains "launch check explains bypassed CI" "Latest dry run used REVIEWER_DRY_RUN_BYPASS_CI=1" "$out"
+  pass "launch check rejects bypassed dry-run CI"
+}
+
+test_launch_check_rejects_changed_config() {
+  local repo out
+  repo="$(setup_launch_repo launch-changed-config)"
+  out="$TMP_ROOT/launch-changed-config.out"
+  write_launch_metadata "$repo" 0
+  printf '["ci","lint"]\n' > "$repo/config/required-checks.json"
+
+  if run_launch_check "$repo" "$out" env; then
+    fail "launch check rejects changed required-check config"
+  fi
+  assert_contains "launch check tells operator to rerun dry-run" "required-check config changed after the latest dry run" "$out"
+  pass "launch check rejects changed required-check config"
+}
+
 test_no_active_project_lists_billing_ready_projects
 test_no_active_project_infers_billing_account_from_projects
 test_no_active_project_with_billing_account_but_no_billed_project
@@ -445,5 +534,8 @@ test_checkout_vm_aligned
 test_checkout_vm_diverged_fails_strict
 test_checkout_dirty_vm_fails_strict
 test_checkout_unreachable_vm_does_not_fail_strict
+test_launch_check_passes_matching_current_dry_run
+test_launch_check_rejects_bypassed_ci_without_override
+test_launch_check_rejects_changed_config
 
 printf 'passed %s preflight fixture assertions\n' "$pass_count"
