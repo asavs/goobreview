@@ -441,19 +441,35 @@ EOF
   pass "incomplete fixture JSON remains parseable as missing required checks"
 }
 
-test_check_runs_summary_reports_completion_and_truncation() {
+test_check_runs_summary_reports_only_needed_plumbing() {
   local output
 
   REPO="example/repo"
-  REVIEWER_CHECK_RUN_SUMMARY_LIMIT=1
   # Invoked indirectly by github_check_runs_summary.
   # shellcheck disable=SC2317
   github_check_runs_json() {
     printf '%s\n' '{"total_count":2,"fetched_count":2,"pages_fetched":1,"complete":true,"check_runs":[{"name":"a","status":"completed","conclusion":"success"},{"name":"b","status":"completed","conclusion":"failure"}]}'
   }
   output=$(github_check_runs_summary sha123)
-  assert_contains "check-run summary reports complete data" "Check-run data: complete (fetched 2 of 2 across 1 page(s))" <(printf '%s\n' "$output")
+  assert_contains "check-run summary includes first result row" "$(printf 'a\tcompleted\tsuccess')" <(printf '%s\n' "$output")
+  assert_not_contains "check-run summary omits complete plumbing" "Check-run data: complete" <(printf '%s\n' "$output")
+  assert_not_contains "check-run summary omits all-results plumbing" "Showing all 2 check runs." <(printf '%s\n' "$output")
+
+  REVIEWER_CHECK_RUN_SUMMARY_LIMIT=1
+  output=$(github_check_runs_summary sha123)
+  assert_contains "check-run summary reports complete data when truncated" "Check-run data: complete (fetched 2 of 2 across 1 page(s))" <(printf '%s\n' "$output")
   assert_contains "check-run summary reports intentional truncation" "Showing first 1 of 2 check runs; summary intentionally truncated." <(printf '%s\n' "$output")
+
+  # Invoked indirectly by github_check_runs_summary.
+  # shellcheck disable=SC2317
+  github_check_runs_json() {
+    printf '%s\n' '{"total_count":3,"fetched_count":2,"pages_fetched":1,"complete":false,"check_runs":[{"name":"a","status":"completed","conclusion":"success"},{"name":"b","status":"completed","conclusion":"failure"}]}'
+  }
+  unset REVIEWER_CHECK_RUN_SUMMARY_LIMIT
+  output=$(github_check_runs_summary sha123)
+  assert_contains "check-run summary reports incomplete data" "Check-run data: incomplete (fetched 2 of 3 across 1 page(s))" <(printf '%s\n' "$output")
+  assert_not_contains "check-run summary omits all-results plumbing for incomplete data" "Showing all 2 check runs." <(printf '%s\n' "$output")
+
   unset REVIEWER_CHECK_RUN_SUMMARY_LIMIT
   unset -f github_check_runs_json
 }
@@ -1331,7 +1347,7 @@ test_gemini_invocation_isolates_review_context
 test_github_api_retries_and_logs
 test_post_review_uses_rest_api
 test_check_ci_paginates_required_check_runs
-test_check_runs_summary_reports_completion_and_truncation
+test_check_runs_summary_reports_only_needed_plumbing
 test_ci_states
 test_config_file_resolution
 test_private_key_permissions
