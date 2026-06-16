@@ -206,12 +206,12 @@ github_check_runs_summary() {
       . as $root
       | ($root.check_runs | sort_by(.name, .started_at // .completed_at // "")) as $runs
       | ($runs | length) as $count
-      | "Check-run data: " + (if $root.complete then "complete" else "incomplete" end) + " (fetched " + ($root.fetched_count|tostring) + " of " + ($root.total_count|tostring) + " across " + ($root.pages_fetched|tostring) + " page(s))"
+      | if (($root.complete | not) or ($count > $limit)) then
+          "Check-run data: " + (if $root.complete then "complete" else "incomplete" end) + " (fetched " + ($root.fetched_count|tostring) + " of " + ($root.total_count|tostring) + " across " + ($root.pages_fetched|tostring) + " page(s))"
+        else empty end
       , if $count > $limit then
           "Showing first " + ($limit|tostring) + " of " + ($count|tostring) + " check runs; summary intentionally truncated."
-        else
-          "Showing all " + ($count|tostring) + " check runs."
-        end
+        else empty end
       , ($runs[:$limit][] | [.name, .status, (.conclusion // "-")] | @tsv)
     '
 }
