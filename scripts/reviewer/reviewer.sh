@@ -27,6 +27,7 @@ COMMIT_SUBJECTS_MAX="${REVIEWER_COMMIT_SUBJECTS_MAX:-50}"
 INCLUDE_AUTHOR="${REVIEWER_INCLUDE_AUTHOR:-0}"
 INCLUDE_DESCRIPTION="${REVIEWER_INCLUDE_DESCRIPTION:-1}"
 INCLUDE_COMMIT_SUBJECTS="${REVIEWER_INCLUDE_COMMIT_SUBJECTS:-1}"
+RESEARCH_CONSENT="${REVIEWER_RESEARCH_CONSENT:-0}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
@@ -72,11 +73,9 @@ if [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; then
   ALLOW_EXAMPLE_CONFIG=1
 fi
 REQUIRED_CHECKS_FILE="$(resolve_reviewer_config_file "required checks" REVIEWER_REQUIRED_CHECKS_FILE "$DEFAULT_REQUIRED_CHECKS_FILE" "$EXAMPLE_REQUIRED_CHECKS_FILE" "$ALLOW_EXAMPLE_CONFIG")"
-PERSONALITY_FILE="${REVIEWER_PERSONALITY_FILE:-}"
-case "$PERSONALITY_FILE" in
-  ''|/*) ;;
-  *) PERSONALITY_FILE="$REPO_DIR/$PERSONALITY_FILE" ;;
-esac
+POSTED_PERSONALITY=""
+PERSONALITY_FILE=""
+resolve_reviewer_personality_config
 ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
 REVIEWER_RUNNER_NAME="${REVIEWER_RUNNER_NAME:-reviewer daemon}"
 
@@ -116,6 +115,8 @@ write_dry_run_artifact() {
     printf 'Repository: %s\n' "$REPO"
     printf 'PR: #%s\n' "$num"
     printf 'Head SHA: %s\n' "$head_sha"
+    printf 'Posted personality: %s\n' "$POSTED_PERSONALITY"
+    printf 'Personality file: %s\n' "$PERSONALITY_FILE"
     printf 'Parsed review event: %s\n' "$event"
     printf 'Generated at: %s\n' "$(date -Is)"
     printf '\n===== GEMINI PROMPT PAYLOAD START =====\n'
@@ -156,6 +157,8 @@ write_dry_run_artifact() {
     --arg event "$event" \
     --arg generated_at "$(date -Is)" \
     --arg dry_run_out "$output_file" \
+    --arg posted_personality "$POSTED_PERSONALITY" \
+    --arg personality_file "$PERSONALITY_FILE" \
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
     --arg dry_run_bypass_ci "${DRY_RUN_BYPASS_CI:-}" \
@@ -167,6 +170,8 @@ write_dry_run_artifact() {
       event: $event,
       generated_at: $generated_at,
       dry_run_out: $dry_run_out,
+      posted_personality: $posted_personality,
+      personality_file: $personality_file,
       required_checks_file: $required_checks_file,
       required_checks_sha256: $required_checks_sha256,
       dry_run_bypass_ci: $dry_run_bypass_ci,
@@ -175,6 +180,266 @@ write_dry_run_artifact() {
   secure_install_file "${output_file}.launch.json.tmp" "${output_file}.launch.json" || fatal "failed to write dry-run launch metadata with mode 0600"
   rm -f "${output_file}.launch.json.tmp"
   log "Dry run artifact written to $output_file"
+}
+
+write_research_review_artifact() {
+  local output_file="$1"
+  local num="$2"
+  local head_sha="$3"
+  local arm="$4"
+  local personality_file="$5"
+  local role="$6"
+  local event="$7"
+  local prompt_file="$8"
+  local review_body="$9"
+  local artifact_tmp artifact_bytes marker marker_bytes body_bytes
+
+  mkdir -p "$(dirname "$output_file")"
+  chmod 700 "$(dirname "$output_file")" 2>/dev/null || true
+  artifact_tmp=$(mktemp "$STATE_DIR/research-artifact.XXXXXX")
+  {
+    printf 'GoobReview research artifact\n'
+    printf 'Repository: %s\n' "$REPO"
+    printf 'PR: #%s\n' "$num"
+    printf 'Head SHA: %s\n' "$head_sha"
+    printf 'Research arm: %s\n' "$arm"
+    printf 'Artifact role: %s\n' "$role"
+    printf 'Posted personality: %s\n' "$POSTED_PERSONALITY"
+    printf 'Personality file: %s\n' "$personality_file"
+    printf 'Parsed review event: %s\n' "$event"
+    printf 'Generated at: %s\n' "$(date -Is)"
+    printf '\n===== GEMINI PROMPT PAYLOAD START =====\n'
+    append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "research prompt artifact"
+    printf '\n===== GEMINI PROMPT PAYLOAD END =====\n'
+    printf '\n===== GEMINI RESPONSE START =====\n'
+    printf '%s\n' "$review_body" | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "research response artifact"
+    printf '===== GEMINI RESPONSE END =====\n'
+  } >"$artifact_tmp"
+
+  artifact_bytes=$(wc -c <"$artifact_tmp" | tr -d ' ')
+  if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
+    marker=$(printf '\n\n[goobreview: research artifact truncated after %s bytes]\n' "$MAX_ARTIFACT_BYTES")
+    marker_bytes=$(printf '%s' "$marker" | wc -c | tr -d ' ')
+    if [ "$marker_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
+      printf '%s' "$marker" | head -c "$MAX_ARTIFACT_BYTES" >"$artifact_tmp.truncated"
+    else
+      body_bytes=$((MAX_ARTIFACT_BYTES - marker_bytes))
+      head -c "$body_bytes" "$artifact_tmp" >"$artifact_tmp.truncated"
+      printf '%s' "$marker" >>"$artifact_tmp.truncated"
+    fi
+    install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || {
+      rm -f "$artifact_tmp" "$artifact_tmp.truncated"
+      return 1
+    }
+    rm -f "$artifact_tmp.truncated"
+  else
+    install_secret_scanned_artifact "$artifact_tmp" "$output_file" || {
+      rm -f "$artifact_tmp"
+      return 1
+    }
+  fi
+  rm -f "$artifact_tmp"
+}
+
+research_personality_file_for_arm() {
+  case "$1" in
+    none) printf '%s\n' "$CONFIG_DIR/personalities/control.md" ;;
+    linus) printf '%s\n' "$CONFIG_DIR/personalities/linus.md" ;;
+    *) return 1 ;;
+  esac
+}
+
+write_prompt_with_replaced_personality() {
+  local output_prompt_file="$1"
+  local personality_file="$2"
+  local source_prompt_file="$3"
+  local prompt_tail status
+
+  prompt_tail=$(mktemp "$STATE_DIR/research-prompt-tail.XXXXXX")
+  if ! awk '
+    found {
+      print
+      next
+    }
+    prev == "---" && $0 == "Trust Boundary" {
+      print prev
+      print
+      found = 1
+      next
+    }
+    {
+      prev = $0
+    }
+    END {
+      if (!found) exit 1
+    }
+  ' "$source_prompt_file" >"$prompt_tail"; then
+    rm -f "$prompt_tail"
+    return 1
+  fi
+
+  status=0
+  : >"$output_prompt_file"
+  cat "$personality_file" >>"$output_prompt_file" || status=1
+  printf '\n' >>"$output_prompt_file" || status=1
+  cat "$prompt_tail" >>"$output_prompt_file" || status=1
+  rm -f "$prompt_tail"
+  if [ "$status" -eq 0 ]; then
+    validate_prompt_size "$output_prompt_file" || status=1
+  fi
+  return "$status"
+}
+
+resolve_research_capture_state() {
+  RESEARCH_CAPTURE_ENABLED=0
+  RESEARCH_REPO_VISIBILITY="unknown"
+
+  [ "$RESEARCH_CONSENT" = "1" ] || return 0
+  if [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; then
+    log "Research consent is enabled, but paired research capture only runs for live reviews"
+    return 0
+  fi
+  case "$POSTED_PERSONALITY" in
+    none|linus) ;;
+    *)
+      log "Research consent is enabled, but paired research capture requires REVIEWER_POSTED_PERSONALITY=none or linus"
+      return 0
+      ;;
+  esac
+
+  if ! repo_json=$(github_api_get "repos/$REPO" 2>>"$LOG_FILE"); then
+    log "Research consent is enabled, but repo visibility could not be verified; paired research capture disabled"
+    return 0
+  fi
+  repo_private=$(printf '%s\n' "$repo_json" | jq -r 'if has("private") then .private else true end')
+  case "$repo_private" in
+    false)
+      RESEARCH_REPO_VISIBILITY="public"
+      RESEARCH_CAPTURE_ENABLED=1
+      ;;
+    *)
+      RESEARCH_REPO_VISIBILITY="private"
+      log "Research consent is enabled, but paired research capture is disabled for private repositories in v1"
+      ;;
+  esac
+}
+
+capture_research_pair() {
+  local num="$1"
+  local head_sha="$2"
+  local ci_state="$3"
+  local review_worktree="$4"
+  local pr_metadata_json="$5"
+  local bot_reviews_json="$6"
+  local posted_prompt_file="$7"
+  local posted_review="$8"
+  local posted_event="$9"
+  local run_id run_dir posted_arm counterfactual_arm posted_dir counterfactual_dir
+  local posted_file counterfactual_file manifest_tmp counterfactual_prompt counterfactual_err
+  local counterfactual_personality_file counterfactual_review counterfactual_event
+  local generated_at required_checks_sha256 posted_personality_file
+
+  [ "$RESEARCH_CAPTURE_ENABLED" = "1" ] || return 0
+
+  posted_arm="$POSTED_PERSONALITY"
+  case "$posted_arm" in
+    none) counterfactual_arm="linus" ;;
+    linus) counterfactual_arm="none" ;;
+    *) return 0 ;;
+  esac
+
+  run_id="$(date -u +%Y%m%dT%H%M%SZ)-pr-${num}-${head_sha}"
+  run_dir="$STATE_DIR/research-runs/$run_id/pr-$num"
+  posted_dir="$run_dir/$posted_arm"
+  counterfactual_dir="$run_dir/$counterfactual_arm"
+  posted_file="$posted_dir/artifact.txt"
+  counterfactual_file="$counterfactual_dir/artifact.txt"
+  generated_at="$(date -Is)"
+  required_checks_sha256=$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')
+  posted_personality_file="$PERSONALITY_FILE"
+  counterfactual_personality_file="$(research_personality_file_for_arm "$counterfactual_arm")" || return 0
+
+  if ! write_research_review_artifact "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review"; then
+    log "PR #$num@$head_sha: failed to write posted research artifact"
+    return 0
+  fi
+
+  counterfactual_prompt=$(mktemp "$STATE_DIR/research-prompt.$num.XXXXXX")
+  counterfactual_err=$(mktemp "$STATE_DIR/research-gemini.$num.err.XXXXXX")
+  if write_prompt_with_replaced_personality "$counterfactual_prompt" "$counterfactual_personality_file" "$posted_prompt_file"; then
+    if counterfactual_review=$(run_gemini_review "$counterfactual_prompt" "$counterfactual_err" "$review_worktree"); then
+      cat "$counterfactual_err" >>"$LOG_FILE"
+      if [ -z "${counterfactual_review// }" ]; then
+        counterfactual_event="EMPTY_RESPONSE"
+      elif ! counterfactual_event=$(printf '%s' "$counterfactual_review" | review_verdict_event); then
+        counterfactual_event="INVALID"
+      fi
+    else
+      cat "$counterfactual_err" >>"$LOG_FILE"
+      counterfactual_event="GEMINI_FAILED"
+      counterfactual_review=$(cat "$counterfactual_err")
+    fi
+  else
+    counterfactual_event="PROMPT_FAILED"
+    counterfactual_review="Counterfactual prompt assembly failed."
+  fi
+
+  if ! write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt" "$counterfactual_review"; then
+    log "PR #$num@$head_sha: failed to write counterfactual research artifact"
+    rm -f "$counterfactual_prompt" "$counterfactual_err"
+    return 0
+  fi
+  rm -f "$counterfactual_prompt" "$counterfactual_err"
+
+  manifest_tmp=$(mktemp "$STATE_DIR/research-manifest.XXXXXX")
+  jq -n \
+    --arg repo "$REPO" \
+    --arg pr "$num" \
+    --arg head_sha "$head_sha" \
+    --arg generated_at "$generated_at" \
+    --arg posted_personality "$POSTED_PERSONALITY" \
+    --arg posted_arm "$posted_arm" \
+    --arg counterfactual_arm "$counterfactual_arm" \
+    --arg posted_event "$posted_event" \
+    --arg counterfactual_event "$counterfactual_event" \
+    --arg posted_artifact "$posted_file" \
+    --arg counterfactual_artifact "$counterfactual_file" \
+    --arg posted_personality_file "$posted_personality_file" \
+    --arg counterfactual_personality_file "$counterfactual_personality_file" \
+    --arg model "$GEMINI_MODEL" \
+    --arg ci_state "$ci_state" \
+    --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
+    --arg required_checks_sha256 "$required_checks_sha256" \
+    --arg repo_visibility "$RESEARCH_REPO_VISIBILITY" \
+    --arg research_eligible "public-consented" \
+    --argjson required_checks "$EFFECTIVE_REQUIRED_CHECKS_JSON" \
+    '{
+      repo: $repo,
+      pr: ($pr | tonumber),
+      head_sha: $head_sha,
+      generated_at: $generated_at,
+      posted_personality: $posted_personality,
+      posted_arm: $posted_arm,
+      counterfactual_arm: $counterfactual_arm,
+      posted_event: $posted_event,
+      counterfactual_event: $counterfactual_event,
+      posted_artifact: $posted_artifact,
+      counterfactual_artifact: $counterfactual_artifact,
+      personality_files: {
+        posted: $posted_personality_file,
+        counterfactual: $counterfactual_personality_file
+      },
+      model: $model,
+      ci_state: $ci_state,
+      required_checks_file: $required_checks_file,
+      required_checks_sha256: $required_checks_sha256,
+      required_checks: $required_checks,
+      repo_visibility: $repo_visibility,
+      research_eligible: $research_eligible
+    }' >"$manifest_tmp"
+  secure_install_file "$manifest_tmp" "$run_dir/manifest.json" || log "PR #$num@$head_sha: failed to write research manifest"
+  rm -f "$manifest_tmp"
+  log "PR #$num@$head_sha: wrote paired research artifacts to $run_dir"
 }
 
 if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$IGNORE_GEMINI_BACKOFF" ]; then
@@ -191,6 +456,7 @@ if [ -z "${REVIEWER_APP_SLUG:-}" ]; then
 fi
 BOT_LOGIN="${REVIEWER_APP_SLUG}[bot]"
 BOT_AUTHOR="app/${REVIEWER_APP_SLUG}"
+resolve_research_capture_state
 
 if [ -n "$ONLY_PR" ] && { [ -n "$DRY_RUN" ] || [ -n "$RENDER_PROMPT_ONLY" ]; }; then
   if ! PRS=$(github_api_get "repos/$REPO/pulls/$ONLY_PR" 2>>"$LOG_FILE" |
@@ -474,14 +740,15 @@ EOF
     continue
   fi
 
-  rm -f "$prompt_tmp" "$gemini_err_tmp"
-
   if post_review "$num" "$event" "$body"; then
     clear_review_failure_attempts "$num" "$head_sha"
     apply_review_labels "$num" "$event" || log "PR #$num: failed to apply review labels"
+    capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prompt_tmp" "$review" "$event"
+    rm -f "$prompt_tmp" "$gemini_err_tmp"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
   else
+    rm -f "$prompt_tmp" "$gemini_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "Failed to post review on PR #$num@$head_sha"
   fi
 done <<< "$PRS"

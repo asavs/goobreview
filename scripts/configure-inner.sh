@@ -19,6 +19,8 @@ app_id=""
 installation_id=""
 key_path=""
 personality=""
+posted_personality=""
+research_consent=""
 create_labels=0
 allow_missing_gemini=0
 
@@ -38,8 +40,11 @@ Options:
                              the App installation exposes exactly one repo.
   --installation-id ID       Use an existing App installation ID. If omitted,
                              auto-discover from --repo.
-  --personality PATH         Personality file, relative to repo root or absolute.
-                             Default: config/personalities/control.md.
+  --posted-personality NAME  Posted review style: none or linus.
+                             Default: none.
+  --research-consent 0|1     Whether public-repo paired research artifacts may
+                             be retained. Default: 0.
+  --personality PATH         Legacy personality-file override for old configs.
   --create-labels           Create/update helper labels on the target repo.
   --allow-missing-gemini    Warn instead of failing when Gemini auth is missing.
   --env-file PATH           Override config/reviewer.env path.
@@ -67,6 +72,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --personality)
       personality="${2:-}"
+      shift
+      ;;
+    --posted-personality)
+      posted_personality="${2:-}"
+      shift
+      ;;
+    --research-consent)
+      research_consent="${2:-}"
       shift
       ;;
     --create-labels)
@@ -113,8 +126,20 @@ ops_copy_if_missing "$ENV_FILE" "$CONFIG_DIR/reviewer.env.example" || exit 1
 [ -n "$app_id" ] || app_id="$(ops_env_get "$ENV_FILE" REVIEWER_APP_ID)"
 [ -n "$installation_id" ] || installation_id="$(ops_env_get "$ENV_FILE" REVIEWER_APP_INSTALLATION_ID)"
 [ -n "$key_path" ] || key_path="$(ops_env_get "$ENV_FILE" REVIEWER_APP_PRIVATE_KEY_PATH)"
+[ -n "$posted_personality" ] || posted_personality="$(ops_env_get "$ENV_FILE" REVIEWER_POSTED_PERSONALITY)"
+[ -n "$posted_personality" ] || posted_personality="none"
+[ -n "$research_consent" ] || research_consent="$(ops_env_get "$ENV_FILE" REVIEWER_RESEARCH_CONSENT)"
+[ -n "$research_consent" ] || research_consent="0"
 [ -n "$personality" ] || personality="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
-[ -n "$personality" ] || personality="config/personalities/control.md"
+
+case "$posted_personality" in
+  none|linus) ;;
+  *) ops_die "Invalid --posted-personality: $posted_personality (expected none or linus)." ;;
+esac
+case "$research_consent" in
+  0|1) ;;
+  *) ops_die "Invalid --research-consent: $research_consent (expected 0 or 1)." ;;
+esac
 
 ops_require_nonempty "REVIEWER_APP_ID" "$app_id" "Pass --app-id ID."
 ops_validate_uint REVIEWER_APP_ID "$app_id"
@@ -172,15 +197,25 @@ else
   fi
 fi
 
-case "$personality" in
-  /*) personality_path="$personality" ;;
-  *) personality_path="$REPO_ROOT/$personality" ;;
+case "$posted_personality" in
+  none) posted_personality_path="$REPO_ROOT/config/personalities/control.md" ;;
+  linus) posted_personality_path="$REPO_ROOT/config/personalities/linus.md" ;;
 esac
-ops_require_file "$personality_path" "Pass --personality config/personalities/<name>.md."
-case "$personality" in
-  "$REPO_ROOT"/*) personality="${personality#"$REPO_ROOT"/}" ;;
-esac
-ops_env_set "$ENV_FILE" REVIEWER_PERSONALITY_FILE "$personality"
+ops_require_file "$posted_personality_path" "Expected committed personality file for posted style '$posted_personality'."
+ops_env_set "$ENV_FILE" REVIEWER_POSTED_PERSONALITY "$posted_personality"
+ops_env_set "$ENV_FILE" REVIEWER_RESEARCH_CONSENT "$research_consent"
+
+if [ -n "$personality" ]; then
+  case "$personality" in
+    /*) personality_path="$personality" ;;
+    *) personality_path="$REPO_ROOT/$personality" ;;
+  esac
+  ops_require_file "$personality_path" "Pass --personality config/personalities/<name>.md."
+  case "$personality" in
+    "$REPO_ROOT"/*) personality="${personality#"$REPO_ROOT"/}" ;;
+  esac
+  ops_env_set "$ENV_FILE" REVIEWER_PERSONALITY_FILE "$personality"
+fi
 
 required_checks="$CONFIG_DIR/required-checks.json"
 ops_copy_if_missing "$required_checks" "$CONFIG_DIR/required-checks.example.json" || exit 1
@@ -199,7 +234,8 @@ cat <<EOF
   env:              $ENV_FILE
   repo:             $repo
   key path:         $key_path
-  personality:      $personality
+  posted style:     $posted_personality
+  research consent: $research_consent
 
 Next:
   scripts/status.sh

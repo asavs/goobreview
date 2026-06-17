@@ -71,7 +71,10 @@ app_id=""
 installation_id=""
 key_path=""
 state_dir="/var/lib/goobreview/example"
+posted_personality=""
+research_consent="0"
 personality_file=""
+posted_personality_valid=1
 required_checks="$CONFIG_DIR/required-checks.json"
 
 if [ -f "$ENV_FILE" ]; then
@@ -81,9 +84,13 @@ if [ -f "$ENV_FILE" ]; then
   installation_id="$(ops_env_get "$ENV_FILE" REVIEWER_APP_INSTALLATION_ID)"
   key_path="$(ops_env_get "$ENV_FILE" REVIEWER_APP_PRIVATE_KEY_PATH)"
   state_from_env="$(ops_env_get "$ENV_FILE" REVIEWER_STATE)"
+  posted_personality="$(ops_env_get "$ENV_FILE" REVIEWER_POSTED_PERSONALITY)"
+  research_consent="$(ops_env_get "$ENV_FILE" REVIEWER_RESEARCH_CONSENT)"
   personality_file="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
   [ -z "$state_from_env" ] || state_dir="$state_from_env"
 fi
+[ -n "$posted_personality" ] || posted_personality="none"
+[ -n "$research_consent" ] || research_consent="0"
 
 repo_ready="$(present "$repo" "owner/repo")"
 app_id_ready="$(present "$app_id")"
@@ -98,7 +105,23 @@ if [ -n "$key_path" ] && [ -r "$key_path" ]; then
 fi
 
 personality_ready=0
-if [ -n "$personality_file" ]; then
+case "$posted_personality" in
+  none)
+    personality_path="$CONFIG_DIR/personalities/control.md"
+    personality_file="config/personalities/control.md"
+    ;;
+  linus)
+    personality_path="$CONFIG_DIR/personalities/linus.md"
+    personality_file="config/personalities/linus.md"
+    ;;
+  *)
+    posted_personality_valid=0
+    personality_path=""
+    ;;
+esac
+if [ -n "$personality_path" ] && [ -f "$personality_path" ]; then
+  personality_ready=1
+elif [ "$posted_personality_valid" -eq 1 ] && [ -n "$personality_file" ]; then
   case "$personality_file" in
     /*) personality_path="$personality_file" ;;
     *) personality_path="$REPO_ROOT/$personality_file" ;;
@@ -129,8 +152,10 @@ elif [ "$app_id_ready" != "true" ] || [ "$installation_ready" != "true" ]; then
   recommendation="Finish GitHub App registration/install, then re-run scripts/configure.sh."
 elif [ "$key_present" -ne 1 ] || [ "$key_readable" -ne 1 ]; then
   recommendation="Place the GitHub App private key at REVIEWER_APP_PRIVATE_KEY_PATH with mode 0600."
+elif [ "$posted_personality_valid" -ne 1 ]; then
+  recommendation="Set REVIEWER_POSTED_PERSONALITY to none or linus."
 elif [ "$personality_ready" -ne 1 ]; then
-  recommendation="Select a valid config/personalities/*.md file with scripts/configure.sh."
+  recommendation="Select REVIEWER_POSTED_PERSONALITY=none or linus with scripts/configure.sh."
 elif [ "$required_checks_ready" -ne 1 ]; then
   recommendation="Run scripts/configure.sh to create required-checks.json."
 elif [ "$gemini_auth" -ne 1 ]; then
@@ -147,6 +172,8 @@ if [ "$report" -eq 1 ]; then
   print_field "private_key_path" "$key_path"
   print_field "private_key_present" "$(bool "$key_present")"
   print_field "private_key_readable" "$(bool "$key_readable")"
+  print_field "posted_personality" "$posted_personality"
+  print_field "research_consent" "$research_consent"
   print_field "personality_file" "$personality_file"
   print_field "personality_file_present" "$(bool "$personality_ready")"
   print_field "required_checks_present" "$(bool "$required_checks_ready")"
@@ -165,6 +192,8 @@ App ID set:             $app_id_ready
 installation ID set:    $installation_ready
 private key present:    $(bool "$key_present")${key_path:+ ($key_path)}
 private key readable:   $(bool "$key_readable")
+posted personality:     $posted_personality
+research consent:       $(bool "$research_consent")
 personality valid:      $(bool "$personality_ready")${personality_file:+ ($personality_file)}
 required checks file:   $(bool "$required_checks_ready") ($required_checks)
 Gemini auth dir:        $(bool "$gemini_auth") ($HOME/.gemini)

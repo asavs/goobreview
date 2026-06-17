@@ -38,8 +38,9 @@ The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `C
 
 Three ways to shape what your reviewer does, in order of impact:
 
-1. **`config/personalities/<name>.md`** - role and voice. Pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`. Add new ones by dropping a `.md` file in this directory. `configure.sh` lists the available personalities and writes your pick into `reviewer.env`.
-2. **`REVIEWER_INCLUDE_*` flags in `config/reviewer.env`** - blinding policy: whether the reviewer sees the author username (off by default), the PR description, and the commit subjects. The prompt composition itself is fixed; if you want a different payload shape, fork and edit `scripts/reviewer/lib/prompt.sh` - the fork is the customization system, same as the personality gallery.
+1. **`REVIEWER_POSTED_PERSONALITY` in `config/reviewer.env`** - which style is posted to GitHub: `none` uses `config/personalities/control.md`, and `linus` uses `config/personalities/linus.md`.
+2. **`REVIEWER_RESEARCH_CONSENT` in `config/reviewer.env`** - whether public live reviews may retain paired control/Linus prompt+response artifacts under `REVIEWER_STATE/research-runs/`. Consent never changes which style is posted.
+3. **`REVIEWER_INCLUDE_*` flags in `config/reviewer.env`** - blinding policy: whether the reviewer sees the author username (off by default), the PR description, and the commit subjects. The prompt composition itself is fixed; if you want a different payload shape, fork and edit `scripts/reviewer/lib/prompt.sh` - the fork is the customization system, same as the personality gallery.
 3. **`config/required-checks.json`** - exact GitHub check-run names that must pass before Gemini is called.
 
 The target repo shapes its own review context with conventions it likely already uses: `AGENTS.md` / `CONTRIBUTING.md` / `GUIDELINES.md` files are pointed out to the reviewer, and diffs for files marked `linguist-generated` in `.gitattributes` are omitted the same way GitHub's own Files Changed tab collapses them.
@@ -56,9 +57,8 @@ config/                              Per-deployment files. *.example.* ships;
   app-manifest.json                  GitHub App template used by register-app.sh
                                      to pre-fill the App-creation form
                                      (permissions, name, url). Committed.
-  personalities/                     Reviewer personalities (control.md,
-                                     linus.md, etc.). Pick one via
-                                     REVIEWER_PERSONALITY_FILE in reviewer.env.
+  personalities/                     Reviewer personalities. none maps to
+                                     control.md; linus maps to linus.md.
                                      The main thing you customize.
   required-checks.example.json       GitHub check-run names that gate review posting.
   reviewer.env.example               Runtime env: target repo, App credentials,

@@ -524,6 +524,43 @@ test_config_file_resolution() {
   unset REVIEWER_REQUIRED_CHECKS_FILE
 }
 
+test_personality_config_resolution() {
+  local config_dir
+
+  config_dir="$TMP_ROOT/personality-config"
+  mkdir -p "$config_dir/personalities"
+  printf 'control\n' > "$config_dir/personalities/control.md"
+  printf 'linus\n' > "$config_dir/personalities/linus.md"
+  REPO_DIR="$config_dir"
+  CONFIG_DIR="$config_dir"
+  unset REVIEWER_PERSONALITY_FILE
+
+  REVIEWER_POSTED_PERSONALITY=none
+  resolve_reviewer_personality_config
+  assert_eq "posted personality none is recorded" "none" "$POSTED_PERSONALITY"
+  assert_eq "posted personality none maps to control" "$config_dir/personalities/control.md" "$PERSONALITY_FILE"
+
+  REVIEWER_POSTED_PERSONALITY=linus
+  resolve_reviewer_personality_config
+  assert_eq "posted personality linus is recorded" "linus" "$POSTED_PERSONALITY"
+  assert_eq "posted personality linus maps to linus" "$config_dir/personalities/linus.md" "$PERSONALITY_FILE"
+
+  unset REVIEWER_POSTED_PERSONALITY
+  REVIEWER_PERSONALITY_FILE="$config_dir/custom.md"
+  printf 'custom\n' > "$REVIEWER_PERSONALITY_FILE"
+  resolve_reviewer_personality_config
+  assert_eq "legacy personality file remains custom" "custom" "$POSTED_PERSONALITY"
+  assert_eq "legacy personality file remains active" "$config_dir/custom.md" "$PERSONALITY_FILE"
+
+  REVIEWER_POSTED_PERSONALITY=bad
+  if ( resolve_reviewer_personality_config ) >/dev/null 2>&1; then
+    fail "invalid posted personality is rejected"
+  fi
+  pass "invalid posted personality is rejected"
+
+  unset REVIEWER_POSTED_PERSONALITY REVIEWER_PERSONALITY_FILE
+}
+
 test_log_rotation() {
   local log_file="$TMP_ROOT/rotate.log"
 
@@ -1492,6 +1529,205 @@ EOF
   assert_contains "second PR failure is recorded" "PR #2@sha2: failed to read CI check-runs; reached failure cap (1/1), skipping until the PR head changes" "$state_dir/log.txt"
 }
 
+test_reviewer_research_capture_posts_selected_review_only() {
+  local state_dir runtime_dir test_reviewer env_file key_file bin_dir config_dir status output
+  local source_dir tarball review_payload posted_body manifest research_dir
+
+  state_dir="$TMP_ROOT/research-state"
+  runtime_dir="$TMP_ROOT/research-runtime"
+  test_reviewer="$TMP_ROOT/research-reviewer"
+  bin_dir="$TMP_ROOT/research-bin"
+  config_dir="$TMP_ROOT/research-config"
+  source_dir="$TMP_ROOT/research-source"
+  tarball="$TMP_ROOT/research.tar.gz"
+  review_payload="$TMP_ROOT/research-review-payload.json"
+  mkdir -p "$state_dir" "$runtime_dir" "$bin_dir" "$config_dir/personalities" "$source_dir/repo-root"
+  cp -R "$REVIEWER_DIR" "$test_reviewer"
+  cp "$REVIEWER_DIR/../../config/personalities/control.md" "$config_dir/personalities/control.md"
+  cp "$REVIEWER_DIR/../../config/personalities/linus.md" "$config_dir/personalities/linus.md"
+  printf 'hello\n' > "$source_dir/repo-root/README.md"
+  tar -czf "$tarball" -C "$source_dir" repo-root
+
+  cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  token) printf 'test-token\n' ;;
+  slug)  printf 'goobreview\n' ;;
+  *)     exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/get-installation-token.sh"
+
+  cat > "$test_reviewer/check-ci.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'success\n'
+EOF
+  chmod +x "$test_reviewer/check-ci.sh"
+
+  cat > "$bin_dir/curl" <<EOF
+#!/usr/bin/env bash
+body_file=""
+data_file=""
+method="GET"
+url="\${*: -1}"
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    -o)
+      body_file="\$2"
+      shift 2
+      ;;
+    -d|--data|--data-binary)
+      data_file="\$2"
+      shift 2
+      ;;
+    -X)
+      method="\$2"
+      shift 2
+      ;;
+    -D|-w|-H)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+case "\$url" in
+  *'/repos/example/repo')
+    printf '%s\n' '{"private":false}' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls?state=open&per_page=100&page=1')
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1","ref":"feature"},"base":{"ref":"main"},"title":"Research PR","body":"Please review","changed_files":1}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/reviews?per_page=100&page=1')
+    printf '%s\n' '[]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/files?per_page=100&page=1')
+    printf '%s\n' '[{"filename":"README.md","status":"modified","additions":1,"deletions":0,"patch":"@@ -1,0 +1,1 @@\n+hello"}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/commits?per_page=100&page=1')
+    printf '%s\n' '[{"commit":{"message":"Update README"}}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/tarball/sha1')
+    cat "$tarball" > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/reviews')
+    if [ -n "\$data_file" ]; then
+      printf '%s\n' "\$data_file" > "$review_payload"
+    fi
+    printf '%s\n' '{"id":123}' > "\$body_file"
+    printf '200'
+    ;;
+  *)
+    printf 'unexpected curl URL: %s\n' "\$url" >&2
+    printf '000'
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  cat > "$bin_dir/timeout" <<'EOF'
+#!/usr/bin/env bash
+shift
+"$@"
+EOF
+  chmod +x "$bin_dir/timeout"
+
+  cat > "$bin_dir/gemini" <<'EOF'
+#!/usr/bin/env bash
+prompt=$(cat)
+case "$prompt" in
+  *"Mauro, SHUT"*) printf 'linus review\nCOMMENT\n' ;;
+  *) printf 'control review\nAPPROVE\n' ;;
+esac
+EOF
+  chmod +x "$bin_dir/gemini"
+
+  key_file="$TMP_ROOT/research-key.pem"
+  printf 'key\n' > "$key_file"
+  chmod 600 "$key_file"
+  printf '[]\n' > "$TMP_ROOT/research-required.json"
+
+  env_file="$TMP_ROOT/research.env"
+  cat > "$env_file" <<EOF
+REVIEWER_REPO=example/repo
+REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1
+REVIEWER_STATE=$state_dir
+REVIEWER_RUNTIME_STATE=$runtime_dir
+REVIEWER_CONFIG_DIR=$config_dir
+REVIEWER_APP_ID=1
+REVIEWER_APP_INSTALLATION_ID=2
+REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
+REVIEWER_POSTED_PERSONALITY=none
+REVIEWER_RESEARCH_CONSENT=1
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/research-required.json
+REVIEWER_MAX_PRS=1
+REVIEWER_MAX_ATTEMPTS=1
+REVIEWER_APPLY_LABELS=0
+EOF
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "research capture fixture reviewer exits successfully"
+  fi
+  pass "research capture fixture reviewer exits successfully"
+
+  posted_body=$(jq -r '.body' "$review_payload")
+  assert_contains "posted review uses selected control arm" "control review" <(printf '%s\n' "$posted_body")
+  assert_not_contains "posted review does not include counterfactual linus arm" "linus review" <(printf '%s\n' "$posted_body")
+
+  manifest=$(find "$state_dir/research-runs" -name manifest.json | head -n 1)
+  if [ -z "$manifest" ]; then
+    fail "research manifest is written"
+  fi
+  pass "research manifest is written"
+  assert_eq "manifest records selected posted personality" "none" "$(jq -r '.posted_personality' "$manifest")"
+  assert_eq "manifest records posted arm event" "APPROVE" "$(jq -r '.posted_event' "$manifest")"
+  assert_eq "manifest records counterfactual event" "COMMENT" "$(jq -r '.counterfactual_event' "$manifest")"
+  assert_eq "manifest records public eligibility" "public-consented" "$(jq -r '.research_eligible' "$manifest")"
+
+  research_dir="$(dirname "$manifest")"
+  assert_contains "posted artifact preserves control response" "control review" "$research_dir/none/artifact.txt"
+  assert_contains "counterfactual artifact preserves linus response" "linus review" "$research_dir/linus/artifact.txt"
+
+  awk '
+    found && /^===== GEMINI PROMPT PAYLOAD END =====$/ { exit }
+    found { print; next }
+    prev == "---" && $0 == "Trust Boundary" {
+      print prev
+      print
+      found = 1
+      next
+    }
+    { prev = $0 }
+  ' "$research_dir/none/artifact.txt" > "$TMP_ROOT/research-none-tail.txt"
+  awk '
+    found && /^===== GEMINI PROMPT PAYLOAD END =====$/ { exit }
+    found { print; next }
+    prev == "---" && $0 == "Trust Boundary" {
+      print prev
+      print
+      found = 1
+      next
+    }
+    { prev = $0 }
+  ' "$research_dir/linus/artifact.txt" > "$TMP_ROOT/research-linus-tail.txt"
+  assert_eq "research arms share identical non-personality prompt payload" \
+    "$(sha256sum "$TMP_ROOT/research-none-tail.txt" | awk '{print $1}')" \
+    "$(sha256sum "$TMP_ROOT/research-linus-tail.txt" | awk '{print $1}')"
+}
+
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
@@ -1511,10 +1747,12 @@ test_check_ci_paginates_required_check_runs
 test_check_runs_summary_reports_only_needed_plumbing
 test_ci_states
 test_config_file_resolution
+test_personality_config_resolution
 test_private_key_permissions
 test_log_rotation
 test_run_once_sync_failure_fails_closed
 test_reviewer_attempt_budget_stops_repeated_expensive_failures
 test_reviewer_failure_cap_skips_poisoned_pr
+test_reviewer_research_capture_posts_selected_review_only
 
 printf 'passed %s fixture assertions\n' "$pass_count"

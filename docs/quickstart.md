@@ -31,20 +31,21 @@ scripts/configure.sh  # auto-detects target repo + installation ID when possible
 
 The `gemini` step is intentionally interactive when you want Google-account quota, including Google AI Pro or Ultra entitlement. Gemini CLI's documented non-interactive auth paths are `GEMINI_API_KEY` and Vertex AI credentials, which use API/Vertex quota and billing rather than personal subscription quota. Keep any Gemini API keys, Vertex credentials, or cached Google auth state out of this repo and checkout.
 
-`configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, walks you through the personality choice, and offers to create helper labels. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
+`configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, asks which review style should be posted, asks whether public-repo research artifacts may be retained, and offers to create helper labels. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
 
 ```bash
 scripts/configure-inner.sh \
   --app-id APP_ID \
   --key-path /var/lib/goobreview/example/app-key.pem \
-  --personality config/personalities/control.md
+  --posted-personality none \
+  --research-consent 0
 ```
 
 Add `--create-labels` only when you want the helper labels created. Add
 `--repo OWNER/REPO` if the App has access to multiple repos. Add
 `--installation-id ID` if you already know it; otherwise the script discovers it.
 
-The most consequential choice is **which personality**: it defines the reviewer's role and voice. Out of the box: `control.md` (general-purpose, no voice direction) or `linus.md` (opinionated, profane-when-warranted). To add a new one, drop a `.md` file in `config/personalities/` in your fork and select it.
+The most consequential product choice is **which style gets posted**: `none` posts the neutral control reviewer, while `linus` posts the blunt Linus-style reviewer. Research consent is separate: on public repositories only, it lets live runs retain paired control/Linus prompt+response artifacts for later analysis. Consent never changes which review style is posted.
 
 The second choice is the **blinding policy** in `config/reviewer.env`: `REVIEWER_INCLUDE_AUTHOR` (default `0` — the reviewer never learns the author's username), `REVIEWER_INCLUDE_DESCRIPTION`, and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (both default `1`, included as author claims to verify against the diff). The rest of the prompt — check-run results, the bot's previous review, the per-file diff, the snapshot pointer — is fixed; forks edit `scripts/reviewer/lib/prompt.sh` to change the shape.
 
@@ -94,7 +95,7 @@ To iterate on voice or prompt shape, use the tuning wrapper:
 scripts/tune.sh 123
 ```
 
-It opens the active personality file and `reviewer.env` (blinding policy, budgets), then offers to run another dry run.
+It opens the active personality file and `reviewer.env` (posted style, research consent, blinding policy, budgets), then offers to run another dry run.
 
 ## 6. Enable The Scheduler
 
