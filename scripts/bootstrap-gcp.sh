@@ -152,6 +152,27 @@ EOF
 ops_require_command curl "Run this in Google Cloud Shell, or install curl first."
 ops_require_command git "Run this in Google Cloud Shell, or install git first."
 ops_require_command gcloud "Run this in Google Cloud Shell, or install gcloud first."
+
+if ! gcloud_auth_ready; then
+  cat >&2 <<EOF
+[bootstrap-gcp] No active gcloud account is selected in this shell.
+
+GoobReview needs the Google account that will own or access the VM to be active
+before it can inspect projects, find billing, or create anything.
+
+Cloud SDK config: $(gcloud_config_location)
+
+Run:
+  gcloud auth login
+  bash scripts/status.sh
+
+If Gemini is operating this shell for the real user, it can run:
+  gcloud auth login --no-launch-browser
+then show the browser URL/code to the human and rerun this script after auth.
+EOF
+  exit 1
+fi
+
 bash "$SCRIPT_DIR/preflight/checkout.sh" --strict
 preflight_source_access
 

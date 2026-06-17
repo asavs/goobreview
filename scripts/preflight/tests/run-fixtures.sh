@@ -56,16 +56,31 @@ if [ -n "$checkout_fixture" ]; then
 fi
 
 case "$cmd" in
+  auth:list)
+    case "$fixture" in
+      unauthenticated) ;;
+      *) printf '%s\n' user@example.test ;;
+    esac
+    ;;
+
   config:get-value)
     case "$fixture" in
       no-active-two-billed|no-active-inferred-billing|no-active-no-billed-with-account|no-active-no-billing) echo "(unset)" ;;
       active-unbilled-with-alternative|active-billed-compute-disabled) echo "alpha-project" ;;
+      unauthenticated)
+        echo "ERROR: (gcloud.config.get-value) You do not currently have an active account selected." >&2
+        exit 1
+        ;;
       *) exit 2 ;;
     esac
     ;;
 
   projects:list)
     case "$fixture" in
+      unauthenticated)
+        echo "ERROR: (gcloud.projects.list) You do not currently have an active account selected." >&2
+        exit 1
+        ;;
       no-active-two-billed|no-active-inferred-billing|active-unbilled-with-alternative)
         printf '%s\n' alpha-project beta-project gamma-project
         ;;
@@ -290,6 +305,21 @@ assert_not_contains() {
     fail "$name"
   fi
   pass "$name"
+}
+
+test_unauthenticated_gcloud_stops_before_project_inference() {
+  local out="$TMP_ROOT/unauthenticated.txt" report="$TMP_ROOT/unauthenticated.report"
+
+  CLOUDSDK_CONFIG=/tmp/goobreview-isolated run_gcloud_preflight unauthenticated "$out"
+
+  assert_contains "unauthenticated reports no active account" "active account:          none" "$out"
+  assert_contains "unauthenticated reports Cloud SDK config" "Cloud SDK config:        /tmp/goobreview-isolated" "$out"
+  assert_contains "unauthenticated points to auth login" "gcloud auth login" "$out"
+  assert_not_contains "unauthenticated avoids billing diagnosis" "Set up Cloud Billing" "$out"
+
+  CLOUDSDK_CONFIG=/tmp/goobreview-isolated run_gcloud_preflight unauthenticated "$report" --report
+  assert_contains "unauthenticated report marks auth false" "gcloud_authenticated='false'" "$report"
+  assert_contains "unauthenticated report includes config" "cloudsdk_config='/tmp/goobreview-isolated'" "$report"
 }
 
 test_no_active_project_lists_billing_ready_projects() {
@@ -550,6 +580,7 @@ test_launch_check_rejects_changed_config() {
   pass "launch check rejects changed required-check config"
 }
 
+test_unauthenticated_gcloud_stops_before_project_inference
 test_no_active_project_lists_billing_ready_projects
 test_no_active_project_infers_billing_account_from_projects
 test_no_active_project_with_billing_account_but_no_billed_project

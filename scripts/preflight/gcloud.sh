@@ -17,7 +17,7 @@ usage() {
 Usage: bash scripts/preflight/gcloud.sh [--report]
 
 Checks the active gcloud project, billing state, Compute Engine API state,
-and prints the recommended next setup action.
+active account, and prints the recommended next setup action.
 
 Options:
   --report   Emit machine-readable key=value output.
@@ -88,7 +88,10 @@ print_project_list() {
 }
 
 gcloud_found=0
+gcloud_authenticated=0
+active_account=""
 active_project=""
+cloudsdk_config=""
 usable_project=0
 project_exists_state="unknown"
 billing_enabled_state="unknown"
@@ -103,58 +106,66 @@ recommendation=""
 
 if gcloud_command_found gcloud; then
   gcloud_found=1
-  active_project="$(gcloud_active_project)"
-  if gcloud_project_is_usable "$active_project"; then
-    usable_project=1
-  fi
+  active_account="$(gcloud_active_account)"
+  cloudsdk_config="$(gcloud_config_location)"
 
-  billing_raw="$(gcloud_list_open_billing_accounts)"
-  if [ -n "$billing_raw" ]; then
-    billing_account_count="$(printf '%s\n' "$billing_raw" | wc -l | tr -d ' ')"
-  else
-    billing_account_count="0"
-  fi
+  if [ -n "$active_account" ]; then
+    gcloud_authenticated=1
+    active_project="$(gcloud_active_project)"
+    if gcloud_project_is_usable "$active_project"; then
+      usable_project=1
+    fi
 
-  accessible_projects="$(gcloud_list_accessible_projects)"
-  if [ -n "$accessible_projects" ]; then
-    project_count="$(printf '%s\n' "$accessible_projects" | wc -l | tr -d ' ')"
-  else
-    project_count="0"
-  fi
-
-  billing_enabled_projects="$(gcloud_list_billing_enabled_projects)"
-  if [ -n "$billing_enabled_projects" ]; then
-    billing_enabled_project_count="$(printf '%s\n' "$billing_enabled_projects" | wc -l | tr -d ' ')"
-    first_billing_project="$(printf '%s\n' "$billing_enabled_projects" | sed -n '1p')"
-    case "$billing_enabled_project_count" in
-      1) billing_enabled_project_hint="$first_billing_project" ;;
-      *) billing_enabled_project_hint="$first_billing_project (+$((billing_enabled_project_count - 1)) more)" ;;
-    esac
-  else
-    billing_enabled_project_count="0"
-  fi
-
-  if [ "$usable_project" -eq 1 ]; then
-    if gcloud_project_exists "$active_project"; then
-      project_exists_state="true"
-      if gcloud_project_billing_enabled "$active_project"; then
-        billing_enabled_state="true"
-      else
-        billing_enabled_state="false"
-      fi
-      if gcloud_compute_api_enabled "$active_project"; then
-        compute_api_state="true"
-      else
-        compute_api_state="false"
-      fi
+    billing_raw="$(gcloud_list_open_billing_accounts)"
+    if [ -n "$billing_raw" ]; then
+      billing_account_count="$(printf '%s\n' "$billing_raw" | wc -l | tr -d ' ')"
     else
-      project_exists_state="false"
+      billing_account_count="0"
+    fi
+
+    accessible_projects="$(gcloud_list_accessible_projects)"
+    if [ -n "$accessible_projects" ]; then
+      project_count="$(printf '%s\n' "$accessible_projects" | wc -l | tr -d ' ')"
+    else
+      project_count="0"
+    fi
+
+    billing_enabled_projects="$(gcloud_list_billing_enabled_projects)"
+    if [ -n "$billing_enabled_projects" ]; then
+      billing_enabled_project_count="$(printf '%s\n' "$billing_enabled_projects" | wc -l | tr -d ' ')"
+      first_billing_project="$(printf '%s\n' "$billing_enabled_projects" | sed -n '1p')"
+      case "$billing_enabled_project_count" in
+        1) billing_enabled_project_hint="$first_billing_project" ;;
+        *) billing_enabled_project_hint="$first_billing_project (+$((billing_enabled_project_count - 1)) more)" ;;
+      esac
+    else
+      billing_enabled_project_count="0"
+    fi
+
+    if [ "$usable_project" -eq 1 ]; then
+      if gcloud_project_exists "$active_project"; then
+        project_exists_state="true"
+        if gcloud_project_billing_enabled "$active_project"; then
+          billing_enabled_state="true"
+        else
+          billing_enabled_state="false"
+        fi
+        if gcloud_compute_api_enabled "$active_project"; then
+          compute_api_state="true"
+        else
+          compute_api_state="false"
+        fi
+      else
+        project_exists_state="false"
+      fi
     fi
   fi
 fi
 
 if [ "$gcloud_found" -ne 1 ]; then
   recommendation="Run this from Google Cloud Shell or install/authenticate gcloud first."
+elif [ "$gcloud_authenticated" -ne 1 ]; then
+  recommendation="Authenticate gcloud in this shell before starting Gemini: run 'gcloud auth login', then 'bash scripts/status.sh'. If Gemini is operating the shell, it can run 'gcloud auth login --no-launch-browser' and ask the human to finish the browser step."
 elif [ "$usable_project" -ne 1 ]; then
   if [ "$billing_enabled_project_count" = "1" ]; then
     recommendation="Select billing-enabled project '$first_billing_project' with: gcloud config set project '$first_billing_project'; then run bash scripts/bootstrap-gcp.sh."
@@ -183,6 +194,9 @@ fi
 
 if [ "$report" -eq 1 ]; then
   print_field "gcloud_found" "$(bool "$gcloud_found")"
+  print_field "gcloud_authenticated" "$(bool "$gcloud_authenticated")"
+  print_field "active_account" "$active_account"
+  print_field "cloudsdk_config" "$cloudsdk_config"
   print_field "active_project" "$active_project"
   print_field "usable_project" "$(bool "$usable_project")"
   print_field "project_exists" "$project_exists_state"
@@ -201,6 +215,8 @@ cat <<EOF
 GCloud preflight
 ----------------
 gcloud installed:        $(bool "$gcloud_found")
+active account:          ${active_account:-none}
+Cloud SDK config:        ${cloudsdk_config:-unknown}
 active project:          ${active_project:-none}
 usable project:          $(bool "$usable_project")
 project exists:          $project_exists_state

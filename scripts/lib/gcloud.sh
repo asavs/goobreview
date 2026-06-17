@@ -12,6 +12,22 @@ gcloud_active_project() {
   gcloud config get-value project 2>/dev/null || true
 }
 
+# Print the active gcloud account, if one is selected.
+gcloud_active_account() {
+  gcloud auth list --filter='status:ACTIVE' --format='value(account)' 2>/dev/null | sed -n '1p' || true
+}
+
+# Return success when gcloud has an active account in the current Cloud SDK
+# config. Project and billing discovery is misleading without this.
+gcloud_auth_ready() {
+  [ -n "$(gcloud_active_account)" ]
+}
+
+# Print the Cloud SDK config location relevant to gcloud auth state.
+gcloud_config_location() {
+  printf '%s' "${CLOUDSDK_CONFIG:-default}"
+}
+
 # Return success when a project value is usable for Compute Engine setup.
 gcloud_project_is_usable() {
   local project="$1"
