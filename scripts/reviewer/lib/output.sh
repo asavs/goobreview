@@ -239,6 +239,20 @@ pull_request_queue_rows() {
   jq -r '[.number, .user.login, .head.sha, (.draft // false), (. | @base64)] | @tsv'
 }
 
+pr_has_requested_reviewer() {
+  local pr_json="$1"
+  local bot_login="$2"
+  local bot_author="${3:-}"
+
+  [ -n "$pr_json" ] || return 1
+  printf '%s\n' "$pr_json" |
+    jq -e --arg bot "$bot_login" --arg bot_author "$bot_author" '
+      [
+        .requested_reviewers[]? | .login // empty
+      ] | any(. == $bot or (. == $bot_author and $bot_author != ""))
+    ' >/dev/null
+}
+
 reviewer_pr_skip_reason() {
   local num="$1"
   local author="$2"

@@ -1077,6 +1077,166 @@ test_pr_queue_skip_reasons() {
     fail "reviewable PR has no skip reason"
   fi
   pass "reviewable PR has no skip reason"
+
+  if ! pr_has_requested_reviewer '{"requested_reviewers":[{"login":"goobreview[bot]"}]}' 'goobreview[bot]' 'app/goobreview'; then
+    fail "requested bot reviewer is detected"
+  fi
+  pass "requested bot reviewer is detected"
+
+  if pr_has_requested_reviewer '{"requested_reviewers":[{"login":"alice"}]}' 'goobreview[bot]' 'app/goobreview'; then
+    fail "unrelated requested reviewer is ignored"
+  fi
+  pass "unrelated requested reviewer is ignored"
+}
+
+test_reviewer_re_requested_review_bypasses_reviewed_sha_skip() {
+  local state_dir runtime_dir test_reviewer env_file key_file bin_dir ci_count posts_file status output
+
+  state_dir="$TMP_ROOT/re-request-state"
+  runtime_dir="$TMP_ROOT/re-request-runtime"
+  test_reviewer="$TMP_ROOT/re-request-reviewer"
+  bin_dir="$TMP_ROOT/re-request-bin"
+  ci_count="$TMP_ROOT/re-request-ci-count"
+  posts_file="$TMP_ROOT/re-request-posts"
+  mkdir -p "$state_dir" "$runtime_dir" "$bin_dir"
+  cp -R "$REVIEWER_DIR" "$test_reviewer"
+  : > "$posts_file"
+
+  cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  token) printf 'test-token\n' ;;
+  slug)  printf 'goobreview\n' ;;
+  *)     exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/get-installation-token.sh"
+
+  cat > "$test_reviewer/check-ci.sh" <<EOF
+#!/usr/bin/env bash
+count=\$(cat "$ci_count" 2>/dev/null || printf 0)
+count=\$((count + 1))
+printf '%s\n' "\$count" > "$ci_count"
+printf 'failing\n'
+EOF
+  chmod +x "$test_reviewer/check-ci.sh"
+
+  cat > "$bin_dir/curl" <<'EOF'
+#!/usr/bin/env bash
+method=GET
+body_file=""
+url="${*: -1}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -X)
+      method="$2"
+      shift 2
+      ;;
+    -o)
+      body_file="$2"
+      shift 2
+      ;;
+    -D|-w|--data)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+case "$method $url" in
+  *'GET '*'repos/example/repo/pulls?state=open&per_page=100&page=1')
+    if [ "${REQUEST_REVIEWER:-0}" = "1" ]; then
+      printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"},"requested_reviewers":[{"login":"goobreview[bot]"}]}]' > "$body_file"
+    else
+      printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"},"requested_reviewers":[]}]' > "$body_file"
+    fi
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/pulls/1/reviews?per_page=100&page=1')
+    printf '%s\n' '[{"user":{"login":"goobreview[bot]"},"commit_id":"sha1","state":"APPROVED"}]' > "$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/commits/sha1/check-runs?filter=latest&per_page=100&page=1')
+    printf '%s\n' '{"total_count":1,"check_runs":[{"name":"ci","status":"completed","conclusion":"failure"}]}' > "$body_file"
+    printf '200'
+    ;;
+  *'POST '*'repos/example/repo/pulls/1/reviews')
+    printf 'post\n' >> "$POSTS_FILE"
+    printf '%s\n' '{"id":1}' > "$body_file"
+    printf '200'
+    ;;
+  *)
+    printf 'unexpected curl %s %s\n' "$method" "$url" >&2
+    printf '000'
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  cat > "$bin_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$bin_dir/gh"
+
+  cat > "$bin_dir/gemini" <<'EOF'
+#!/usr/bin/env bash
+printf 'Looks good.\nAPPROVE\n'
+EOF
+  chmod +x "$bin_dir/gemini"
+
+  key_file="$TMP_ROOT/re-request-key.pem"
+  printf 'key\n' > "$key_file"
+  chmod 600 "$key_file"
+
+  printf '## Role\nReview.\n' > "$TMP_ROOT/re-request-personality.md"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/re-request-engine.md"
+  printf '["ci"]\n' > "$TMP_ROOT/re-request-required.json"
+
+  env_file="$TMP_ROOT/re-request.env"
+  cat > "$env_file" <<EOF
+REVIEWER_REPO=example/repo
+REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1
+REVIEWER_STATE=$state_dir
+REVIEWER_RUNTIME_STATE=$runtime_dir
+REVIEWER_APP_ID=1
+REVIEWER_APP_INSTALLATION_ID=2
+REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/re-request-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/re-request-engine.md
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/re-request-required.json
+REVIEWER_MAX_PRS=1
+REVIEWER_MAX_ATTEMPTS=1
+EOF
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; POSTS_FILE="$posts_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "reviewed SHA without re-request fixture exits successfully"
+  fi
+  pass "reviewed SHA without re-request fixture exits successfully"
+  assert_not_contains "reviewed SHA without re-request does not post" "post" "$posts_file"
+  assert_contains "reviewed SHA without re-request logs skip" "PR #1@sha1 already reviewed by goobreview[bot], skipping" "$state_dir/log.txt"
+
+  : > "$posts_file"
+  : > "$state_dir/log.txt"
+  rm -f "$ci_count"
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REQUEST_REVIEWER=1 POSTS_FILE="$posts_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "reviewed SHA with re-request fixture exits successfully"
+  fi
+  pass "reviewed SHA with re-request fixture exits successfully"
+  assert_eq "re-requested review reaches CI gate" "1" "$(cat "$ci_count")"
+  assert_contains "re-requested review posts despite reviewed SHA" "post" "$posts_file"
+  assert_contains "re-requested review logs bypass" "PR #1@sha1 already reviewed by goobreview[bot], but review was re-requested; reviewing again" "$state_dir/log.txt"
 }
 
 test_run_once_sync_failure_fails_closed() {
@@ -1343,6 +1503,7 @@ test_invalid_verdict_state
 test_artifact_secret_safety
 test_state_and_output_permissions
 test_pr_queue_skip_reasons
+test_reviewer_re_requested_review_bypasses_reviewed_sha_skip
 test_gemini_invocation_isolates_review_context
 test_github_api_retries_and_logs
 test_post_review_uses_rest_api
