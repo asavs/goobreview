@@ -9,8 +9,8 @@ Five phases:
 
 1. **Provision** — VM exists, dependencies installed.
 2. **Register** — GitHub App created, key on VM, App installed on target repo.
-3. **Configure** — per-deployment config written (repo, App credentials, personality, prompt shape).
-4. **Tune** — iterate personality + prompt against real PRs without posting.
+3. **Configure** - per-deployment config written (repo, App credentials, posted style, research consent, prompt policy).
+4. **Tune** - iterate posted style, personality files, and prompt policy against real PRs without posting.
 5. **Launch** — flip on the scheduler.
 
 For each step: what the user types, what actually happens, what they need to
@@ -140,14 +140,15 @@ trust prompt, then return control to the setup agent for `scripts/configure.sh`.
    - Installation ID auto-discovered by calling
      `scripts/reviewer/get-installation-token.sh discover <owner/repo>`.
 4. Offers to open `reviewer.env` in `$EDITOR` for other settings.
-5. **Personality picker** — lists `config/personalities/*.md` files by basename
-   (currently `control`, `linus`), prompts for index. Writes selection to
-   `REVIEWER_PERSONALITY_FILE`.
-6. **Required-checks** — copies `required-checks.example.json` → `required-checks.json`
+5. **Posted style picker** - prompts for `none` or `linus` and writes
+   `REVIEWER_POSTED_PERSONALITY`.
+6. **Research consent** - prompts whether public-repo paired artifacts may be
+   retained and writes `REVIEWER_RESEARCH_CONSENT`.
+7. **Required-checks** - copies `required-checks.example.json` → `required-checks.json`
    if missing, offers to edit.
-7. **Labels** — offers to create helper labels (`agent-reviewed`,
+8. **Labels** - offers to create helper labels (`agent-reviewed`,
    `agent-requested-changes`, `needs-human-decision`) on the target repo.
-8. Prints "next steps" pointing at `dry-run.sh` and `enable-cron.sh`.
+9. Prints "next steps" pointing at `dry-run.sh` and `enable-cron.sh`.
 
 **State after Phase 3:**
 - `config/reviewer.env` and `config/required-checks.json` populated.
@@ -155,11 +156,11 @@ trust prompt, then return control to the setup agent for `scripts/configure.sh`.
 - Reviewer is fully configured but not yet running on a schedule.
 
 **Friction notes:**
-- Re-running to change one thing (e.g. personality) walks through everything.
+- Re-running to change one thing (e.g. posted style) walks through everything.
   Pre-filled defaults mean it's mostly "press enter 5 times", but it's the kind
   of papercut that makes you not want to iterate.
-- Personality picker shows file basenames only — no description of what
-  `control` vs `linus` produces.
+- Posted style picker should make clear that `none` maps to control and `linus`
+  maps to the blunt gallery file.
 - Personality *content* lives in `config/personalities/<file>.md`; nothing in
   the configure flow tells you that's the file to edit if you want to change
   the reviewer's voice.
@@ -192,12 +193,15 @@ cat /var/lib/goobreview/example/dry-pr-123.txt
 - Gemini's full response.
 
 **To iterate:**
-- **Change which personality is used:** edit `REVIEWER_PERSONALITY_FILE` in
-  `config/reviewer.env`, or re-run `configure.sh`.
+- **Change which review style is posted:** edit `REVIEWER_POSTED_PERSONALITY`
+  in `config/reviewer.env`, or re-run `configure.sh`.
+- **Change whether paired artifacts are retained:** edit
+  `REVIEWER_RESEARCH_CONSENT` in `config/reviewer.env`. Consent only affects
+  public-repo artifact retention; it never changes which review posts.
 - **Change what the personality says:** edit `config/personalities/<file>.md`
   directly. Re-run `dry-run.sh`.
-- **Add a new personality:** drop a new `.md` in `config/personalities/`,
-  then point `REVIEWER_PERSONALITY_FILE` at it.
+- **Add a new personality:** drop a new `.md` in `config/personalities/` and
+  update the product mapping before exposing it as a supported posted style.
 - **Change the blinding policy** (author username, PR description, commit
   subjects): edit the `REVIEWER_INCLUDE_*` flags in `config/reviewer.env`.
   The prompt composition itself is fixed; forks edit
@@ -223,9 +227,8 @@ cat /var/lib/goobreview/example/dry-pr-123.txt
 - Dedicated `scripts/tune.sh` now wraps the loop of editing the active
   personality/blinding policy and running another dry run.
 - No way to diff two dry-run artifacts to see "did my edit help?"
-- The split between "what the personality says" (markdown file) and "which
-  personality is selected" (env var) means changing voice requires editing
-  two surfaces depending on what kind of change you want.
+- The split between posted style, consent, and personality file content is now
+  explicit, but `scripts/status.sh` should keep reporting the active state.
 - _(fill in as you walk through)_
 
 ---
@@ -292,7 +295,8 @@ scripts/enable-cron.sh
 | Want to change... | Edit... |
 | --- | --- |
 | What the reviewer "sounds like" | `config/personalities/<file>.md` |
-| Which personality is active | `REVIEWER_PERSONALITY_FILE` in `config/reviewer.env` |
+| Which review style is posted | `REVIEWER_POSTED_PERSONALITY` in `config/reviewer.env` |
+| Whether paired artifacts are retained | `REVIEWER_RESEARCH_CONSENT` in `config/reviewer.env` |
 | Blinding policy (author, description, commit subjects) | `REVIEWER_INCLUDE_*` in `config/reviewer.env` |
 | The prompt payload shape itself | `scripts/reviewer/lib/prompt.sh` (fork-owned) |
 | The invariant review-event output contract | `scripts/reviewer/review-prompt.md` (rarely) |

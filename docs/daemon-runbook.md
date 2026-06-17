@@ -23,6 +23,7 @@ sync.log                Checkout sync log.
 app_token.json          Cached App installation token + slug (refreshed when <5 min remain).
 app-key.pem             GitHub App private key (you provide; mode 0600).
 dry-pr-<number>.txt     Dry-run artifact with full Gemini prompt payload and response.
+research-runs/          Consented public-repo paired control/Linus artifacts.
 *.txt.launch.json       Launch metadata from a dry run: repo, config hashes, required checks, and CI-bypass state.
 ```
 
@@ -197,11 +198,12 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
 6. Counts the PR against `REVIEWER_MAX_ATTEMPTS`, then applies the required-check gate.
 7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current` and neutralizes any symlinks into metadata stubs before prompt assembly or Gemini access.
-8. Builds the prompt: personality, trust preamble, compact PR metadata with the author's description as claims to verify (author username blinded by default), commit subjects, GitHub check-run results, previous bot review on the same PR, the snapshot mount path with a pointer at the repo's own `AGENTS.md`/`CONTRIBUTING.md`/`GUIDELINES.md` conventions, the per-file diff with changed-file index and whole-file omission markers (lockfiles plus the repo's `.gitattributes` `linguist-generated` patterns), and the GitHub review formatting rule. Composition is fixed in `scripts/reviewer/lib/prompt.sh`; blinding policy and budgets come from `reviewer.env`.
+8. Builds the prompt with the configured posted style (`REVIEWER_POSTED_PERSONALITY=none` uses `control.md`; `linus` uses `linus.md`), trust preamble, compact PR metadata with the author's description as claims to verify (author username blinded by default), commit subjects, GitHub check-run results, previous bot review on the same PR, the snapshot mount path with a pointer at the repo's own `AGENTS.md`/`CONTRIBUTING.md`/`GUIDELINES.md` conventions, the per-file diff with changed-file index and whole-file omission markers (lockfiles plus the repo's `.gitattributes` `linguist-generated` patterns), and the GitHub review formatting rule. Composition is fixed in `scripts/reviewer/lib/prompt.sh`; posted style, research consent, blinding policy, and budgets come from `reviewer.env`.
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Posts a top-level GitHub review through the GitHub REST API.
 12. Applies optional labels.
+13. If `REVIEWER_RESEARCH_CONSENT=1` and the target repository is public, saves paired control/Linus prompt+response artifacts under `REVIEWER_STATE/research-runs/`. The posted style is still the only review posted to GitHub; the other style is counterfactual research data.
 
 Queued skips, attempted reviews, and posted reviews are separate counters.
 Drafts, self-authored PRs, PRs outside `REVIEWER_ONLY_PR`, and
@@ -275,7 +277,7 @@ node scripts/reviewer/lib/app-token.mjs token \
 
 The reviewer reads two gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` writes them interactively, and the example files themselves carry the authoritative inline documentation:
 
-- **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_PERSONALITY_FILE` (no default — the daemon fails loudly when it is unset; `configure.sh` pre-selects `config/personalities/control.md`). Also carries the blinding policy: `REVIEWER_INCLUDE_AUTHOR` (default `0`), `REVIEWER_INCLUDE_DESCRIPTION` and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (default `1`).
+- **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_POSTED_PERSONALITY` (`none` or `linus`; default `none`). `REVIEWER_RESEARCH_CONSENT` defaults to `0`; when set to `1`, public live reviews retain paired control/Linus artifacts under `REVIEWER_STATE/research-runs/`. Also carries the blinding policy: `REVIEWER_INCLUDE_AUTHOR` (default `0`), `REVIEWER_INCLUDE_DESCRIPTION` and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (default `1`).
 - **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon fetches all check-run pages for the PR head before deciding whether a required check is missing, waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
 
 GitHub API calls are bounded by default. Shell-based REST calls use `REVIEWER_GITHUB_CONNECT_TIMEOUT` (default `10` seconds), `REVIEWER_GITHUB_MAX_TIME` (default `60` seconds), `REVIEWER_GITHUB_RETRIES` (default `2` retries for safe transient GET failures such as network errors, 5xx, 429, or rate-limit-like 403 responses), and `REVIEWER_GITHUB_RETRY_SLEEP` (default `1` second between attempts). The Node App-token helper uses `REVIEWER_GITHUB_FETCH_TIMEOUT` (default `60` seconds) as its fetch abort timeout. Failed GitHub API calls log the method, path, curl status, HTTP status, attempt count, and a short redacted response snippet so operators can distinguish auth/configuration errors from transient GitHub failures without leaking tokens. Check-run summaries include whether the fetched data is complete and whether the displayed rows were intentionally truncated; set `REVIEWER_CHECK_RUN_SUMMARY_LIMIT` (default `200`) to change the display limit without changing required-check gating.
@@ -293,10 +295,10 @@ scripts/launch-check.sh
 
 The first command writes the normal dry-run artifact and a sibling `.launch.json` file. The second confirms that the launch metadata still matches the current target repo and required-check config.
 
-Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim and selected via `REVIEWER_PERSONALITY_FILE`. To try one in a dry run without editing config:
+Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim. Operators choose the posted style with `REVIEWER_POSTED_PERSONALITY=none|linus`; the legacy `REVIEWER_PERSONALITY_FILE` path remains as an escape hatch for old configs when `REVIEWER_POSTED_PERSONALITY` is unset. To try Linus in a dry run without editing config:
 
 ```bash
-REVIEWER_PERSONALITY_FILE=config/personalities/linus.md scripts/dry-run.sh 42
+REVIEWER_POSTED_PERSONALITY=linus scripts/dry-run.sh 42
 ```
 
 The engine prompt at `scripts/reviewer/review-prompt.md` only defines the parsed output contract (first line `APPROVE`/`REQUEST_CHANGES`/`COMMENT`, rest is the review body) — edit it only to change that contract; everything voice-related belongs in a personality file.

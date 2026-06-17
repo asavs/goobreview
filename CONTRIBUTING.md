@@ -37,13 +37,15 @@ Forks are encouraged. The reviewer is designed to be specialized through
 **config files**, not by editing scripts. To change personality, edit (in
 order of impact):
 
-1. `config/personalities/<name>.md` — role, voice, focus areas. Add new personalities by dropping a `.md` file in this directory. Existing entries (e.g. `linus.md`, `control.md`) are committed verbatim; pick one via `REVIEWER_PERSONALITY_FILE` in `reviewer.env`.
-2. `config/required-checks.example.json` — CI gates that must pass before the reviewer calls Gemini.
+1. `REVIEWER_POSTED_PERSONALITY=none|linus` - which review style posts to GitHub. `none` uses `config/personalities/control.md`; `linus` uses `config/personalities/linus.md`.
+2. `REVIEWER_RESEARCH_CONSENT=0|1` - whether public-repo runs may retain paired control/Linus research artifacts. This never changes which review posts.
+3. `config/personalities/<name>.md` - role, voice, focus areas. Existing entries are committed verbatim; `REVIEWER_PERSONALITY_FILE` is only a legacy/internal escape hatch for direct file selection.
+4. `config/required-checks.example.json` - CI gates that must pass before the reviewer calls Gemini.
 
 Edit the `.example.*` siblings in your fork. End users will copy them to
 their non-example names with `scripts/configure.sh`. (Personalities are the
-exception — gallery files have no `.example` layer; users select an existing
-gallery entry or write a new one and PR it.)
+exception - gallery files have no `.example` layer; users select an existing
+posted style or write a new gallery entry and PR it.)
 
 Keep forks honest about scope. If a reviewer is specialized, make the
 personality file say what it is good at and when it should use `COMMENT`

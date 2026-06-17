@@ -34,4 +34,6 @@ run_sensor "$SCRIPT_DIR/preflight/app.sh"
 printf '\n'
 run_sensor "$SCRIPT_DIR/preflight/config.sh"
 printf '\n'
+run_sensor "$SCRIPT_DIR/preflight/research.sh"
+printf '\n'
 run_sensor "$SCRIPT_DIR/preflight/runtime.sh"

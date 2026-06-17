@@ -21,7 +21,11 @@ ops_require_executable "$DRY_RUN_SH" "This checkout looks incomplete."
 ops_source_env "$ENV_FILE"
 ops_require_envs REVIEWER_REPO
 
-personality_file="${REVIEWER_PERSONALITY_FILE:-config/personalities/control.md}"
+case "${REVIEWER_POSTED_PERSONALITY:-}" in
+  linus) personality_file="config/personalities/linus.md" ;;
+  none|'') personality_file="${REVIEWER_PERSONALITY_FILE:-config/personalities/control.md}" ;;
+  *) personality_file="${REVIEWER_PERSONALITY_FILE:-config/personalities/control.md}" ;;
+esac
 case "$personality_file" in
   /*) personality_path="$personality_file" ;;
   *) personality_path="$REPO_ROOT/$personality_file" ;;

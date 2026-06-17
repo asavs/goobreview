@@ -180,9 +180,9 @@ After you quit Gemini CLI, let the setup agent continue with:
 scripts/configure.sh
 ```
 
-`configure.sh` auto-detects the target repo plus App installation ID when the App installation exposes exactly one repo, then lets you pick a personality and offers to open the generated config files in `$EDITOR`. If the App can see multiple repos, it prompts for `owner/repo`.
+`configure.sh` auto-detects the target repo plus App installation ID when the App installation exposes exactly one repo, then asks which style should be posted and whether public-repo research artifacts may be retained. It also offers to open the generated config files in `$EDITOR`. If the App can see multiple repos, it prompts for `owner/repo`.
 
-Personality choice is the most consequential decision before your first dry run: it defines what kind of reviewer this is. `control` is neutral and general-purpose. `linus` is intentionally blunt. You can change this later with `scripts/tune.sh`.
+Posted style is the most consequential decision before your first dry run: `none` is neutral and general-purpose, while `linus` is intentionally blunt. Research consent is separate; it controls artifact retention only, not which review posts. You can change both later with `scripts/tune.sh` or `config/reviewer.env`.
 
 Quick check on the VM:
 

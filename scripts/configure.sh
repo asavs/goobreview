@@ -161,36 +161,34 @@ fi
 ops_require_nonempty "REVIEWER_REPO" "$repo"
 ops_validate_owner_repo "$repo" REVIEWER_REPO
 
-PERSONALITY_GALLERY="$CONFIG_DIR/personalities"
-gallery=()
-if [ -d "$PERSONALITY_GALLERY" ]; then
-  while IFS= read -r f; do
-    gallery+=("$f")
-  done < <(find "$PERSONALITY_GALLERY" -maxdepth 1 -type f -name '*.md' | sort)
+current_posted_personality="$(ops_env_get "$ENV_FILE" REVIEWER_POSTED_PERSONALITY)"
+if [ -z "$current_posted_personality" ]; then
+  current_personality="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
+  case "$current_personality" in
+    *linus.md) current_posted_personality="linus" ;;
+    *) current_posted_personality="none" ;;
+  esac
 fi
-if [ "${#gallery[@]}" -eq 0 ]; then
-  log "No personalities found in $PERSONALITY_GALLERY; cannot continue."
-  exit 1
-fi
+case "$current_posted_personality" in
+  linus) default_idx=1 ;;
+  *) default_idx=0 ;;
+esac
+log "Which review style should be posted to GitHub?"
+log "  0) [$( [ "$default_idx" -eq 0 ] && printf '*' || printf ' ' )] none  - general-purpose review focus, neutral voice"
+log "  1) [$( [ "$default_idx" -eq 1 ] && printf '*' || printf ' ' )] linus - same review focus, blunt/profane when warranted"
+pick="$(ask 'Pick posted review style by number' "$default_idx")"
+case "$pick" in
+  1) posted_personality="linus" ;;
+  *) posted_personality="none" ;;
+esac
 
-current_personality="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
-default_idx=0
-chosen="${current_personality:-config/personalities/control.md}"
-log "Available personalities:"
-for i in "${!gallery[@]}"; do
-  rel="${gallery[$i]#$REPO_ROOT/}"
-  marker=" "
-  if [ "$rel" = "$current_personality" ]; then
-    marker="*"
-    default_idx="$i"
-  fi
-  log "  $i) [$marker] $(basename "${gallery[$i]}" .md) - $(personality_summary "${gallery[$i]}")"
-done
-pick="$(ask 'Pick a personality by number' "$default_idx")"
-if [[ "$pick" =~ ^[0-9]+$ ]] && [ "$pick" -ge 0 ] && [ "$pick" -lt "${#gallery[@]}" ]; then
-  chosen="${gallery[$pick]#$REPO_ROOT/}"
+current_research_consent="$(ops_env_get "$ENV_FILE" REVIEWER_RESEARCH_CONSENT)"
+[ -n "$current_research_consent" ] || current_research_consent=0
+research_consent="$current_research_consent"
+if confirm "Allow paired control/Linus research artifact retention for public repositories?"; then
+  research_consent=1
 else
-  log "Invalid choice; using existing/default personality: $chosen"
+  research_consent=0
 fi
 
 create_labels=0
@@ -203,7 +201,8 @@ inner_args=(
   --repo "$repo"
   --app-id "$app_id"
   --key-path "$key_path"
-  --personality "$chosen"
+  --posted-personality "$posted_personality"
+  --research-consent "$research_consent"
 )
 if [ -n "$installation_id" ]; then
   inner_args+=(--installation-id "$installation_id")
@@ -236,7 +235,7 @@ cat <<EOF
   # Tune before launch
   scripts/tune.sh             # edit active files, then optionally dry-run
   scripts/tune.sh 123         # tune against a specific PR
-  #   - edit $chosen for voice/focus, if you picked a personality above
+  #   - edit config/personalities/control.md or config/personalities/linus.md for voice/focus
   #   - edit REVIEWER_INCLUDE_* in config/reviewer.env for blinding policy
   #   - re-run scripts/dry-run.sh until the artifact looks right
 

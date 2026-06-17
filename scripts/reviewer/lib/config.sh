@@ -49,6 +49,40 @@ validate_bool_env() {
   esac
 }
 
+resolve_reviewer_personality_config() {
+  local configured_posted="${REVIEWER_POSTED_PERSONALITY:-}"
+  local configured_file="${REVIEWER_PERSONALITY_FILE:-}"
+
+  case "$configured_posted" in
+    '')
+      if [ -n "$configured_file" ]; then
+        POSTED_PERSONALITY="custom"
+        PERSONALITY_FILE="$configured_file"
+      else
+        POSTED_PERSONALITY="none"
+        PERSONALITY_FILE="$CONFIG_DIR/personalities/control.md"
+      fi
+      ;;
+    none)
+      POSTED_PERSONALITY="none"
+      PERSONALITY_FILE="$CONFIG_DIR/personalities/control.md"
+      ;;
+    linus)
+      POSTED_PERSONALITY="linus"
+      PERSONALITY_FILE="$CONFIG_DIR/personalities/linus.md"
+      ;;
+    *)
+      fatal "invalid REVIEWER_POSTED_PERSONALITY: $configured_posted (expected none or linus)"
+      ;;
+  esac
+
+  : "$POSTED_PERSONALITY"
+  case "$PERSONALITY_FILE" in
+    ''|/*) ;;
+    *) PERSONALITY_FILE="$REPO_DIR/$PERSONALITY_FILE" ;;
+  esac
+}
+
 ensure_owner_private_dir() {
   local label="$1"
   local path="$2"
@@ -141,10 +175,10 @@ validate_reviewer_config() {
   fi
 
   if [ -z "$PERSONALITY_FILE" ]; then
-    fatal "REVIEWER_PERSONALITY_FILE is required (set it in reviewer.env). See config/personalities/ for options."
+    fatal "REVIEWER_POSTED_PERSONALITY is required (set it to none or linus in reviewer.env)."
   fi
   if [ ! -f "$PERSONALITY_FILE" ]; then
-    fatal "REVIEWER_PERSONALITY_FILE points at '$PERSONALITY_FILE' which does not exist."
+    fatal "Resolved reviewer personality file '$PERSONALITY_FILE' does not exist."
   fi
   validate_uint_env REVIEWER_MAX_PRS "$MAX_PRS"
   validate_uint_env REVIEWER_MAX_ATTEMPTS "$MAX_ATTEMPTS"
@@ -160,6 +194,7 @@ validate_reviewer_config() {
   validate_bool_env REVIEWER_INCLUDE_AUTHOR "$INCLUDE_AUTHOR"
   validate_bool_env REVIEWER_INCLUDE_DESCRIPTION "$INCLUDE_DESCRIPTION"
   validate_bool_env REVIEWER_INCLUDE_COMMIT_SUBJECTS "$INCLUDE_COMMIT_SUBJECTS"
+  validate_bool_env REVIEWER_RESEARCH_CONSENT "${RESEARCH_CONSENT:-0}"
   validate_uint_env REVIEWER_FAILURE_MAX_ATTEMPTS "$FAILURE_MAX_ATTEMPTS"
   validate_uint_env REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS "$INVALID_VERDICT_MAX_ATTEMPTS"
   validate_bool_env REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE "$ALLOW_REQUIRED_CHECKS_OVERRIDE"
