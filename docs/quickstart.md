@@ -10,7 +10,7 @@ At any point, run:
 bash scripts/status.sh
 ```
 
-It summarizes local config, dry-run/scheduler state, active GCloud project/billing readiness, and likely existing GoobReview VMs visible to your account, with a recommended next action.
+It summarizes local config, dry-run/scheduler state, active GCloud account/project/billing readiness, and likely existing GoobReview VMs visible to your account, with a recommended next action.
 
 ## 4. Finish Setup On The VM
 

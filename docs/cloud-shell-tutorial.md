@@ -20,6 +20,10 @@ bash scripts/status.sh
 ```
 
 It prints the current GCloud, VM, GitHub App, config, and runtime state with a recommended next action.
+Before opening Gemini, you can run the same command yourself. If Cloud Shell did
+not carry an active `gcloud` account into this terminal, `status.sh` will stop
+at that boundary and show the auth command to run first. That keeps Gemini from
+starting setup in a shell that cannot inspect projects or billing.
 It also runs a read-only VM discovery pass across accessible projects using
 `gcloud compute instances list`, which can help you find an existing
 GoobReview VM without creating anything. Run only that helper with:
@@ -30,7 +34,15 @@ bash scripts/discover-vms.sh
 
 ## 1. Let Gemini run the bootstrap script
 
-Open Gemini in Cloud Shell:
+First make sure `status.sh` can see an active Google account:
+
+```bash
+bash scripts/status.sh
+```
+
+If it reports `active account: none`, complete the printed `gcloud auth login`
+step, then rerun `status.sh`. After that passes the auth boundary, open Gemini
+in Cloud Shell:
 
 ```bash
 gemini
