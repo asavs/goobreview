@@ -253,6 +253,10 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
   fi
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
+    requested_review=0
+    if pr_has_requested_reviewer "$pr_metadata_json" "$BOT_LOGIN" "$BOT_AUTHOR"; then
+      requested_review=1
+    fi
     existing=$(printf '%s\n' "$bot_reviews_json" |
       jq --arg head "$head_sha" '[.[] | select(.commit_id == $head)] | length')
     case "$existing" in
@@ -262,8 +266,12 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
         ;;
     esac
     if [ "$existing" -gt 0 ]; then
-      log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, skipping"
-      continue
+      if [ "$requested_review" -eq 1 ]; then
+        log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, but review was re-requested; reviewing again"
+      else
+        log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, skipping"
+        continue
+      fi
     fi
   fi
 
