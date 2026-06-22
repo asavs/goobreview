@@ -13,16 +13,16 @@ The setup intentionally pauses for browser-only steps. When it does, finish the 
 
 The Cloud Shell bootstrap path expects this template checkout to be readable without interactive credentials from the VM. If you made a private template copy, either keep it public during bootstrap or use the manual VM setup path.
 
-At any point, Gemini can run:
+At any point, Antigravity CLI can run:
 
 ```bash
 bash scripts/status.sh
 ```
 
 It prints the current GCloud, VM, GitHub App, config, and runtime state with a recommended next action.
-Before opening Gemini, you can run the same command yourself. If Cloud Shell did
+Before opening Antigravity CLI, you can run the same command yourself. If Cloud Shell did
 not carry an active `gcloud` account into this terminal, `status.sh` will stop
-at that boundary and show the auth command to run first. That keeps Gemini from
+at that boundary and show the auth command to run first. That keeps Antigravity CLI from
 starting setup in a shell that cannot inspect projects or billing.
 It also runs a read-only VM discovery pass across accessible projects using
 `gcloud compute instances list`, which can help you find an existing
@@ -32,7 +32,7 @@ GoobReview VM without creating anything. Run only that helper with:
 bash scripts/discover-vms.sh
 ```
 
-## 1. Let Gemini run the bootstrap script
+## 1. Let Antigravity CLI run the bootstrap script
 
 First make sure `status.sh` can see an active Google account:
 
@@ -41,19 +41,19 @@ bash scripts/status.sh
 ```
 
 If it reports `active account: none`, complete the printed `gcloud auth login`
-step, then rerun `status.sh`. After that passes the auth boundary, open Gemini
+step, then rerun `status.sh`. After that passes the auth boundary, open Antigravity CLI
 in Cloud Shell:
 
 ```bash
-gemini
+agy
 ```
 
-Then ask it to set up GoobReview from this checkout. Gemini should run the
+Then ask it to set up GoobReview from this checkout. Antigravity CLI should run the
 read-only sensors, choose the default VM shape, and execute the flag-driven
-scripts for you. The shell commands below are shown so you can see what Gemini
+scripts for you. The shell commands below are shown so you can see what Antigravity CLI
 is doing; use them yourself only if you are taking the manual path.
 
-Gemini's first provisioning command is:
+Antigravity CLI's first provisioning command is:
 
 ```bash
 bash scripts/bootstrap-gcp.sh \
@@ -72,7 +72,7 @@ The bootstrap script checks your Google Cloud project and billing state, then ha
 
 The script looks for billing accounts directly, and can also infer one from an existing project that already has billing enabled. If the billing page is confusing, stay in Gemini and ask it to guide you through the Google Cloud console step.
 
-Gemini should only ask you for choices that cannot be inferred. The default values are:
+Antigravity CLI should only ask you for choices that cannot be inferred. The default values are:
 
 - **GCP project ID** - defaults to whatever `gcloud config get-value project` returns, or a new project ID if the script is creating one
 - **Zone** - defaults to `us-central1-a`
@@ -160,21 +160,21 @@ GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh
 
 ## 3. Configure the reviewer
 
-Gemini should open the VM SSH session for you and land in the checkout:
+Antigravity CLI should open the VM SSH session for you and land in the checkout:
 
 ```bash
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 cd /opt/goobreview/example
 ```
 
-When the VM shell is ready, your next true browser/auth boundary is Gemini CLI
-sign-in and workspace trust:
+When the VM shell is ready, your next true browser/auth boundary is Antigravity CLI
+sign-in:
 
 ```bash
-gemini                # Google OAuth - sign in, trust this folder, then /quit
+agy                   # Google OAuth - sign in
 ```
 
-After you quit Gemini CLI, let the setup agent continue with:
+After sign-in completes, let the setup agent continue with:
 
 ```bash
 scripts/configure.sh
@@ -206,7 +206,7 @@ Or target a specific PR:
 scripts/dry-run.sh 123
 ```
 
-Nothing is posted to GitHub. The script writes an artifact under `$REVIEWER_STATE` that contains the exact prompt and Gemini response. Read it before launching.
+Nothing is posted to GitHub. The script writes an artifact under `$REVIEWER_STATE` that contains the exact prompt and agy response. Read it before launching.
 
 To iterate on the voice or prompt shape:
 

@@ -14,22 +14,22 @@ It summarizes local config, dry-run/scheduler state, active GCloud account/proje
 
 ## 4. Finish Setup On The VM
 
-Gemini should SSH to the VM, enter the checkout, and leave you at the Gemini
+Antigravity CLI should SSH to the VM, enter the checkout, and leave you at the Antigravity CLI
 CLI sign-in boundary:
 
 ```bash
 gcloud compute ssh goobreview-1 --zone=us-central1-a
 cd /opt/goobreview/example
-gemini                # Google OAuth - sign in, trust this folder, then /quit
+agy                   # Google OAuth - sign in
 ```
 
-After you quit Gemini CLI, let the setup agent continue with:
+After sign-in completes, let the setup agent continue with:
 
 ```bash
 scripts/configure.sh  # auto-detects target repo + installation ID when possible
 ```
 
-The `gemini` step is intentionally interactive when you want Google-account quota, including Google AI Pro or Ultra entitlement. Gemini CLI's documented non-interactive auth paths are `GEMINI_API_KEY` and Vertex AI credentials, which use API/Vertex quota and billing rather than personal subscription quota. Keep any Gemini API keys, Vertex credentials, or cached Google auth state out of this repo and checkout.
+The `agy` step is intentionally interactive and uses Google Sign-In. Keep cached Google auth state out of this repo and checkout.
 
 `configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, asks which review style should be posted, asks whether public-repo research artifacts may be retained, and offers to create helper labels. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
 
@@ -59,7 +59,7 @@ Still on the VM:
 scripts/dry-run.sh
 ```
 
-This runs the reviewer once against your target repo with `REVIEWER_DRY_RUN=1` so nothing is posted. It makes a fresh Gemini call and writes a dry-run artifact containing the exact prompt payload plus Gemini's full response.
+This runs the reviewer once against your target repo with `REVIEWER_DRY_RUN=1` so nothing is posted. It makes a fresh `agy` call and writes a dry-run artifact containing the exact prompt payload plus the response.
 
 To dry-run a specific PR:
 
@@ -81,7 +81,7 @@ REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
 
 This writes a sibling `.launch.json` metadata file that records the target repo, config hashes, required-check list, and whether CI was bypassed.
 
-To preview exactly what Gemini would receive without calling Gemini:
+To preview exactly what `agy` would receive without calling it:
 
 ```bash
 scripts/render-prompt.sh 123 --explain
@@ -126,4 +126,4 @@ For non-Cloud-Shell paths (own hardware, AWS, manual GCP, corporate GitHub, etc.
 
 1. Provision a small Ubuntu LTS VM, run `bash scripts/setup-vm.sh` to install the tools and clone the template, using [docs/vm-setup.md](vm-setup.md) for details.
 2. Register and install the App using [docs/github-app-setup.md](github-app-setup.md). If registering manually, place the `.pem` at `/var/lib/goobreview/example/app-key.pem` with mode `0600`. Registering under an organization: `GOOBREVIEW_GH_ORG=my-org bash scripts/register-app.sh`.
-3. Continue at [Step 4 above](#4-finish-setup-on-the-vm) for Gemini auth, `scripts/configure.sh`, dry run, and scheduler enablement.
+3. Continue at [Step 4 above](#4-finish-setup-on-the-vm) for Antigravity CLI auth, `scripts/configure.sh`, dry run, and scheduler enablement.

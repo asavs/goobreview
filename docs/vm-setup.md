@@ -1,6 +1,6 @@
 # VM Setup
 
-Use this page for any non-Cloud-Shell install, or when you need to understand what `scripts/bootstrap-gcp.sh` and `scripts/setup-vm.sh` create for you. The VM needs `git`, `jq`, `curl`, `wget`, `tar`, `flock`, `timeout`, Node/npm, and Gemini CLI. Ubuntu LTS is the easiest default.
+Use this page for any non-Cloud-Shell install, or when you need to understand what `scripts/bootstrap-gcp.sh` and `scripts/setup-vm.sh` create for you. The VM needs `git`, `jq`, `curl`, `wget`, `tar`, `flock`, `timeout`, Node/npm, and Antigravity CLI (`agy`). Ubuntu LTS is the easiest default.
 
 Minimum practical shape:
 
@@ -41,7 +41,7 @@ bash scripts/discover-vms.sh
 It uses ordinary `gcloud compute instances list` calls across accessible
 projects and zones, filtering for likely GoobReview instance names.
 
-`e2-micro` (2 vCPU, 1 GB RAM) in `us-central1`, `us-west1`, or `us-east1` (excluding northern Virginia) is covered by GCP's always-free tier - one instance and 30 GB standard disk per month. Gemini CLI can spike past 1 GB during a review, so `scripts/setup-vm.sh` configures a 2 GB swap file by default; set `GOOBREVIEW_SWAP_SIZE=0` to skip if you're on a larger machine.
+`e2-micro` (2 vCPU, 1 GB RAM) in `us-central1`, `us-west1`, or `us-east1` (excluding northern Virginia) is covered by GCP's always-free tier - one instance and 30 GB standard disk per month. Antigravity CLI can spike past 1 GB during a review, so `scripts/setup-vm.sh` configures a 2 GB swap file by default; set `GOOBREVIEW_SWAP_SIZE=0` to skip if you're on a larger machine.
 
 Keep firewall exposure minimal. The reviewer needs outbound HTTPS and inbound SSH only.
 
@@ -49,7 +49,7 @@ Keep firewall exposure minimal. The reviewer needs outbound HTTPS and inbound SS
 
 After SSHing to the VM, the recommended manual path is to run the same installer
 the Cloud Shell bootstrap uses. It installs base packages, Node 20,
-Gemini CLI, the checkout, the state directory, and optional swap:
+Antigravity CLI, the checkout, the state directory, and optional swap:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/asavschaeffer/goobreview/main/scripts/setup-vm.sh | bash
@@ -95,36 +95,34 @@ sudo apt-get install -y git jq curl wget ca-certificates gnupg lsb-release util-
 `flock` comes from `util-linux`; `timeout` comes from `coreutils`. Do not rely
 on Ubuntu's `nodejs` package on older LTS images; install Node 20 or newer.
 
-## Install Gemini CLI
+## Install Antigravity CLI
 
-The Gemini CLI project documents npm installation. It requires Node 20 or newer:
+Use the official Antigravity CLI installer:
 
-- https://github.com/google-gemini/gemini-cli
-- https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/index.md
+- https://antigravity.google/docs/cli-overview
 
 Current documented install path:
 
 ```bash
-sudo npm install -g @google/gemini-cli
-gemini --version
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+agy --version
 ```
 
 Then authenticate and trust the daemon checkout:
 
 ```bash
 cd /opt/goobreview/example
-gemini
+agy
 ```
 
-The Gemini CLI authentication docs describe three supported auth families:
+Antigravity CLI authenticates with Google Sign-In, storing credentials in the system keyring or its file fallback.
 
-- **Sign in with Google** for individual Google accounts and Gemini Code Assist licenses. This is the path that preserves Google AI Pro or Google AI Ultra subscription entitlement; use the Google account associated with that subscription.
-- **Gemini API key** for headless setup through `GEMINI_API_KEY`. This is suitable for automation but uses API-key quota and billing, not personal Google AI Pro/Ultra subscription quota.
+- **Sign in with Google** for the Google account associated with your Antigravity access.
 - **Vertex AI** through Application Default Credentials, a service account JSON key, or a Google Cloud API key, plus `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`. This is suitable for enterprise or production automation but uses Vertex AI quota and billing, not personal Google AI Pro/Ultra subscription quota.
 
-GoobReview's default path intentionally uses Sign in with Google. Do not copy Google auth files, service account JSON, API keys, or other Gemini credentials into the repo or checkout. If you choose API key or Vertex AI mode instead, keep those credentials in the VM user's shell environment, systemd environment, or another VM-side secret store.
+GoobReview's default path intentionally uses Sign in with Google. Do not copy Google auth files, service account JSON, API keys, or other Antigravity credentials into the repo or checkout.
 
-Exit Gemini with:
+Exit Antigravity CLI when sign-in completes.
 
 ```text
 /quit
@@ -133,10 +131,10 @@ Exit Gemini with:
 Verify headless mode from the same checkout:
 
 ```bash
-printf 'say hi in three words' | timeout 60s gemini -m auto -p ""
+timeout 60s agy --sandbox --dangerously-skip-permissions --print "say hi in three words"
 ```
 
-If this prompts for authorization or times out, run `gemini` interactively again from the exact checkout path cron will use. The reviewer later runs Gemini from `REVIEWER_RUNTIME_STATE/gemini-runtime` with the PR-head source snapshot attached as read-only workspace context. For that isolated runtime call, GoobReview sets Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override and writes system settings that disable project context filename loading, local `.env` loading, shell tools, and MCP servers.
+If this prompts for authorization or times out, run `agy` interactively again from the exact VM user account that cron will use. The reviewer later runs `agy` from `REVIEWER_RUNTIME_STATE/agy-runtime` with the PR-head source snapshot as its sole project context and the GitHub App credentials removed from its environment.
 
 ## Clone The Template
 
@@ -162,4 +160,4 @@ sudo mkdir -p /opt/goobreview/example /var/lib/goobreview/example
 sudo chown -R goobreview:goobreview /opt/goobreview /var/lib/goobreview
 ```
 
-Then perform clone, GitHub App key install, and `gemini` trust as that user.
+Then perform clone, GitHub App key install, and `agy` sign-in as that user.

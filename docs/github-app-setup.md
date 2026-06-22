@@ -40,7 +40,7 @@ These are filled in automatically; this section is the reference if you ever nee
 
 | Permission | Setting | Why |
 |---|---|---|
-| Checks | Read-only | CI gate — reads check-runs before calling Gemini |
+| Checks | Read-only | CI gate — reads check-runs before calling `agy` |
 | Contents | Read-only | Downloads the PR-head source snapshot for read-only review context |
 | Issues | Read & Write | Posts labels (`agent-reviewed`, etc.) via the Issues API |
 | Metadata | Read-only | Auto-selected; required for any repo API access |
@@ -76,7 +76,7 @@ If you can't run the helper server (no Cloud Shell, restrictive corporate GitHub
    ssh USER@HOST 'chmod 600 /var/lib/goobreview/example/app-key.pem'
    ```
 
-6. Continue with the VM configure handoff in [docs/quickstart.md](quickstart.md#4-finish-setup-on-the-vm). Gemini should open the SSH session; you complete Gemini CLI sign-in and workspace trust, then it runs `scripts/configure.sh`.
+6. Continue with the VM configure handoff in [docs/quickstart.md](quickstart.md#4-finish-setup-on-the-vm). Antigravity CLI should open the SSH session; you complete its sign-in, then it runs `scripts/configure.sh`.
 
 ## Troubleshooting
 

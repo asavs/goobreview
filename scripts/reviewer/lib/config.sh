@@ -182,8 +182,8 @@ validate_reviewer_config() {
   fi
   validate_uint_env REVIEWER_MAX_PRS "$MAX_PRS"
   validate_uint_env REVIEWER_MAX_ATTEMPTS "$MAX_ATTEMPTS"
-  validate_uint_env REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF "$GEMINI_QUOTA_DEFAULT_BACKOFF"
-  validate_uint_env REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING "$GEMINI_QUOTA_BACKOFF_PADDING"
+  validate_uint_env REVIEWER_AGY_QUOTA_DEFAULT_BACKOFF "$AGY_QUOTA_DEFAULT_BACKOFF"
+  validate_uint_env REVIEWER_AGY_QUOTA_BACKOFF_PADDING "$AGY_QUOTA_BACKOFF_PADDING"
   validate_positive_uint_env REVIEWER_MAX_PROMPT_BYTES "$MAX_PROMPT_BYTES"
   validate_positive_uint_env REVIEWER_MAX_ARTIFACT_BYTES "$MAX_ARTIFACT_BYTES"
   validate_positive_uint_env REVIEWER_DIFF_MAX_BYTES "$DIFF_MAX_BYTES"
@@ -206,7 +206,7 @@ validate_reviewer_config() {
   require node
   require tar
   if [ -z "${RENDER_PROMPT_ONLY:-}" ]; then
-    require gemini
+    require agy
     require timeout
   fi
 

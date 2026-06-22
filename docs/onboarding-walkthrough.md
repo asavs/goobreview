@@ -50,7 +50,7 @@ bash scripts/bootstrap-gcp.sh --project PROJECT_ID --zone us-central1-a --vm-nam
 5. Waits up to ~3min for SSH to come up.
 6. SSHes in and pipes `scripts/setup-vm.sh` (fetched from
    `raw.githubusercontent.com/<this-fork>/main/...`) into `bash`.
-7. `setup-vm.sh` installs: `git jq curl wget`, Node 20, `@google/gemini-cli`,
+7. `setup-vm.sh` installs: `git jq curl wget`, Node 20, Antigravity CLI (`agy`),
    2GB swapfile, clones the repo into `/opt/goobreview/example`, creates state
    dir at `/var/lib/goobreview/example`.
 
@@ -118,19 +118,19 @@ bash scripts/register-app.sh
 - Phases 1 + 2 complete.
 - App installed on target repo (Phase 2 step 7).
 
-**Commands Gemini should run to reach the VM:**
+**Commands Antigravity CLI should run to reach the VM:**
 ```bash
 gcloud compute ssh goobreview-1 --zone=us-central1-a   # from Cloud Shell
 cd /opt/goobreview/example
-gemini                  # first-time Google OAuth; trust this folder; /quit
+agy                     # first-time Google OAuth
 scripts/configure.sh
 ```
 
-The user should only take over for the `gemini` browser sign-in and workspace
-trust prompt, then return control to the setup agent for `scripts/configure.sh`.
+The user should only take over for the `agy` browser sign-in, then return
+control to the setup agent for `scripts/configure.sh`.
 
 **What happens inside `configure.sh`:**
-1. Preflight: `node`, `jq`, `gemini` on PATH; `~/.gemini` exists; copies
+1. Preflight: `node`, `jq`, `agy` on PATH; Antigravity auth state exists; copies
    `reviewer.env.example` → `reviewer.env` if missing.
 2. **REVIEWER_REPO** prompt (target `owner/repo`).
 3. **App credentials**:
@@ -189,8 +189,8 @@ cat /var/lib/goobreview/example/dry-pr-123.txt
 **What's in the artifact:**
 - Repo, PR number, head SHA, parsed review event (APPROVE / REQUEST_CHANGES /
   COMMENT), timestamp.
-- The full prompt payload sent to Gemini.
-- Gemini's full response.
+- The full prompt payload sent to `agy`.
+- `agy`'s full response.
 
 **To iterate:**
 - **Change which review style is posted:** edit `REVIEWER_POSTED_PERSONALITY`
@@ -206,7 +206,7 @@ cat /var/lib/goobreview/example/dry-pr-123.txt
   subjects): edit the `REVIEWER_INCLUDE_*` flags in `config/reviewer.env`.
   The prompt composition itself is fixed; forks edit
   `scripts/reviewer/lib/prompt.sh` to change the payload shape.
-- **Render the prompt without invoking Gemini** (just see what would be sent):
+- **Render the prompt without invoking `agy`** (just see what would be sent):
   ```bash
   REVIEWER_RENDER_PROMPT_ONLY=1 REVIEWER_ONLY_PR=123 scripts/reviewer/reviewer.sh
   ```
@@ -304,4 +304,4 @@ scripts/enable-cron.sh
 | Setup interactive flow | `scripts/configure.sh` |
 | Scheduler installation | `scripts/enable-cron.sh` or `deploy/systemd/*.example` |
 | Sync behavior | `scripts/reviewer/sync-worktree.sh` |
-| The Gemini invocation itself | `scripts/reviewer/lib/gemini.sh` |
+| The Antigravity CLI invocation itself | `scripts/reviewer/lib/agy.sh` |
