@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Gemini review-output parsing helpers. Keep the reviewer contract tiny:
+# Antigravity CLI review-output parsing helpers. Keep the reviewer contract tiny:
 # normal markdown review text, then one final GitHub review event line.
 
 review_verdict_event() {
@@ -218,14 +218,14 @@ write_invalid_verdict_artifact() {
   mkdir -p "$STATE_DIR"
   tmp=$(mktemp "$STATE_DIR/last-invalid-$num.XXXXXX")
   {
-    printf 'GoobReview invalid Gemini output\n'
+    printf 'GoobReview invalid Antigravity CLI output\n'
     printf 'PR: #%s\n' "$num"
     printf 'Head SHA: %s\n' "$head_sha"
     printf 'Reason: %s\n' "$reason"
     printf 'Captured at: %s\n' "$(date -Is)"
-    printf '\n===== REJECTED GEMINI OUTPUT START =====\n'
+    printf '\n===== REJECTED AGY OUTPUT START =====\n'
     printf '%s\n' "$rejected_output"
-    printf '===== REJECTED GEMINI OUTPUT END =====\n'
+    printf '===== REJECTED AGY OUTPUT END =====\n'
   } >"$tmp"
   chmod 600 "$tmp" 2>/dev/null || true
   mv "$tmp" "$artifact"

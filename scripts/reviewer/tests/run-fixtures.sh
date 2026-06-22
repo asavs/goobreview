@@ -23,7 +23,7 @@ LOG_FILE="$TMP_ROOT/test.log"
 # shellcheck disable=SC1091
 . "$LIB_DIR/config.sh"
 # shellcheck disable=SC1091
-. "$LIB_DIR/gemini.sh"
+. "$LIB_DIR/agy.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/github-api.sh"
 # shellcheck disable=SC1091
@@ -883,7 +883,7 @@ test_symlink_snapshot_safety() {
   worktree_dir="$TMP_ROOT/worktree-symlink"
   outside_file="$TMP_ROOT/outside-secret.txt"
   prompt_file="$TMP_ROOT/prompt-symlink.md"
-  err_file="$TMP_ROOT/gemini-symlink.err"
+  err_file="$TMP_ROOT/agy-symlink.err"
   mkdir -p "$worktree_dir/docs"
   printf 'outside secret should not appear\n' > "$outside_file"
   ln -s "$outside_file" "$worktree_dir/docs/GUIDELINES.md"
@@ -891,15 +891,15 @@ test_symlink_snapshot_safety() {
   REPO="example/repo"
   STATE_DIR="$TMP_ROOT/state-symlink"
   RUNTIME_STATE_DIR="$TMP_ROOT/runtime-symlink"
-  GEMINI_TIMEOUT=60
-  GEMINI_MODEL=auto
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
   mkdir -p "$STATE_DIR"
   printf 'APPROVE\n' > "$prompt_file"
-  if run_gemini_review "$prompt_file" "$err_file" "$worktree_dir" >/dev/null; then
-    fail "gemini refuses snapshot containing symlinks"
+  if run_agy_review "$prompt_file" "$err_file" "$worktree_dir" >/dev/null; then
+    fail "agy refuses snapshot containing symlinks"
   fi
-  pass "gemini refuses snapshot containing symlinks"
-  assert_contains "gemini refusal explains symlink snapshot" "PR-head snapshot contains symlinks" "$err_file"
+  pass "agy refuses snapshot containing symlinks"
+  assert_contains "agy refusal explains symlink snapshot" "PR-head snapshot contains symlinks" "$err_file"
 
   sanitize_review_worktree_symlinks "$worktree_dir"
   if [ -L "$worktree_dir/docs/GUIDELINES.md" ]; then
@@ -1058,18 +1058,18 @@ test_state_and_output_permissions() {
   assert_file_mode "prompt output is mode 0600" "600" "$output_dst"
 }
 
-test_gemini_invocation_isolates_review_context() {
-  local prompt_file err_file output worktree_dir settings_path
+test_agy_invocation_isolates_review_context() {
+  local prompt_file err_file output worktree_dir
 
   STATE_DIR="$TMP_ROOT/state"
   RUNTIME_STATE_DIR="$TMP_ROOT/runtime-state"
-  GEMINI_TIMEOUT=60
-  GEMINI_MODEL=auto
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
   mkdir -p "$STATE_DIR"
   worktree_dir="$TMP_ROOT/worktree"
   mkdir -p "$worktree_dir"
-  prompt_file="$TMP_ROOT/prompt-for-gemini.md"
-  err_file="$TMP_ROOT/gemini.err"
+  prompt_file="$TMP_ROOT/prompt-for-agy.md"
+  err_file="$TMP_ROOT/agy.err"
   printf 'APPROVE\n' > "$prompt_file"
 
   GH_TOKEN=secret-token
@@ -1082,23 +1082,15 @@ test_gemini_invocation_isolates_review_context() {
     printf 'gh_token=%s\n' "${GH_TOKEN:-unset}"
     printf 'github_token=%s\n' "${GITHUB_TOKEN:-unset}"
     printf 'key_path=%s\n' "${REVIEWER_APP_PRIVATE_KEY_PATH:-unset}"
-    printf 'trust_workspace=%s\n' "${GEMINI_CLI_TRUST_WORKSPACE:-unset}"
-    printf 'settings=%s\n' "$GEMINI_CLI_SYSTEM_SETTINGS_PATH"
+    printf 'args=%s\n' "$*"
   }
 
-  output=$(run_gemini_review "$prompt_file" "$err_file" "$worktree_dir")
-  settings_path=$(printf '%s\n' "$output" | sed -n 's/^settings=//p')
-
-  assert_contains "gemini runs outside persistent state and PR snapshot" "cwd=$RUNTIME_STATE_DIR/gemini-runtime" <(printf '%s\n' "$output")
-  assert_contains "gemini child gets no gh token" "gh_token=unset" <(printf '%s\n' "$output")
-  assert_contains "gemini child gets no github token" "github_token=unset" <(printf '%s\n' "$output")
-  assert_contains "gemini child gets no app key path" "key_path=unset" <(printf '%s\n' "$output")
-  assert_contains "gemini trusts isolated runtime workspace" "trust_workspace=true" <(printf '%s\n' "$output")
-  assert_eq "gemini settings disables context filename" ".goobreview-gemini-context-disabled.md" "$(jq -r '.context.fileName' "$settings_path")"
-  assert_eq "gemini settings attaches PR snapshot" "$worktree_dir" "$(jq -r '.context.includeDirectories[0]' "$settings_path")"
-  assert_eq "gemini settings disables local env" "true" "$(jq -r '.advanced.ignoreLocalEnv' "$settings_path")"
-  assert_eq "gemini settings excludes shell tool" "false" "$(jq '.tools.core | index("run_shell_command") != null' "$settings_path")"
-  assert_eq "gemini settings excludes mcp servers" "0" "$(jq '.mcp.allowed | length' "$settings_path")"
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir")
+  assert_contains "agy runs outside persistent state and PR snapshot" "cwd=$RUNTIME_STATE_DIR/agy-runtime" <(printf '%s\n' "$output")
+  assert_contains "agy child gets no gh token" "gh_token=unset" <(printf '%s\n' "$output")
+  assert_contains "agy child gets no github token" "github_token=unset" <(printf '%s\n' "$output")
+  assert_contains "agy child gets no app key path" "key_path=unset" <(printf '%s\n' "$output")
+  assert_contains "agy uses native sandbox" "--sandbox" <(printf '%s\n' "$output")
 }
 
 
@@ -1234,11 +1226,11 @@ exit 0
 EOF
   chmod +x "$bin_dir/gh"
 
-  cat > "$bin_dir/gemini" <<'EOF'
+  cat > "$bin_dir/agy" <<'EOF'
 #!/usr/bin/env bash
 printf 'Looks good.\nAPPROVE\n'
 EOF
-  chmod +x "$bin_dir/gemini"
+  chmod +x "$bin_dir/agy"
 
   key_file="$TMP_ROOT/re-request-key.pem"
   printf 'key\n' > "$key_file"
@@ -1383,11 +1375,11 @@ esac
 EOF
   chmod +x "$bin_dir/curl"
 
-  cat > "$bin_dir/gemini" <<'EOF'
+  cat > "$bin_dir/agy" <<'EOF'
 #!/usr/bin/env bash
 printf 'Looks good.\nAPPROVE\n'
 EOF
-  chmod +x "$bin_dir/gemini"
+  chmod +x "$bin_dir/agy"
 
   key_file="$TMP_ROOT/attempt-budget-key.pem"
   printf 'key\n' > "$key_file"
@@ -1493,11 +1485,11 @@ esac
 EOF
   chmod +x "$bin_dir/curl"
 
-  cat > "$bin_dir/gemini" <<'EOF'
+  cat > "$bin_dir/agy" <<'EOF'
 #!/usr/bin/env bash
 printf 'Looks good.\nAPPROVE\n'
 EOF
-  chmod +x "$bin_dir/gemini"
+  chmod +x "$bin_dir/agy"
 
   cat > "$bin_dir/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -1656,7 +1648,7 @@ shift
 EOF
   chmod +x "$bin_dir/timeout"
 
-  cat > "$bin_dir/gemini" <<'EOF'
+  cat > "$bin_dir/agy" <<'EOF'
 #!/usr/bin/env bash
 prompt=$(cat)
 case "$prompt" in
@@ -1664,7 +1656,7 @@ case "$prompt" in
   *) printf 'control review\nAPPROVE\n' ;;
 esac
 EOF
-  chmod +x "$bin_dir/gemini"
+  chmod +x "$bin_dir/agy"
 
   key_file="$TMP_ROOT/research-key.pem"
   printf 'key\n' > "$key_file"
@@ -1718,7 +1710,7 @@ EOF
   assert_contains "counterfactual artifact preserves linus response" "linus review" "$research_dir/linus/artifact.txt"
 
   awk '
-    found && /^===== GEMINI PROMPT PAYLOAD END =====$/ { exit }
+    found && /^===== AGY PROMPT PAYLOAD END =====$/ { exit }
     found { print; next }
     prev == "---" && $0 == "Trust Boundary" {
       print prev
@@ -1729,7 +1721,7 @@ EOF
     { prev = $0 }
   ' "$research_dir/none/artifact.txt" > "$TMP_ROOT/research-none-tail.txt"
   awk '
-    found && /^===== GEMINI PROMPT PAYLOAD END =====$/ { exit }
+    found && /^===== AGY PROMPT PAYLOAD END =====$/ { exit }
     found { print; next }
     prev == "---" && $0 == "Trust Boundary" {
       print prev
@@ -1756,7 +1748,7 @@ test_artifact_secret_safety
 test_state_and_output_permissions
 test_pr_queue_skip_reasons
 test_reviewer_re_requested_review_bypasses_reviewed_sha_skip
-test_gemini_invocation_isolates_review_context
+test_agy_invocation_isolates_review_context
 test_github_api_retries_and_logs
 test_post_review_uses_rest_api
 test_check_ci_paginates_required_check_runs

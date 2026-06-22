@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Render the exact prompt text that would be sent to Gemini for one PR.
-# No Gemini call is made, no review is posted, and seen.txt is not updated.
+# Render the exact prompt text that would be sent to agy for one PR.
+# No agy call is made, no review is posted, and seen.txt is not updated.
 #
 # Usage:
 #   scripts/render-prompt.sh PR_NUMBER [OUTPUT_FILE] [--explain]

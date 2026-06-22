@@ -12,11 +12,11 @@ DRY_RUN_OUT="${REVIEWER_DRY_RUN_OUT:-}"
 DRY_RUN_BYPASS_CI="${REVIEWER_DRY_RUN_BYPASS_CI:-}"
 RENDER_PROMPT_ONLY="${REVIEWER_RENDER_PROMPT_ONLY:-}"
 PROMPT_OUT="${REVIEWER_PROMPT_OUT:-}"
-IGNORE_GEMINI_BACKOFF="${REVIEWER_IGNORE_GEMINI_BACKOFF:-}"
-GEMINI_TIMEOUT="${REVIEWER_GEMINI_TIMEOUT:-600}"
-GEMINI_MODEL="${REVIEWER_GEMINI_MODEL:-auto}"
-GEMINI_QUOTA_DEFAULT_BACKOFF="${REVIEWER_GEMINI_QUOTA_DEFAULT_BACKOFF:-3600}"
-GEMINI_QUOTA_BACKOFF_PADDING="${REVIEWER_GEMINI_QUOTA_BACKOFF_PADDING:-300}"
+IGNORE_AGY_BACKOFF="${REVIEWER_IGNORE_AGY_BACKOFF:-}"
+AGY_TIMEOUT="${REVIEWER_AGY_TIMEOUT:-600}"
+AGY_MODEL="${REVIEWER_AGY_MODEL:-auto}"
+AGY_QUOTA_DEFAULT_BACKOFF="${REVIEWER_AGY_QUOTA_DEFAULT_BACKOFF:-3600}"
+AGY_QUOTA_BACKOFF_PADDING="${REVIEWER_AGY_QUOTA_BACKOFF_PADDING:-300}"
 MAX_PROMPT_BYTES="${REVIEWER_MAX_PROMPT_BYTES:-240000}"
 MAX_ARTIFACT_BYTES="${REVIEWER_MAX_ARTIFACT_BYTES:-1000000}"
 DIFF_MAX_BYTES="${REVIEWER_DIFF_MAX_BYTES:-120000}"
@@ -43,14 +43,14 @@ REPO_DIR="${REVIEWER_REPO_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 CONFIG_DIR="${REVIEWER_CONFIG_DIR:-$REPO_DIR/config}"
 LOG_FILE="$STATE_DIR/log.txt"
 LOCK_FILE="$STATE_DIR/lock"
-GEMINI_BACKOFF_FILE="$STATE_DIR/gemini_backoff_until"
+AGY_BACKOFF_FILE="$STATE_DIR/agy_backoff_until"
 
 # shellcheck disable=SC1091
 . "$LIB_DIR/ci.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/config.sh"
 # shellcheck disable=SC1091
-. "$LIB_DIR/gemini.sh"
+. "$LIB_DIR/agy.sh"
 # shellcheck disable=SC1091
 . "$LIB_DIR/github-api.sh"
 # shellcheck disable=SC1091
@@ -119,12 +119,12 @@ write_dry_run_artifact() {
     printf 'Personality file: %s\n' "$PERSONALITY_FILE"
     printf 'Parsed review event: %s\n' "$event"
     printf 'Generated at: %s\n' "$(date -Is)"
-    printf '\n===== GEMINI PROMPT PAYLOAD START =====\n'
+    printf '\n===== AGY PROMPT PAYLOAD START =====\n'
     append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "dry-run prompt artifact"
-    printf '\n===== GEMINI PROMPT PAYLOAD END =====\n'
-    printf '\n===== GEMINI RESPONSE START =====\n'
+    printf '\n===== AGY PROMPT PAYLOAD END =====\n'
+    printf '\n===== AGY RESPONSE START =====\n'
     printf '%s\n' "$review_body" | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "dry-run response artifact"
-    printf '===== GEMINI RESPONSE END =====\n'
+    printf '===== AGY RESPONSE END =====\n'
   } >"$artifact_tmp"
   artifact_bytes=$(wc -c <"$artifact_tmp" | tr -d ' ')
   if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
@@ -208,12 +208,12 @@ write_research_review_artifact() {
     printf 'Personality file: %s\n' "$personality_file"
     printf 'Parsed review event: %s\n' "$event"
     printf 'Generated at: %s\n' "$(date -Is)"
-    printf '\n===== GEMINI PROMPT PAYLOAD START =====\n'
+    printf '\n===== AGY PROMPT PAYLOAD START =====\n'
     append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "research prompt artifact"
-    printf '\n===== GEMINI PROMPT PAYLOAD END =====\n'
-    printf '\n===== GEMINI RESPONSE START =====\n'
+    printf '\n===== AGY PROMPT PAYLOAD END =====\n'
+    printf '\n===== AGY RESPONSE START =====\n'
     printf '%s\n' "$review_body" | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "research response artifact"
-    printf '===== GEMINI RESPONSE END =====\n'
+    printf '===== AGY RESPONSE END =====\n'
   } >"$artifact_tmp"
 
   artifact_bytes=$(wc -c <"$artifact_tmp" | tr -d ' ')
@@ -365,9 +365,9 @@ capture_research_pair() {
   fi
 
   counterfactual_prompt=$(mktemp "$STATE_DIR/research-prompt.$num.XXXXXX")
-  counterfactual_err=$(mktemp "$STATE_DIR/research-gemini.$num.err.XXXXXX")
+  counterfactual_err=$(mktemp "$STATE_DIR/research-agy.$num.err.XXXXXX")
   if write_prompt_with_replaced_personality "$counterfactual_prompt" "$counterfactual_personality_file" "$posted_prompt_file"; then
-    if counterfactual_review=$(run_gemini_review "$counterfactual_prompt" "$counterfactual_err" "$review_worktree"); then
+    if counterfactual_review=$(run_agy_review "$counterfactual_prompt" "$counterfactual_err" "$review_worktree"); then
       cat "$counterfactual_err" >>"$LOG_FILE"
       if [ -z "${counterfactual_review// }" ]; then
         counterfactual_event="EMPTY_RESPONSE"
@@ -376,7 +376,7 @@ capture_research_pair() {
       fi
     else
       cat "$counterfactual_err" >>"$LOG_FILE"
-      counterfactual_event="GEMINI_FAILED"
+      counterfactual_event="AGY_FAILED"
       counterfactual_review=$(cat "$counterfactual_err")
     fi
   else
@@ -406,7 +406,7 @@ capture_research_pair() {
     --arg counterfactual_artifact "$counterfactual_file" \
     --arg posted_personality_file "$posted_personality_file" \
     --arg counterfactual_personality_file "$counterfactual_personality_file" \
-    --arg model "$GEMINI_MODEL" \
+    --arg model "$AGY_MODEL" \
     --arg ci_state "$ci_state" \
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
@@ -442,9 +442,9 @@ capture_research_pair() {
   log "PR #$num@$head_sha: wrote paired research artifacts to $run_dir"
 }
 
-if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$IGNORE_GEMINI_BACKOFF" ]; then
-  if remaining=$(gemini_backoff_remaining); then
-    log "Gemini quota backoff active for ${remaining}s"
+if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$IGNORE_AGY_BACKOFF" ]; then
+  if remaining=$(agy_backoff_remaining); then
+    log "Antigravity quota backoff active for ${remaining}s"
     exit 0
   fi
 fi
@@ -582,11 +582,11 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
         ci_state="dry-run-bypassed-failing"
       else
         if [ -n "$RENDER_PROMPT_ONLY" ]; then
-          log "PR #$num@$head_sha: CI is failing, so no Gemini prompt would be sent"
+          log "PR #$num@$head_sha: CI is failing, so no agy prompt would be sent"
           review_actions=$((review_actions + 1))
           continue
         fi
-        log "PR #$num@$head_sha: CI is failing, posting REQUEST_CHANGES without Gemini"
+        log "PR #$num@$head_sha: CI is failing, posting REQUEST_CHANGES without agy"
         ci_summary=$(github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || true)
         ci_failure_body=$(cat <<EOF
 CI is failing on this commit. Fix the failing job(s) and push a new commit - I will re-review on the new head SHA.
@@ -596,7 +596,7 @@ ${ci_summary:-No check summary available.}
 \`\`\`
 
 ---
-*Auto-generated by the reviewer daemon. CI was non-green at review time, so no Gemini call was made.*
+*Auto-generated by the reviewer daemon. CI was non-green at review time, so no agy call was made.*
 EOF
 )
         if [ -n "$DRY_RUN" ]; then
@@ -626,7 +626,7 @@ EOF
     invalid_attempts=$(invalid_verdict_attempt_count "$num" "$head_sha")
     if [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
       invalid_artifact=$(invalid_verdict_artifact_path "$num" || true)
-      log "PR #$num@$head_sha: invalid Gemini output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=$INVALID_VERDICT_MAX_ATTEMPTS; skipping until the PR head changes (last artifact: ${invalid_artifact:-unavailable})"
+      log "PR #$num@$head_sha: invalid agy output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=$INVALID_VERDICT_MAX_ATTEMPTS; skipping until the PR head changes (last artifact: ${invalid_artifact:-unavailable})"
       continue
     fi
   fi
@@ -641,7 +641,7 @@ EOF
 
   if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json"; then
     rm -f "$prompt_tmp"
-    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to build Gemini prompt"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to build agy prompt"
     continue
   fi
 
@@ -658,34 +658,34 @@ EOF
     continue
   fi
 
-  gemini_err_tmp=$(mktemp "$STATE_DIR/gemini.$num.err.XXXXXX")
-  if ! review=$(run_gemini_review "$prompt_tmp" "$gemini_err_tmp" "$review_worktree"); then
-    cat "$gemini_err_tmp" >> "$LOG_FILE"
+  agy_err_tmp=$(mktemp "$STATE_DIR/agy.$num.err.XXXXXX")
+  if ! review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree"); then
+    cat "$agy_err_tmp" >> "$LOG_FILE"
     if [ -n "$DRY_RUN" ]; then
-      write_dry_run_artifact "$num" "$head_sha" "GEMINI_FAILED" "$prompt_tmp" "$(cat "$gemini_err_tmp")"
+      write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")"
     fi
-    set_gemini_quota_backoff "$gemini_err_tmp" || true
-    rm -f "$prompt_tmp" "$gemini_err_tmp"
-    record_review_failure_and_log "$num" "$head_sha" "gemini failed for PR #$num@$head_sha"
+    set_agy_quota_backoff "$agy_err_tmp" || true
+    rm -f "$prompt_tmp" "$agy_err_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "agy failed for PR #$num@$head_sha"
     continue
   fi
-  cat "$gemini_err_tmp" >> "$LOG_FILE"
+  cat "$agy_err_tmp" >> "$LOG_FILE"
 
   if [ -z "${review// }" ]; then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$review")
     write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review"
-    rm -f "$prompt_tmp" "$gemini_err_tmp"
+    rm -f "$prompt_tmp" "$agy_err_tmp"
     if [ -z "$DRY_RUN" ]; then
       invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
       if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
-        log "gemini returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
+        log "agy returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
       elif [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
-        log "gemini returned empty for PR #$num@$head_sha; wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+        log "agy returned empty for PR #$num@$head_sha; wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
       else
-        log "gemini returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+        log "agy returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
       fi
     else
-      log "gemini returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick"
+      log "agy returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick"
     fi
     continue
   fi
@@ -693,7 +693,7 @@ EOF
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "INVALID_VERDICT" "$review")
     write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review"
-    rm -f "$prompt_tmp" "$gemini_err_tmp"
+    rm -f "$prompt_tmp" "$agy_err_tmp"
     verdict_line=$(printf '%s' "$review" | awk '
       {
         line = $0
@@ -708,14 +708,14 @@ EOF
     if [ -z "$DRY_RUN" ]; then
       invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
       if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
-        log "PR #$num@$head_sha: gemini did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
+        log "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
       elif [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
-        log "PR #$num@$head_sha: gemini did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+        log "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
       else
-        log "PR #$num@$head_sha: gemini did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+        log "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
       fi
     else
-      log "PR #$num@$head_sha: gemini did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick"
+      log "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick"
     fi
     continue
   fi
@@ -728,13 +728,13 @@ EOF
 $review_body
 
 ---
-*Drafted by \`gemini\` running on $REVIEWER_RUNNER_NAME, posted by @$BOT_LOGIN. Verdict and findings are gemini's; no human read this diff before posting.*
+*Drafted by \`agy\` running on $REVIEWER_RUNNER_NAME, posted by @$BOT_LOGIN. Verdict and findings are agy's; no human read this diff before posting.*
 EOF
 )
 
   if [ -n "$DRY_RUN" ]; then
     write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review"
-    rm -f "$prompt_tmp" "$gemini_err_tmp"
+    rm -f "$prompt_tmp" "$agy_err_tmp"
     log "Dry run: would post $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
     continue
@@ -744,11 +744,11 @@ EOF
     clear_review_failure_attempts "$num" "$head_sha"
     apply_review_labels "$num" "$event" || log "PR #$num: failed to apply review labels"
     capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prompt_tmp" "$review" "$event"
-    rm -f "$prompt_tmp" "$gemini_err_tmp"
+    rm -f "$prompt_tmp" "$agy_err_tmp"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
   else
-    rm -f "$prompt_tmp" "$gemini_err_tmp"
+    rm -f "$prompt_tmp" "$agy_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "Failed to post review on PR #$num@$head_sha"
   fi
 done <<< "$PRS"

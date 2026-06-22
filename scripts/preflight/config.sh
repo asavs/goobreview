@@ -138,9 +138,9 @@ if [ -f "$required_checks" ]; then
   required_checks_ready=1
 fi
 
-gemini_auth=0
-if [ -d "$HOME/.gemini" ]; then
-  gemini_auth=1
+agy_auth=0
+if [ -d "$HOME/.gemini/antigravity-cli" ]; then
+  agy_auth=1
 fi
 
 recommendation="Config looks ready for dry-run."
@@ -158,8 +158,8 @@ elif [ "$personality_ready" -ne 1 ]; then
   recommendation="Select REVIEWER_POSTED_PERSONALITY=none or linus with scripts/configure.sh."
 elif [ "$required_checks_ready" -ne 1 ]; then
   recommendation="Run scripts/configure.sh to create required-checks.json."
-elif [ "$gemini_auth" -ne 1 ]; then
-  recommendation="Run gemini once on the VM, sign in, trust this folder, then /quit."
+elif [ "$agy_auth" -ne 1 ]; then
+  recommendation="Run agy once on the VM and complete Google sign-in."
 fi
 
 if [ "$report" -eq 1 ]; then
@@ -178,7 +178,7 @@ if [ "$report" -eq 1 ]; then
   print_field "personality_file_present" "$(bool "$personality_ready")"
   print_field "required_checks_present" "$(bool "$required_checks_ready")"
   print_field "reviewer_state" "$state_dir"
-  print_field "gemini_auth_present" "$(bool "$gemini_auth")"
+  print_field "agy_auth_present" "$(bool "$agy_auth")"
   print_field "recommendation" "$recommendation"
   exit 0
 fi
@@ -196,7 +196,7 @@ posted personality:     $posted_personality
 research consent:       $(bool "$research_consent")
 personality valid:      $(bool "$personality_ready")${personality_file:+ ($personality_file)}
 required checks file:   $(bool "$required_checks_ready") ($required_checks)
-Gemini auth dir:        $(bool "$gemini_auth") ($HOME/.gemini)
+Antigravity auth dir:   $(bool "$agy_auth") ($HOME/.gemini/antigravity-cli)
 
 Next: $recommendation
 EOF

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PR-head worktree helpers. The reviewer never executes code from this tree;
-# it only gives Gemini filesystem context while it reads the diff.
+# it only gives Antigravity CLI filesystem context while it reads the diff.
 
 review_worktree_slug() {
   printf '%s' "$REPO" | tr '/:' '__' | tr -c 'A-Za-z0-9._-' '_'

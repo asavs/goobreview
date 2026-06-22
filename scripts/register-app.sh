@@ -261,7 +261,7 @@ After installing, finish setup on the VM:
 
   gcloud compute ssh $VM_NAME --zone=$ZONE
   cd /opt/goobreview/example
-  gemini                # Google OAuth — sign in, trust this folder, /quit
+  agy                   # Google OAuth — sign in
   scripts/configure.sh  # App config is pre-filled when --repo detected the install
 
 Check setup state from either checkout:

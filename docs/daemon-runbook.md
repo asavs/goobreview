@@ -9,7 +9,7 @@ Preferred layout:
 ```text
 /opt/goobreview/<name>          Stable checkout of this template repo.
 /var/lib/goobreview/<name>      Runtime state and logs.
-/tmp/goobreview-runtime-<user>  Default PR snapshot and Gemini runtime root.
+/tmp/goobreview-runtime-<user>  Default PR snapshot and Antigravity runtime root.
 ```
 
 Runtime state:
@@ -22,7 +22,7 @@ gemini_backoff_until    Quota/capacity retry timestamp.
 sync.log                Checkout sync log.
 app_token.json          Cached App installation token + slug (refreshed when <5 min remain).
 app-key.pem             GitHub App private key (you provide; mode 0600).
-dry-pr-<number>.txt     Dry-run artifact with full Gemini prompt payload and response.
+dry-pr-<number>.txt     Dry-run artifact with full agy prompt payload and response.
 research-runs/          Consented public-repo paired control/Linus artifacts.
 *.txt.launch.json       Launch metadata from a dry run: repo, config hashes, required checks, and CI-bypass state.
 ```
@@ -81,7 +81,7 @@ configuration can be tested before CI is terminal. Set
 run. Set `REVIEWER_DRY_RUN_OUT=/path/to/file.txt` to choose a different
 artifact path.
 
-Render the exact Gemini prompt text for one PR without calling Gemini
+Render the exact prompt text for one PR without calling agy
 or posting a review:
 
 ```bash
@@ -309,7 +309,7 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 
 - `REVIEWER_APPLY_LABELS` — apply the helper labels after posting (default `1`; set `0` to disable). `scripts/reviewer/ensure-labels.sh` creates the labels; review posting never depends on them.
 - `REVIEWER_MAX_ATTEMPTS` — maximum non-skipped PRs to attempt in one tick. Defaults to `REVIEWER_MAX_PRS`. Reaching this limit logs `Reached REVIEWER_MAX_ATTEMPTS=...` and stops the tick.
-- `REVIEWER_IGNORE_GEMINI_BACKOFF` — set `1` to run even while a Gemini quota backoff (`gemini_backoff_until`) is active. `dry-run.sh` sets this automatically.
+- `REVIEWER_IGNORE_AGY_BACKOFF` — set `1` to run even while an Antigravity quota backoff (`agy_backoff_until`) is active. `dry-run.sh` sets this automatically.
 - `REVIEWER_REQUIRED_CHECKS_JSON` + `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE=1` — override the required-check gate from the environment for one-off runs; both must be set, so a stray env var cannot loosen a production gate.
 - `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK` — emergency bypass for the live tick launch gate. Prefer rerunning `REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh` and `scripts/launch-check.sh`.
 - `REVIEWER_SYNC_REMOTE`, `REVIEWER_SYNC_BRANCH`, `REVIEWER_SYNC_LOG` — which remote/branch `sync-worktree.sh` tracks (default `origin`/`main`) and where it logs.

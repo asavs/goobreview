@@ -93,18 +93,18 @@ ops_require_executable "$APP_TOKEN_SH" "This checkout looks incomplete."
 ops_require_file "$CONFIG_DIR/reviewer.env.example" "This checkout looks incomplete."
 ops_require_command node "Run scripts/setup-vm.sh first."
 ops_require_command jq "Run scripts/setup-vm.sh first."
-ops_require_command gemini "Run scripts/setup-vm.sh first, then authenticate Gemini."
+ops_require_command agy "Run scripts/setup-vm.sh first, then authenticate Antigravity CLI."
 bash "$SCRIPT_DIR/preflight/checkout.sh" --strict --allow-setup-ref-mismatch
 
-allow_missing_gemini=0
-if [ ! -d "$HOME/.gemini" ]; then
-  log "Warning: ~/.gemini not found - Gemini CLI does not look authenticated for $(whoami)."
+allow_missing_agy=0
+if [ ! -d "$HOME/.gemini/antigravity-cli" ]; then
+  log "Warning: Antigravity CLI auth state not found for $(whoami)."
   log "Without auth, dry runs and the reviewer daemon will fail. To authenticate:"
-  log "  gemini                # sign in to Google in the browser, trust this folder, then /quit"
+  log "  agy                   # sign in to Google in the browser"
   if ! confirm "Continue configuring anyway?"; then
     exit 1
   fi
-  allow_missing_gemini=1
+  allow_missing_agy=1
 fi
 
 ops_copy_if_missing "$ENV_FILE" "$CONFIG_DIR/reviewer.env.example" || exit 1
@@ -210,8 +210,8 @@ fi
 if [ "$create_labels" -eq 1 ]; then
   inner_args+=(--create-labels)
 fi
-if [ "$allow_missing_gemini" -eq 1 ]; then
-  inner_args+=(--allow-missing-gemini)
+if [ "$allow_missing_agy" -eq 1 ]; then
+  inner_args+=(--allow-missing-agy)
 fi
 
 bash "$INNER_SH" "${inner_args[@]}"

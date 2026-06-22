@@ -24,7 +24,7 @@ the beginning if a later phase is already complete.
   persistent credentials, or enabling the scheduler. The free-tier VM itself
   does not need a confirmation round-trip: announce the project/zone/name you
   are about to use, create it, and report where it lives.
-- Never place GitHub App private keys, Gemini credentials, or cloud credentials
+- Never place GitHub App private keys, Antigravity CLI credentials, or cloud credentials
   in the repo.
 - Keep the GitHub App `.pem` on the VM at `REVIEWER_APP_PRIVATE_KEY_PATH`
   (default: `$REVIEWER_STATE/app-key.pem`) with mode `0600`.
@@ -116,14 +116,14 @@ scripts/configure-inner.sh \
 
 Add `--installation-id ID` only if discovery is not desired or has already been
 done. Add `--create-labels` only after asking the user. Add
-`--allow-missing-gemini` only if the user intentionally wants to configure
-before authenticating Gemini.
+`--allow-missing-agy` only if the user intentionally wants to configure
+before authenticating Antigravity CLI.
 
-Gemini CLI auth on the VM is manual:
+Antigravity CLI auth on the VM is manual:
 
 ```bash
-gemini
-# sign in, trust this folder, then /quit
+agy
+# sign in
 ```
 
 ## Phase 4 - Tune

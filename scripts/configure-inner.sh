@@ -22,7 +22,7 @@ personality=""
 posted_personality=""
 research_consent=""
 create_labels=0
-allow_missing_gemini=0
+allow_missing_agy=0
 
 usage() {
   cat <<EOF
@@ -46,7 +46,7 @@ Options:
                              be retained. Default: 0.
   --personality PATH         Legacy personality-file override for old configs.
   --create-labels           Create/update helper labels on the target repo.
-  --allow-missing-gemini    Warn instead of failing when Gemini auth is missing.
+  --allow-missing-agy       Warn instead of failing when Antigravity CLI auth is missing.
   --env-file PATH           Override config/reviewer.env path.
   -h, --help                Show this help.
 EOF
@@ -85,8 +85,8 @@ while [ "$#" -gt 0 ]; do
     --create-labels)
       create_labels=1
       ;;
-    --allow-missing-gemini)
-      allow_missing_gemini=1
+    --allow-missing-agy)
+      allow_missing_agy=1
       ;;
     --env-file)
       ENV_FILE="${2:-}"
@@ -105,16 +105,16 @@ done
 
 ops_require_command node "Run scripts/setup-vm.sh first."
 ops_require_command jq "Run scripts/setup-vm.sh first."
-ops_require_command gemini "Run scripts/setup-vm.sh first, then authenticate Gemini."
+ops_require_command agy "Run scripts/setup-vm.sh first, then authenticate Antigravity CLI."
 ops_require_executable "$APP_TOKEN_SH" "This checkout looks incomplete."
 ops_require_file "$CONFIG_DIR/reviewer.env.example" "This checkout looks incomplete."
 ops_require_file "$CONFIG_DIR/required-checks.example.json" "This checkout looks incomplete."
 
-if [ ! -d "$HOME/.gemini" ]; then
-  if [ "$allow_missing_gemini" -eq 1 ]; then
-    ops_warn "$HOME/.gemini not found; dry runs will fail until Gemini is authenticated."
+if [ ! -d "$HOME/.gemini/antigravity-cli" ]; then
+  if [ "$allow_missing_agy" -eq 1 ]; then
+    ops_warn "Antigravity CLI auth state not found; dry runs will fail until agy is authenticated."
   else
-    ops_die "$HOME/.gemini not found. Run 'gemini' once, sign in, trust this folder, then /quit. Use --allow-missing-gemini to configure anyway."
+    ops_die "Antigravity CLI auth state not found. Run 'agy' once and sign in. Use --allow-missing-agy to configure anyway."
   fi
 fi
 

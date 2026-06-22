@@ -27,7 +27,7 @@ The GitHub Actions workflow in `.github/workflows/linux-validation.yml` runs
 the same required checks on Ubuntu and installs `jq` through apt. It also
 enforces ShellCheck when apt can provide it; local runs may skip ShellCheck if
 it is not installed. The fixture runner covers reviewer-core parser, prompt,
-and CI-gate behavior without GitHub credentials, Gemini auth, or network
+and CI-gate behavior without GitHub credentials, Antigravity CLI auth, or network
 access. Run the shell checks from Linux or a working WSL environment; a
 Windows host with no WSL distribution is not authoritative for Bash syntax.
 
@@ -40,7 +40,7 @@ order of impact):
 1. `REVIEWER_POSTED_PERSONALITY=none|linus` - which review style posts to GitHub. `none` uses `config/personalities/control.md`; `linus` uses `config/personalities/linus.md`.
 2. `REVIEWER_RESEARCH_CONSENT=0|1` - whether public-repo runs may retain paired control/Linus research artifacts. This never changes which review posts.
 3. `config/personalities/<name>.md` - role, voice, focus areas. Existing entries are committed verbatim; `REVIEWER_PERSONALITY_FILE` is only a legacy/internal escape hatch for direct file selection.
-4. `config/required-checks.example.json` - CI gates that must pass before the reviewer calls Gemini.
+4. `config/required-checks.example.json` - CI gates that must pass before the reviewer calls `agy`.
 
 Edit the `.example.*` siblings in your fork. End users will copy them to
 their non-example names with `scripts/configure.sh`. (Personalities are the
@@ -64,7 +64,7 @@ If you fork instead, the cleanup workflow won't fire until a push to `main`. Eit
 ## Safety Rules
 
 - Do not commit real `config/reviewer.env` files.
-- Do not add tokens, private keys, cloud credentials, or Gemini auth files.
+- Do not add tokens, private keys, cloud credentials, or Antigravity auth files.
 - Do not hard-code private repository names in generic docs or examples.
 - Keep local config ignored so `sync-worktree.sh` can safely update clean daemon checkouts.
 - Avoid adding dependencies unless they materially improve reliability.
@@ -75,6 +75,6 @@ If you fork instead, the cleanup workflow won't fire until a push to `main`. Eit
 Use `REVIEWER_DRY_RUN=1` first. Only post a real review after:
 
 - `scripts/reviewer/get-installation-token.sh token` returns a token (proves the App credentials and installation are wired up).
-- Gemini CLI works headlessly from the daemon checkout.
+- Antigravity CLI works headlessly from the daemon checkout.
 - The configured target repo is correct.
 - Required check names match GitHub check-run display names.

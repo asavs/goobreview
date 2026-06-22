@@ -54,7 +54,7 @@ sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils tar
 
-# Small VMs (e2-micro = 1 GB RAM) can OOM when Gemini CLI spikes during a
+# Small VMs (e2-micro = 1 GB RAM) can OOM when Antigravity CLI spikes during a
 # review. A 2 GB swap file turns hard OOM kills into slower-but-successful
 # runs. Override size via GOOBREVIEW_SWAP_SIZE (e.g. "0" to skip).
 SWAPFILE="${GOOBREVIEW_SWAPFILE:-/swapfile}"
@@ -86,11 +86,11 @@ else
   log "Node $(node -v) already installed"
 fi
 
-if ! command -v gemini >/dev/null 2>&1; then
-  log "Installing Gemini CLI (npm global)"
-  sudo npm install -g @google/gemini-cli
+if ! command -v agy >/dev/null 2>&1; then
+  log "Installing Antigravity CLI"
+  curl -fsSL https://antigravity.google/cli/install.sh | sudo -E bash
 else
-  log "gemini already installed"
+  log "agy already installed"
 fi
 
 log "Preparing $CHECKOUT_DIR and $STATE_DIR"
@@ -108,14 +108,14 @@ fi
 log "Versions:"
 git --version
 node --version
-gemini --version 2>/dev/null || echo "gemini installed (version flag may require login)"
+agy --version 2>/dev/null || echo "agy installed (version flag may require login)"
 
 cat <<EOF
 
 [setup-vm] Done. Next, on this VM:
 
   cd $CHECKOUT_DIR
-  gemini                              # sign in to Google, trust this folder, /quit
+  agy                                 # sign in to Google
 
   # Then register a GitHub App (docs/github-app-setup.md), scp its
   # private key into $STATE_DIR/app-key.pem, and run:
