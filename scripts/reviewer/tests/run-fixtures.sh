@@ -1650,7 +1650,18 @@ EOF
 
   cat > "$bin_dir/agy" <<'EOF'
 #!/usr/bin/env bash
-prompt=$(cat)
+prompt=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --print)
+      prompt="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 case "$prompt" in
   *"Mauro, SHUT"*) printf 'linus review\nCOMMENT\n' ;;
   *) printf 'control review\nAPPROVE\n' ;;
