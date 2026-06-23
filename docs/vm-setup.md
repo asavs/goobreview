@@ -1,6 +1,6 @@
 # VM Setup
 
-Use this page for any non-Cloud-Shell install, or when you need to understand what `scripts/bootstrap-gcp.sh` and `scripts/setup-vm.sh` create for you. The VM needs `git`, `jq`, `curl`, `wget`, `tar`, `flock`, `timeout`, Node/npm, and Antigravity CLI (`agy`). Ubuntu LTS is the easiest default.
+Use this page for any non-Cloud-Shell install, or when you need to understand what `scripts/bootstrap-gcp.sh` and `scripts/setup-vm.sh` create for you. The VM needs `git`, `jq`, `curl`, `wget`, `tar`, `flock`, `timeout`, `openssl`, and Antigravity CLI (`agy`). No Node runtime is required on the VM. Ubuntu LTS is the easiest default.
 
 Minimum practical shape:
 
@@ -48,7 +48,7 @@ Keep firewall exposure minimal. The reviewer needs outbound HTTPS and inbound SS
 ## Install GoobReview Runtime
 
 After SSHing to the VM, the recommended manual path is to run the same installer
-the Cloud Shell bootstrap uses. It installs base packages, Node 20,
+the Cloud Shell bootstrap uses. It installs base packages,
 Antigravity CLI, the checkout, the state directory, and optional swap:
 
 ```bash
@@ -89,11 +89,12 @@ On Ubuntu, install the base packages first:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils tar
+sudo apt-get install -y git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils tar openssl
 ```
 
-`flock` comes from `util-linux`; `timeout` comes from `coreutils`. Do not rely
-on Ubuntu's `nodejs` package on older LTS images; install Node 20 or newer.
+`flock` comes from `util-linux`; `timeout` comes from `coreutils`; `openssl`
+signs the GitHub App JWT. No Node runtime is needed on the VM — the token
+minting that used to require Node is now pure shell (`openssl` + `curl` + `jq`).
 
 ## Install Antigravity CLI
 

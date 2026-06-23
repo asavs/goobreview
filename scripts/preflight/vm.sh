@@ -102,7 +102,7 @@ if gcloud_command_found gcloud; then
       remote_probe="$(vm_remote_dependency_probe "$vm_name" "$zone" 30)"
       checkout_present="$(report_value checkout_present "$remote_probe")"
       missing=""
-      for cmd in git jq curl wget node agy; do
+      for cmd in git jq curl wget openssl agy; do
         if [ "$(report_value "$cmd" "$remote_probe")" != "true" ]; then
           missing="${missing}${missing:+,}$cmd"
         fi

@@ -257,20 +257,21 @@ scripts/reviewer/get-installation-token.sh slug
 
 `discover` only needs `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY_PATH`.
 `token` and `slug` also need `REVIEWER_APP_INSTALLATION_ID` and
-`REVIEWER_STATE` so the short-lived installation token can be cached. For
-one-off diagnostics before `reviewer.env` is fully populated, the underlying
-Node helper accepts direct flags:
+`REVIEWER_STATE` so the short-lived installation token can be cached. The
+helper is pure shell (`openssl` signs the JWT, `curl` calls the API) and reads
+everything from the `REVIEWER_*` environment, so for one-off diagnostics before
+`reviewer.env` is fully populated, export the values inline:
 
 ```bash
-node scripts/reviewer/lib/app-token.mjs discover OWNER/REPO \
-  --app-id APP_ID \
-  --key-path /var/lib/goobreview/example/app-key.pem
+REVIEWER_APP_ID=APP_ID \
+REVIEWER_APP_PRIVATE_KEY_PATH=/var/lib/goobreview/example/app-key.pem \
+  scripts/reviewer/get-installation-token.sh discover OWNER/REPO
 
-node scripts/reviewer/lib/app-token.mjs token \
-  --app-id APP_ID \
-  --installation-id INSTALLATION_ID \
-  --key-path /var/lib/goobreview/example/app-key.pem \
-  --state /var/lib/goobreview/example
+REVIEWER_APP_ID=APP_ID \
+REVIEWER_APP_INSTALLATION_ID=INSTALLATION_ID \
+REVIEWER_APP_PRIVATE_KEY_PATH=/var/lib/goobreview/example/app-key.pem \
+REVIEWER_STATE=/var/lib/goobreview/example \
+  scripts/reviewer/get-installation-token.sh token
 ```
 
 ## Configuration Reference
@@ -280,7 +281,7 @@ The reviewer reads two gitignored files under `config/`, each copied from a `*.e
 - **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_POSTED_PERSONALITY` (`none` or `linus`; default `none`). `REVIEWER_RESEARCH_CONSENT` defaults to `0`; when set to `1`, public live reviews retain paired control/Linus artifacts under `REVIEWER_STATE/research-runs/`. Also carries the blinding policy: `REVIEWER_INCLUDE_AUTHOR` (default `0`), `REVIEWER_INCLUDE_DESCRIPTION` and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (default `1`).
 - **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon fetches all check-run pages for the PR head before deciding whether a required check is missing, waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
 
-GitHub API calls are bounded by default. Shell-based REST calls use `REVIEWER_GITHUB_CONNECT_TIMEOUT` (default `10` seconds), `REVIEWER_GITHUB_MAX_TIME` (default `60` seconds), `REVIEWER_GITHUB_RETRIES` (default `2` retries for safe transient GET failures such as network errors, 5xx, 429, or rate-limit-like 403 responses), and `REVIEWER_GITHUB_RETRY_SLEEP` (default `1` second between attempts). The Node App-token helper uses `REVIEWER_GITHUB_FETCH_TIMEOUT` (default `60` seconds) as its fetch abort timeout. Failed GitHub API calls log the method, path, curl status, HTTP status, attempt count, and a short redacted response snippet so operators can distinguish auth/configuration errors from transient GitHub failures without leaking tokens. Check-run summaries include whether the fetched data is complete and whether the displayed rows were intentionally truncated; set `REVIEWER_CHECK_RUN_SUMMARY_LIMIT` (default `200`) to change the display limit without changing required-check gating.
+GitHub API calls are bounded by default. Shell-based REST calls use `REVIEWER_GITHUB_CONNECT_TIMEOUT` (default `10` seconds), `REVIEWER_GITHUB_MAX_TIME` (default `60` seconds), `REVIEWER_GITHUB_RETRIES` (default `2` retries for safe transient GET failures such as network errors, 5xx, 429, or rate-limit-like 403 responses), and `REVIEWER_GITHUB_RETRY_SLEEP` (default `1` second between attempts). The App-token helper (`get-installation-token.sh`) uses `REVIEWER_GITHUB_FETCH_TIMEOUT` (default `60` seconds) as its per-request `curl --max-time`. Failed GitHub API calls log the method, path, curl status, HTTP status, attempt count, and a short redacted response snippet so operators can distinguish auth/configuration errors from transient GitHub failures without leaking tokens. Check-run summaries include whether the fetched data is complete and whether the displayed rows were intentionally truncated; set `REVIEWER_CHECK_RUN_SUMMARY_LIMIT` (default `200`) to change the display limit without changing required-check gating.
 
 Prompt assembly is also bounded by default. The diff degrades per file: `REVIEWER_DIFF_FILE_MAX_BYTES` (default `40000`) and `REVIEWER_DIFF_MAX_BYTES` (default `120000`) cap the per-file and total patch budgets, and a file over budget (or matching a built-in lockfile pattern or the target repo's `.gitattributes` `linguist-generated` patterns, or served without a text patch by GitHub) is replaced whole by an explicit `goobreview` omission marker — never cut mid-hunk. Omitted files remain readable in the PR-head snapshot. After assembly, `REVIEWER_MAX_PROMPT_BYTES` (default `240000`) is a hard fail-closed budget checked before Gemini is invoked. Dry-run output is capped by `REVIEWER_MAX_ARTIFACT_BYTES` (default `1000000`) and marked when truncated.
 

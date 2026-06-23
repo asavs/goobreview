@@ -49,7 +49,7 @@ ops_validate_owner_repo "$REVIEWER_REPO" REVIEWER_REPO
 ops_validate_uint REVIEWER_APP_ID "$REVIEWER_APP_ID"
 ops_validate_uint REVIEWER_APP_INSTALLATION_ID "$REVIEWER_APP_INSTALLATION_ID"
 ops_require_private_key "$REVIEWER_APP_PRIVATE_KEY_PATH"
-for cmd in curl jq node tar flock; do
+for cmd in curl jq openssl tar flock; do
   ops_require_command "$cmd" "Run scripts/setup-vm.sh first."
 done
 

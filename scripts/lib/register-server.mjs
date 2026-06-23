@@ -146,6 +146,7 @@ function renderSuccess(summary) {
     a.btn { display: inline-block; font-size: 16px; padding: 0.75em 1.5em; background: #2da44e; color: white; text-decoration: none; border-radius: 6px; }
     a.btn:hover { background: #2c974b; }
     code { background: #f6f8fa; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+    a.btn code { background: rgba(255, 255, 255, 0.2); color: inherit; }
     .muted { color: #57606a; font-size: 13px; }
   </style>
 </head>

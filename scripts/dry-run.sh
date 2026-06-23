@@ -26,7 +26,7 @@ ops_require_private_key "$REVIEWER_APP_PRIVATE_KEY_PATH"
 if [ ! -d "$HOME/.gemini/antigravity-cli" ]; then
   ops_die "Antigravity CLI auth state not found at $HOME/.gemini/antigravity-cli. Run 'agy' once in this checkout and complete Google sign-in."
 fi
-for cmd in curl agy jq node sha256sum tar flock timeout; do
+for cmd in curl agy jq openssl sha256sum tar flock timeout; do
   ops_require_command "$cmd" "Run scripts/setup-vm.sh first."
 done
 

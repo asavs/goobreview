@@ -42,7 +42,26 @@ jobs:
         run: bash scripts/reviewer/tests/run-fixtures.sh
 
       - name: App token helper smoke test
-        run: node scripts/reviewer/lib/app-token.mjs --help
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          export REVIEWER_APP_ID=12345
+          export REVIEWER_APP_INSTALLATION_ID=67890
+          export REVIEWER_STATE="$tmp/state"
+          export REVIEWER_APP_PRIVATE_KEY_PATH="$tmp/key.pem"
+          mkdir -p "$REVIEWER_STATE"
+          openssl genrsa -out "$REVIEWER_APP_PRIVATE_KEY_PATH" 2048
+          # Serve a far-future cached token/slug without any network call.
+          jq -nc --argjson e "$(( $(date +%s) + 3600 ))" \
+            '{app_id:"12345",installation_id:"67890",slug:"goob-bot",token:"ghs_SMOKE",expires_at:$e}' \
+            > "$REVIEWER_STATE/app_token.json"
+          [ "$(scripts/reviewer/get-installation-token.sh token)" = "ghs_SMOKE" ]
+          [ "$(scripts/reviewer/get-installation-token.sh slug)" = "goob-bot" ]
+          # Unknown query must exit non-zero.
+          if scripts/reviewer/get-installation-token.sh bogus 2>/dev/null; then
+            echo "expected non-zero exit for unknown query" >&2
+            exit 1
+          fi
 
       - name: Preflight fixtures
         run: bash scripts/preflight/tests/run-fixtures.sh
