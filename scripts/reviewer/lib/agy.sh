@@ -60,6 +60,6 @@ run_agy_review() {
     # sandbox confines tool execution; the snapshot is its sole project context.
     unset GH_TOKEN GITHUB_TOKEN REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH
     timeout "$AGY_TIMEOUT" agy --sandbox --dangerously-skip-permissions \
-      --print-timeout "${AGY_TIMEOUT}s" --model "$AGY_MODEL" --print "$prompt" 2>"$err_file"
+      --print-timeout "${AGY_TIMEOUT}s" --model "$AGY_MODEL" --print "$prompt" </dev/null 2>"$err_file"
   )
 }

@@ -108,7 +108,7 @@ fi
 log "Versions:"
 git --version
 node --version
-agy --version 2>/dev/null || echo "agy installed (version flag may require login)"
+agy --version </dev/null 2>/dev/null || echo "agy installed (version flag may require login)"
 
 cat <<EOF
 
