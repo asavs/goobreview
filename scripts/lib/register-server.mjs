@@ -263,12 +263,16 @@ function sendHtml(res, status, html) {
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.method === 'GET' && req.url === '/') {
+    // Cloud Shell's Web Preview appends query params (e.g. ?authuser=0) when
+    // routing requests, so match on the path only, not the raw req.url.
+    const pathname = new URL(req.url, 'http://localhost').pathname;
+
+    if (req.method === 'GET' && pathname === '/') {
       sendHtml(res, 200, renderForm());
       return;
     }
 
-    if (req.method === 'GET' && req.url === '/installation') {
+    if (req.method === 'GET' && pathname === '/installation') {
       if (!TARGET_REPO) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'disabled' }));
@@ -307,7 +311,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === 'POST' && req.url === '/complete') {
+    if (req.method === 'POST' && pathname === '/complete') {
       const form = await parseMultipart(req);
       const appId = String(form.get('app_id') || '').trim();
       const pemFile = form.get('pem_file');
