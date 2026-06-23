@@ -35,7 +35,28 @@ FAILURE_MAX_ATTEMPTS="${REVIEWER_FAILURE_MAX_ATTEMPTS:-3}"
 INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
 RUNTIME_OWNER="${USER:-$(id -u 2>/dev/null || printf user)}"
-RUNTIME_STATE_DIR="${REVIEWER_RUNTIME_STATE:-${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/goobreview-runtime-$RUNTIME_OWNER}"
+# Minimum free space (KB) required on the default runtime base before we
+# fall back to /tmp instead. XDG_RUNTIME_DIR is commonly a tmpfs capped near
+# 10% of RAM, which on a 1 GB e2-micro VM is ~96 MB -- too small to unpack a
+# PR-head snapshot.
+RUNTIME_MIN_FREE_KB="${REVIEWER_RUNTIME_MIN_FREE_KB:-204800}"
+if [ -n "${REVIEWER_RUNTIME_STATE:-}" ]; then
+  RUNTIME_STATE_DIR="$REVIEWER_RUNTIME_STATE"
+else
+  runtime_base="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+  if [ -d "$runtime_base" ]; then
+    runtime_avail_kb=$(df -Pk "$runtime_base" 2>/dev/null | awk 'NR==2{print $4}')
+    case "$runtime_avail_kb" in
+      ''|*[!0-9]*) ;;
+      *)
+        if [ "$runtime_avail_kb" -lt "$RUNTIME_MIN_FREE_KB" ]; then
+          runtime_base=/tmp
+        fi
+        ;;
+    esac
+  fi
+  RUNTIME_STATE_DIR="$runtime_base/goobreview-runtime-$RUNTIME_OWNER"
+fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
 PROMPT_FILE="${REVIEWER_PROMPT:-$SCRIPT_DIR/review-prompt.md}"
