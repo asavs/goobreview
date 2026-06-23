@@ -208,7 +208,9 @@ if command -v gcloud >/dev/null 2>&1; then
 fi
 
 if [ "$local_git_found" -eq 1 ] && [ "$vm_reachable" = "true" ] && [ -n "$vm_head" ]; then
-  if [ "$local_head" = "$vm_head" ] && [ "$local_origin" = "$vm_origin" ]; then
+  local_owner_repo="$(ops_to_owner_repo "$local_origin")"
+  vm_owner_repo="$(ops_to_owner_repo "$vm_origin")"
+  if [ "$local_head" = "$vm_head" ] && [ "$local_owner_repo" = "$vm_owner_repo" ]; then
     alignment="true"
   else
     alignment="false"
