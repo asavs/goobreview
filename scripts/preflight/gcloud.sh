@@ -4,11 +4,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+STATE_FILE="$REPO_ROOT/.goobreview-cloud-shell.env"
 # shellcheck disable=SC1091
 . "$REPO_ROOT/scripts/lib/ops.sh"
 # shellcheck disable=SC1091
 . "$REPO_ROOT/scripts/lib/gcloud.sh"
 export OPS_LOG_PREFIX="preflight-gcloud"
+
+if [ -f "$STATE_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+fi
 
 report=0
 
@@ -112,6 +118,7 @@ if gcloud_command_found gcloud; then
   if [ -n "$active_account" ]; then
     gcloud_authenticated=1
     active_project="$(gcloud_active_project)"
+    active_project="$(gcloud_restore_saved_project "$active_project" "${GOOBREVIEW_GCP_PROJECT:-}")"
     if gcloud_project_is_usable "$active_project"; then
       usable_project=1
     fi

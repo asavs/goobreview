@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Shared read-only Google Cloud probes for onboarding scripts.
-# This file intentionally contains no mutating gcloud operations.
+# Shared read-only Google Cloud probes for onboarding scripts, plus a single
+# narrow mutation: restoring a previously saved project when Cloud Shell has
+# cleared the active one. See gcloud_restore_saved_project below.
 
 # Return success when the named command is available on PATH.
 gcloud_command_found() {
@@ -35,6 +36,31 @@ gcloud_project_is_usable() {
     ''|'(unset)'|cloudshell-*) return 1 ;;
     *) return 0 ;;
   esac
+}
+
+# If the active gcloud project is unset/cleared/a Cloud Shell ephemeral and a
+# previously saved project is available (e.g. from .goobreview-cloud-shell.env's
+# GOOBREVIEW_GCP_PROJECT), restore it with `gcloud config set project`. This
+# recovers automatically from a Cloud Shell backend restart, which clears the
+# active project but leaves the saved env file intact. No-op when the active
+# project is already usable, or when no saved project is available. Prints the
+# now-active project on stdout. Requires ops_log to be sourced by the caller.
+gcloud_restore_saved_project() {
+  local active_project="$1" saved_project="$2"
+
+  if gcloud_project_is_usable "$active_project"; then
+    printf '%s' "$active_project"
+    return 0
+  fi
+
+  if [ -z "$saved_project" ]; then
+    printf '%s' "$active_project"
+    return 0
+  fi
+
+  ops_log "Active gcloud project is unset; restoring saved project '$saved_project'." >&2
+  gcloud config set project "$saved_project" >/dev/null
+  printf '%s' "$saved_project"
 }
 
 GCLOUD_ACCESSIBLE_PROJECTS_CACHE=""

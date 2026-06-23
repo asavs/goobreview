@@ -67,9 +67,26 @@ case "$cmd" in
     case "$fixture" in
       no-active-two-billed|no-active-inferred-billing|no-active-no-billed-with-account|no-active-no-billing) echo "(unset)" ;;
       active-unbilled-with-alternative|active-billed-compute-disabled) echo "alpha-project" ;;
+      restore-saved-project)
+        if [ -f "$RESTORE_MARKER" ]; then
+          echo "alpha-project"
+        else
+          echo "(unset)"
+        fi
+        ;;
       unauthenticated)
         echo "ERROR: (gcloud.config.get-value) You do not currently have an active account selected." >&2
         exit 1
+        ;;
+      *) exit 2 ;;
+    esac
+    ;;
+
+  config:set)
+    case "$fixture" in
+      restore-saved-project)
+        project="${4:-}"
+        printf '%s' "$project" > "$RESTORE_MARKER"
         ;;
       *) exit 2 ;;
     esac
@@ -84,7 +101,7 @@ case "$cmd" in
       no-active-two-billed|no-active-inferred-billing|active-unbilled-with-alternative)
         printf '%s\n' alpha-project beta-project gamma-project
         ;;
-      no-active-no-billed-with-account|no-active-no-billing|active-billed-compute-disabled)
+      no-active-no-billed-with-account|no-active-no-billing|active-billed-compute-disabled|restore-saved-project)
         printf '%s\n' alpha-project
         ;;
       *) exit 2 ;;
@@ -94,14 +111,14 @@ case "$cmd" in
   projects:describe)
     project="${3:-}"
     case "$fixture:$project" in
-      active-unbilled-with-alternative:alpha-project|active-billed-compute-disabled:alpha-project) echo "$project" ;;
+      active-unbilled-with-alternative:alpha-project|active-billed-compute-disabled:alpha-project|restore-saved-project:alpha-project) echo "$project" ;;
       *) echo "$project" ;;
     esac
     ;;
 
   billing:accounts)
     case "$fixture" in
-      no-active-two-billed|no-active-no-billed-with-account|active-unbilled-with-alternative|active-billed-compute-disabled)
+      no-active-two-billed|no-active-no-billed-with-account|active-unbilled-with-alternative|active-billed-compute-disabled|restore-saved-project)
         printf '%s\t%s\n' billingAccounts/ABC123 "Personal Billing"
         ;;
       no-active-no-billing)
@@ -127,7 +144,7 @@ case "$cmd" in
           printf '%s\n' True
         fi
         ;;
-      active-unbilled-with-alternative:beta-project|active-billed-compute-disabled:alpha-project)
+      active-unbilled-with-alternative:beta-project|active-billed-compute-disabled:alpha-project|restore-saved-project:alpha-project)
         if [[ "$*" == *"billingAccountName,billingEnabled"* ]]; then
           printf '%s\t%s\n' billingAccounts/ABC123 True
         else
@@ -177,6 +194,30 @@ run_gcloud_preflight() {
 
   PATH="$FAKE_BIN:$PATH" GCLOUD_FIXTURE="$fixture" \
     bash "$PREFLIGHT_DIR/gcloud.sh" "$@" > "$out"
+}
+
+setup_gcloud_repo_with_saved_project() {
+  local name="$1" saved_project="$2" repo
+  repo="$TMP_ROOT/$name"
+
+  mkdir -p "$repo/scripts/preflight" "$repo/scripts/lib"
+  cp "$PREFLIGHT_DIR/gcloud.sh" "$repo/scripts/preflight/gcloud.sh"
+  cp "$PREFLIGHT_DIR/../lib/ops.sh" "$repo/scripts/lib/ops.sh"
+  cp "$PREFLIGHT_DIR/../lib/gcloud.sh" "$repo/scripts/lib/gcloud.sh"
+
+  cat > "$repo/.goobreview-cloud-shell.env" <<EOF
+GOOBREVIEW_GCP_PROJECT='$saved_project'
+EOF
+
+  printf '%s' "$repo"
+}
+
+run_gcloud_preflight_in_repo() {
+  local fixture="$1" repo="$2" out="$3" marker="$4"
+  shift 4
+
+  PATH="$FAKE_BIN:$PATH" GCLOUD_FIXTURE="$fixture" RESTORE_MARKER="$marker" \
+    bash "$repo/scripts/preflight/gcloud.sh" "$@" > "$out"
 }
 
 setup_checkout_repo() {
@@ -390,6 +431,20 @@ test_active_billed_project_with_compute_disabled() {
   assert_contains "delegates compute enablement to bootstrap" "bootstrap-gcp.sh can do this before VM creation" "$out"
 }
 
+test_gcloud_restores_saved_project_when_unset() {
+  local repo out marker
+  repo="$(setup_gcloud_repo_with_saved_project gcloud-restore alpha-project)"
+  out="$TMP_ROOT/restore-saved-project.report"
+  marker="$TMP_ROOT/restore-saved-project.marker"
+  rm -f "$marker"
+
+  run_gcloud_preflight_in_repo restore-saved-project "$repo" "$out" "$marker" --report
+
+  assert_contains "restore writes config set with saved project" "alpha-project" "$marker"
+  assert_contains "restore reports active project restored" "active_project='alpha-project'" "$out"
+  assert_contains "restore reports usable project" "usable_project='true'" "$out"
+}
+
 test_checkout_aligned_clean() {
   local repo out
   repo="$(setup_checkout_repo checkout-aligned main)"
@@ -587,6 +642,7 @@ test_no_active_project_with_billing_account_but_no_billed_project
 test_no_active_project_without_billing
 test_active_unbilled_project_points_to_alternative
 test_active_billed_project_with_compute_disabled
+test_gcloud_restores_saved_project_when_unset
 test_checkout_aligned_clean
 test_checkout_setup_ref_mismatch_fails_strict
 test_checkout_explicit_setup_url_passes_strict
