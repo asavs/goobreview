@@ -88,7 +88,7 @@ fi
 
 if ! command -v agy >/dev/null 2>&1; then
   log "Installing Antigravity CLI"
-  curl -fsSL https://antigravity.google/cli/install.sh | sudo -E bash
+  curl -fsSL https://antigravity.google/cli/install.sh | sudo -E bash -s -- --dir /usr/local/bin
 else
   log "agy already installed"
 fi
