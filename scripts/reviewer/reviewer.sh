@@ -35,7 +35,11 @@ FAILURE_MAX_ATTEMPTS="${REVIEWER_FAILURE_MAX_ATTEMPTS:-3}"
 INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
 RUNTIME_OWNER="${USER:-$(id -u 2>/dev/null || printf user)}"
-RUNTIME_STATE_DIR="${REVIEWER_RUNTIME_STATE:-${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/goobreview-runtime-$RUNTIME_OWNER}"
+# Snapshot extraction needs deterministic on-disk space, so default to /tmp
+# rather than XDG_RUNTIME_DIR (commonly a tmpfs capped near 10% of RAM, ~96 MB
+# on a 1 GB e2-micro -- too small to unpack a PR-head snapshot). The dir is
+# created 0700 below, keeping it private despite /tmp being world-traversable.
+RUNTIME_STATE_DIR="${REVIEWER_RUNTIME_STATE:-/tmp/goobreview-runtime-$RUNTIME_OWNER}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
 PROMPT_FILE="${REVIEWER_PROMPT:-$SCRIPT_DIR/review-prompt.md}"
