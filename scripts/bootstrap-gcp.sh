@@ -364,7 +364,17 @@ create_project_interactive() {
   printf '%s' "$project_id"
 }
 
+saved_gcp_project=""
+if [ -f "$STATE_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+  saved_gcp_project="${GOOBREVIEW_GCP_PROJECT:-}"
+fi
+
 current_project="${PROJECT_ARG:-$(gcloud_active_project)}"
+if [ -z "$PROJECT_ARG" ]; then
+  current_project="$(gcloud_restore_saved_project "$current_project" "$saved_gcp_project")"
+fi
 case "$current_project" in
   ''|'(unset)'|cloudshell-*)
     cat >&2 <<EOF
