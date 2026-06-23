@@ -52,7 +52,7 @@ fi
 log "apt: base packages"
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils tar
+  git jq curl wget ca-certificates gnupg lsb-release util-linux coreutils tar openssl
 
 # Small VMs (e2-micro = 1 GB RAM) can OOM when Antigravity CLI spikes during a
 # review. A 2 GB swap file turns hard OOM kills into slower-but-successful
@@ -77,15 +77,6 @@ if [ "$SWAP_SIZE" != "0" ]; then
   fi
 fi
 
-node_major="$(node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/' || echo 0)"
-if [ "${node_major:-0}" -lt 20 ]; then
-  log "Installing Node.js 20 from NodeSource"
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
-else
-  log "Node $(node -v) already installed"
-fi
-
 if ! command -v agy >/dev/null 2>&1; then
   log "Installing Antigravity CLI"
   curl -fsSL https://antigravity.google/cli/install.sh | sudo -E bash -s -- --dir /usr/local/bin
@@ -107,7 +98,7 @@ fi
 
 log "Versions:"
 git --version
-node --version
+openssl version
 agy --version </dev/null 2>/dev/null || echo "agy installed (version flag may require login)"
 
 cat <<EOF

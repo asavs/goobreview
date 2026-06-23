@@ -203,7 +203,7 @@ validate_reviewer_config() {
   require base64
   require curl
   require flock
-  require node
+  require openssl
   require tar
   if [ -z "${RENDER_PROMPT_ONLY:-}" ]; then
     require agy

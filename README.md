@@ -67,8 +67,9 @@ config/                              Per-deployment files. *.example.* ships;
 scripts/
   bootstrap-gcp.sh                   Cloud Shell provisioner: creates the VM,
                                      runs setup-vm.sh on it.
-  setup-vm.sh                        Installs Node, Antigravity CLI, configures
-                                     swap; clones the template. Runs on the VM.
+  setup-vm.sh                        Installs base tools + Antigravity CLI,
+                                     configures swap; clones the template.
+                                     Runs on the VM (no Node runtime needed).
   register-app.sh                    GitHub App registration: runs
                                      lib/register-server.mjs, scps the key to
                                      the VM, writes REVIEWER_APP_ID.
@@ -86,8 +87,9 @@ scripts/
     check-ci.sh                      Required check-run gate.
     merge-gate.sh                    Mechanical pre-merge checks.
     ensure-labels.sh                 Optional helper-label setup.
-    get-installation-token.sh        Discover installation IDs or mint/cache App tokens.
-    lib/app-token.mjs                Node helper: signs JWT, fetches /app, mints token.
+    get-installation-token.sh        Pure-shell App auth: openssl signs the JWT,
+                                     curl mints/caches tokens, discovers
+                                     installation IDs. No Node on the VM.
 
 docs/
   quickstart.md                      5-minute end-to-end path.

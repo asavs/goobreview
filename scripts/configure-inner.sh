@@ -103,7 +103,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-ops_require_command node "Run scripts/setup-vm.sh first."
+ops_require_command openssl "Run scripts/setup-vm.sh first."
 ops_require_command jq "Run scripts/setup-vm.sh first."
 ops_require_command agy "Run scripts/setup-vm.sh first, then authenticate Antigravity CLI."
 ops_require_executable "$APP_TOKEN_SH" "This checkout looks incomplete."
