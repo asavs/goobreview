@@ -1661,6 +1661,10 @@ case "\$url" in
     printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1","ref":"feature"},"base":{"ref":"main"},"title":"Research PR","body":"Please review","changed_files":1}]' > "\$body_file"
     printf '200'
     ;;
+  *'/repos/example/repo/pulls/1')
+    printf '%s\n' '{"number":1,"head":{"sha":"sha1"}}' > "\$body_file"
+    printf '200'
+    ;;
   *'/repos/example/repo/pulls/1/reviews?per_page=100&page=1')
     printf '%s\n' '[]' > "\$body_file"
     printf '200'
