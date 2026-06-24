@@ -637,7 +637,7 @@ test_prompt_assembly() {
     printf '%s\n' 'Use REQUEST_CHANGES only for concrete issues that should block merge.'
     printf '%s\n' 'Use COMMENT when the review is informational.'
     printf '%s\n' 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.'
-    printf '%s\n' "Use file references such as \`path/to/file.ext:123\`."
+    printf '%s\n' "Use a short Markdown heading and cite the precise source location as \`path/to/file.ext:123\`."
   } > "$PROMPT_FILE"
   INCLUDE_AUTHOR=0
   INCLUDE_DESCRIPTION=1
@@ -756,7 +756,7 @@ test_prompt_assembly() {
   assert_contains "prompt includes GitHub formatting rules last" "Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT." "$prompt_file"
   assert_contains "prompt includes request-changes policy" "Use REQUEST_CHANGES only for concrete issues that should block merge." "$prompt_file"
   assert_contains "prompt includes comment policy" "Use COMMENT when the review is informational." "$prompt_file"
-  assert_contains "prompt includes GitHub file references" "Use file references such as \`path/to/file.ext:123\`." "$prompt_file"
+  assert_contains "prompt includes GitHub file references" "Use a short Markdown heading and cite the precise source location as \`path/to/file.ext:123\`." "$prompt_file"
   assert_not_contains "prompt omits guidance file contents" "Client guidance." "$prompt_file"
   assert_not_contains "prompt omits all-check summary" "All Check Summary" "$prompt_file"
 

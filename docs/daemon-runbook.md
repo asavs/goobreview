@@ -201,7 +201,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 8. Builds the prompt with the configured posted style (`REVIEWER_POSTED_PERSONALITY=none` uses `control.md`; `linus` uses `linus.md`), a shared evidence-first reviewer contract and compact trust boundary, PR metadata with the author's description as a claim to verify (author username blinded by default), the first and last commit subjects, GitHub check-run results, the subject of the prior bot review on the same PR (not its full body), the snapshot mount path with a pointer at the repo's own `AGENTS.md`/`CONTRIBUTING.md`/`GUIDELINES.md` conventions, the per-file diff with changed-file index and whole-file omission markers (lockfiles plus the repo's `.gitattributes` `linguist-generated` patterns), and the GitHub review formatting rule. Composition is fixed in `scripts/reviewer/lib/prompt.sh`; posted style, research consent, blinding policy, and budgets come from `reviewer.env`.
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
-11. Posts a top-level GitHub review through the GitHub REST API.
+11. Re-reads the PR head, then atomically posts the GitHub review event, summary, and any verified inline comments through the GitHub REST API.
 12. Applies optional labels.
 13. If `REVIEWER_RESEARCH_CONSENT=1` and the target repository is public, saves paired control/Linus prompt+response artifacts under `REVIEWER_STATE/research-runs/`. The posted style is still the only review posted to GitHub; the other style is counterfactual research data.
 
@@ -320,7 +320,7 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 
 ## Known Limits
 
-- Reviews are posted as top-level GitHub reviews; file and line references live in the review body.
+- A cited location becomes an inline review comment only when it resolves to a changed line in GitHub's diff. Unanchorable findings remain in the top-level review body.
 - Very large diffs may exceed useful Gemini context.
 - Prompt and dry-run artifact size limits are explicit runtime knobs; truncated context is marked in the prompt/artifact, and prompts that still exceed `REVIEWER_MAX_PROMPT_BYTES` fail before Gemini is called.
 - PR-head source snapshots are provided as read-only context under `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current`; Gemini itself runs from `REVIEWER_RUNTIME_STATE/gemini-runtime`, and the daemon does not run project code from the snapshot. Symlinks in PR-head snapshots are neutralized into metadata stubs, and any raw symlink that reaches prompt assembly or Gemini access is skipped/refused rather than dereferenced.
