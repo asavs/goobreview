@@ -146,13 +146,10 @@ control to the setup agent for `scripts/configure.sh`.
    retained and writes `REVIEWER_RESEARCH_CONSENT`.
 7. **Required-checks** - copies `required-checks.example.json` → `required-checks.json`
    if missing, offers to edit.
-8. **Labels** - offers to create helper labels (`agent-reviewed`,
-   `agent-requested-changes`, `needs-human-decision`) on the target repo.
-9. Prints "next steps" pointing at `dry-run.sh` and `enable-cron.sh`.
+8. Prints "next steps" pointing at `dry-run.sh` and `enable-cron.sh`.
 
 **State after Phase 3:**
 - `config/reviewer.env` and `config/required-checks.json` populated.
-- Helper labels exist on target repo (if opted in).
 - Reviewer is fully configured but not yet running on a schedule.
 
 **Friction notes:**

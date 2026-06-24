@@ -32,7 +32,7 @@ If you can't or don't want to use the one-click path - say, you already have a V
 2. Register and install the GitHub App. See [docs/github-app-setup.md](docs/github-app-setup.md).
 3. Finish the on-VM flow in [docs/quickstart.md](docs/quickstart.md#4-finish-setup-on-the-vm): authenticate Antigravity CLI, run `scripts/configure.sh`, dry-run, then enable cron or systemd.
 
-The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews under a clearly-bot login (`<your-app>[bot]`) without burning a second GitHub user account or org seat. It can also apply helper labels and re-review every new PR head commit.
+The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews under a clearly-bot login (`<your-app>[bot]`) without burning a second GitHub user account or org seat, and re-review every new PR head commit.
 
 ## Customizing
 
@@ -86,7 +86,6 @@ scripts/
                                      the configured branch.
     check-ci.sh                      Required check-run gate.
     merge-gate.sh                    Mechanical pre-merge checks.
-    ensure-labels.sh                 Optional helper-label setup.
     get-installation-token.sh        Pure-shell App auth: openssl signs the JWT,
                                      curl mints/caches tokens, discovers
                                      installation IDs. No Node on the VM.
@@ -108,4 +107,4 @@ deploy/systemd/
 
 The daemon trusts a GitHub App installation token (minted from a private key stored at `REVIEWER_APP_PRIVATE_KEY_PATH`) and local `gemini` authentication on the VM. Keep the private key file at mode `0600`, owned by the user that runs the cron. Do not run this from a developer's active working checkout. PR-head source snapshots under `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current` are read-only review context; Gemini runs from `REVIEWER_RUNTIME_STATE/gemini-runtime` with PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled, and Gemini CLI's documented workspace-trust session override set for the isolated review invocation. The daemon does not execute project code from snapshots.
 
-The daemon does not merge PRs and does not edit source code. It only posts reviews and applies optional labels.
+The daemon does not merge PRs and does not edit source code. It only posts reviews.

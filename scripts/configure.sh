@@ -191,11 +191,6 @@ else
   research_consent=0
 fi
 
-create_labels=0
-if confirm "Create the helper labels (agent-reviewed, agent-requested-changes, needs-human-decision) on $repo now?"; then
-  create_labels=1
-fi
-
 inner_args=(
   --env-file "$ENV_FILE"
   --repo "$repo"
@@ -206,9 +201,6 @@ inner_args=(
 )
 if [ -n "$installation_id" ]; then
   inner_args+=(--installation-id "$installation_id")
-fi
-if [ "$create_labels" -eq 1 ]; then
-  inner_args+=(--create-labels)
 fi
 if [ "$allow_missing_agy" -eq 1 ]; then
   inner_args+=(--allow-missing-agy)
