@@ -43,6 +43,20 @@ review_body_before_verdict() {
   '
 }
 
+# Extract source locations mentioned in ordinary Markdown review prose. The
+# reviewer model remains free to write a conventional review; this parser
+# merely discovers path:line references that can later be verified against the
+# pull request diff and promoted to native GitHub review comments.
+#
+# Output is one unique path<TAB>line pair per line. A range such as
+# src/app.ts:42-45 resolves to its first line because a later validation step
+# decides whether a single-line or multi-line GitHub anchor is possible.
+review_source_locations() {
+  grep -oE '[[:alnum:]_.][[:alnum:]_.+/-]*\.[[:alnum:]_+-]+:[0-9]+(-[0-9]+)?' |
+    sed -E 's/:([0-9]+)-[0-9]+$/\t\1/; s/:/\t/' |
+    awk -F '\t' 'NF == 2 && $1 !~ /(^|\/)\.\.($|\/)/ { key = $1 FS $2; if (!seen[key]++) print }'
+}
+
 secure_install_file() {
   local src="$1"
   local dst="$2"

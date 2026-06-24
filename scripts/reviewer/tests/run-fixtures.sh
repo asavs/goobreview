@@ -117,7 +117,7 @@ assert_file_mode() {
 }
 
 test_output_parser() {
-  local valid approve expected_body
+  local valid approve expected_body locations
 
   # shellcheck disable=SC2016
   valid='## Summary
@@ -134,6 +134,13 @@ REQUEST_CHANGES'
   assert_eq "valid verdict maps to event" "REQUEST_CHANGES" "$(printf '%s' "$valid" | review_verdict_event)"
   assert_eq "review body strips only final verdict line" "$expected_body" "$(printf '%s' "$valid" | review_body_before_verdict)"
   assert_eq "file and line references stay in body" "1" "$(printf '%s' "$valid" | review_body_before_verdict | grep -c 'src/auth.py:42')"
+
+  locations=$(printf '%s\n' \
+    'See `src/auth.py:42` and src/auth.py:42-45.' \
+    'The generated file dist/app.js:9 is not a second finding.' \
+    '../outside.py:3 must not be accepted as a repository path.' |
+    review_source_locations)
+  assert_eq "source-location parser finds unique path and line pairs" $'src/auth.py\t42\ndist/app.js\t9' "$locations"
 
   if printf 'NOPE\n' | review_verdict_event >/dev/null; then
     fail "malformed verdict is rejected"
