@@ -63,6 +63,15 @@ jobs:
             exit 1
           fi
 
+      - name: Register server smoke test
+        run: |
+          set -euo pipefail
+          # No --repo: auto-detect the single installed repo.
+          node scripts/lib/tests/register-server.test.mjs
+          # --repo: detection is constrained to the requested repo.
+          GOOBREVIEW_TARGET_REPO=someuser/their-repo GOOBREVIEW_REGISTER_PORT=8772 \
+            node scripts/lib/tests/register-server.test.mjs
+
       - name: Preflight fixtures
         run: bash scripts/preflight/tests/run-fixtures.sh
 

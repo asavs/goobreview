@@ -46,6 +46,9 @@ mapfile -t shell_files < <(git ls-files '*.sh')
 bash -n "${shell_files[@]}"
 bash scripts/reviewer/tests/run-fixtures.sh
 
+# Smoke-test the Cloud Shell registration server (mocks GitHub; network-free)
+node scripts/lib/tests/register-server.test.mjs
+
 # Validate example JSON
 jq . config/required-checks.example.json
 
