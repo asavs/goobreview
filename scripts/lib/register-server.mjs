@@ -89,7 +89,7 @@ function renderForm() {
 
   <h2>2. Upload the key</h2>
   <p>Submit the downloaded <code>.pem</code> and the App ID below. <code>register-app.sh</code> forwards the key to your VM; after success, delete the browser download.</p>
-  ${TARGET_REPO ? `<p class="muted">After the key is verified, this page will ask you to install the App on <code>${htmlEscape(TARGET_REPO)}</code> and will detect the installation ID automatically.</p>` : ''}
+  <p class="muted">After the key is verified, this page will ask you to install the App on the repo you want it to review, then detect that repo and its installation ID automatically.</p>
   <div class="upload">
     <form method="POST" action="/complete" enctype="multipart/form-data">
       <div class="field">
@@ -109,11 +109,10 @@ function renderForm() {
 
 function renderSuccess(summary) {
   const installUrl = `https://github.com/apps/${encodeURIComponent(summary.slug)}/installations/new`;
-  const repoHtml = TARGET_REPO ? `<code>${htmlEscape(TARGET_REPO)}</code>` : 'your target repo';
-  const pollingHtml = TARGET_REPO ? `
-  <p><strong>Final step:</strong> install the App on ${repoHtml}, then keep this tab open. The helper will detect the installation ID and exit.</p>
-  <p><a class="btn" href="${htmlEscape(installUrl)}" target="_blank" rel="noopener">Install ${htmlEscape(summary.name)} on ${repoHtml} &rarr;</a></p>
-  <p id="install-status" class="muted">Waiting for installation on ${repoHtml}...</p>
+  const pollingHtml = `
+  <p><strong>Final step:</strong> install the App on the repo you want it to review &mdash; pick <strong>"Only select repositories"</strong> and choose that one repo &mdash; then keep this tab open. The helper detects the repo and its installation ID automatically and exits.</p>
+  <p><a class="btn" href="${htmlEscape(installUrl)}" target="_blank" rel="noopener">Install ${htmlEscape(summary.name)} on a repo &rarr;</a></p>
+  <p id="install-status" class="muted">Waiting for the App to be installed on a repo...</p>
   <script>
     const statusEl = document.getElementById('install-status');
     async function pollInstallation() {
@@ -121,7 +120,7 @@ function renderSuccess(summary) {
         const resp = await fetch('/installation');
         const data = await resp.json();
         if (data.status === 'installed') {
-          statusEl.innerHTML = 'Installation detected. Installation ID <code>' + data.installation_id + '</code> was saved for configure.sh.';
+          statusEl.innerHTML = 'Detected <code>' + data.repo + '</code> (installation ID <code>' + data.installation_id + '</code>). Saved for configure.sh &mdash; return to your terminal.';
           return;
         }
         statusEl.textContent = data.message || 'Still waiting for installation...';
@@ -131,10 +130,7 @@ function renderSuccess(summary) {
       setTimeout(pollInstallation, 5000);
     }
     setTimeout(pollInstallation, 2000);
-  </script>` : `
-  <p><strong>One step left:</strong> install the App on your target repo.</p>
-  <p><a class="btn" href="${htmlEscape(installUrl)}" target="_blank" rel="noopener">Install ${htmlEscape(summary.name)} on a repo &rarr;</a></p>
-  <p class="muted">Pick "Only select repositories" and choose the repo GoobReview will review. After install, return to your terminal &mdash; the register script has already exited and printed the next command to run.</p>`;
+  </script>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -211,21 +207,67 @@ async function fetchAppMeta(jwt) {
   return resp.json();
 }
 
-async function fetchRepoInstallation(jwt, repo) {
-  const resp = await fetch(`https://api.github.com/repos/${repo}/installation`, {
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'goobreview-register',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
+function ghHeaders(auth) {
+  return {
+    Authorization: `Bearer ${auth}`,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'goobreview-register',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+}
+
+// Discover which repo(s) the App has been installed on, without being told the
+// repo in advance. Mirrors get-installation-token.sh's discover-target: list
+// the App's installations, then for each mint an installation token and list
+// its selected repositories. Returns deduped {repo, installation_id} pairs.
+async function discoverInstalledRepos(jwt) {
+  const instResp = await fetch('https://api.github.com/app/installations?per_page=100', {
+    headers: ghHeaders(jwt),
   });
-  if (resp.status === 404) return null;
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`GitHub installation lookup failed (${resp.status}): ${body.slice(0, 200)}`);
+  if (!instResp.ok) {
+    const body = await instResp.text();
+    throw new Error(`Listing App installations failed (${instResp.status}): ${body.slice(0, 200)}`);
   }
-  return resp.json();
+  const installations = await instResp.json();
+  if (!Array.isArray(installations)) throw new Error('unexpected /app/installations response');
+
+  const seen = new Set();
+  const candidates = [];
+  for (const inst of installations) {
+    const tokResp = await fetch(`https://api.github.com/app/installations/${inst.id}/access_tokens`, {
+      method: 'POST',
+      headers: ghHeaders(jwt),
+    });
+    if (!tokResp.ok) {
+      const body = await tokResp.text();
+      throw new Error(`Minting installation token failed (${tokResp.status}): ${body.slice(0, 200)}`);
+    }
+    const { token } = await tokResp.json();
+    if (!token) throw new Error(`no token minted for installation ${inst.id}`);
+
+    const repoResp = await fetch('https://api.github.com/installation/repositories?per_page=100', {
+      headers: ghHeaders(token),
+    });
+    if (!repoResp.ok) {
+      const body = await repoResp.text();
+      throw new Error(`Listing installation repositories failed (${repoResp.status}): ${body.slice(0, 200)}`);
+    }
+    const data = await repoResp.json();
+    const repos = data.repositories;
+    if (!Array.isArray(repos)) throw new Error('unexpected /installation/repositories response');
+    const total = Number(data.total_count ?? repos.length);
+    if (total > repos.length) {
+      throw new Error(`installation ${inst.id} exposes ${total} repositories; reinstall on a single repo or set REVIEWER_REPO during configure`);
+    }
+    for (const r of repos) {
+      if (typeof r.full_name !== 'string') continue;
+      const key = `${inst.id}:${r.full_name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push({ repo: r.full_name, installation_id: String(inst.id) });
+    }
+  }
+  return candidates;
 }
 
 async function parseMultipart(req) {
@@ -250,8 +292,9 @@ function saveResult(meta, pemContent, installation = null) {
     owner: meta.owner?.login || '',
     html_url: meta.html_url || '',
   };
-  if (TARGET_REPO) summary.repo = TARGET_REPO;
-  if (installation?.id) summary.installation_id = String(installation.id);
+  const repo = installation?.repo || TARGET_REPO;
+  if (repo) summary.repo = repo;
+  if (installation?.installation_id) summary.installation_id = String(installation.installation_id);
   fs.writeFileSync(path.join(OUTPUT_DIR, 'app.json'), JSON.stringify(summary, null, 2));
   return summary;
 }
@@ -273,40 +316,55 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && pathname === '/installation') {
-      if (!TARGET_REPO) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'disabled' }));
-        return;
-      }
       if (!verifiedApp) {
         res.writeHead(409, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'pending', message: 'Upload and verify the App key first.' }));
         return;
       }
 
-      let installation;
+      let candidates;
       try {
-        installation = await fetchRepoInstallation(verifiedApp.jwt, TARGET_REPO);
+        candidates = await discoverInstalledRepos(verifiedApp.jwt);
       } catch (err) {
         res.writeHead(502, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'error', message: err.message }));
         return;
       }
 
-      if (!installation?.id) {
+      // TARGET_REPO (from --repo) is an optional filter, not a requirement: the
+      // common case installs on a single repo we auto-detect here.
+      if (TARGET_REPO) {
+        candidates = candidates.filter((c) => c.repo.toLowerCase() === TARGET_REPO.toLowerCase());
+      }
+
+      if (candidates.length === 0) {
+        const where = TARGET_REPO ? `on ${TARGET_REPO}` : 'on a repository';
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           status: 'pending',
-          message: `Waiting for ${verifiedApp.summary.name} to be installed on ${TARGET_REPO}...`,
+          message: `Waiting for ${verifiedApp.summary.name} to be installed ${where}...`,
         }));
         return;
       }
 
-      const summary = saveResult(verifiedApp.meta, verifiedApp.pemContent, installation);
+      if (candidates.length > 1) {
+        const repos = candidates.map((c) => c.repo);
+        const preview = repos.slice(0, 10).join(', ') + (repos.length > 10 ? `, ... (+${repos.length - 10} more)` : '');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          status: 'multiple',
+          repos,
+          message: `Installed on ${repos.length} repos (${preview}). Reinstall on a single repo, or set REVIEWER_REPO when you run configure.sh.`,
+        }));
+        return;
+      }
+
+      const chosen = candidates[0];
+      const summary = saveResult(verifiedApp.meta, verifiedApp.pemContent, chosen);
       verifiedApp.summary = summary;
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'installed', installation_id: summary.installation_id }));
-      console.error(`[register-server] Installation ${summary.installation_id} detected for ${TARGET_REPO}.`);
+      res.end(JSON.stringify({ status: 'installed', repo: chosen.repo, installation_id: summary.installation_id }));
+      console.error(`[register-server] Installation ${summary.installation_id} detected for ${chosen.repo}.`);
       setTimeout(() => server.close(() => process.exit(0)), 1500);
       return;
     }
@@ -351,10 +409,8 @@ const server = http.createServer(async (req, res) => {
       verifiedApp = { meta, pemContent, jwt, summary };
       sendHtml(res, 200, renderSuccess(summary));
       console.error(`[register-server] App ${summary.name} (id=${summary.id}) verified; key written to ${OUTPUT_DIR}/app-key.pem`);
-      if (!TARGET_REPO) {
-        // Let the browser finish receiving the response before we exit.
-        setTimeout(() => server.close(() => process.exit(0)), 1500);
-      }
+      // Stay alive: the page now polls /installation until the App is installed
+      // on a repo, which we auto-detect and which triggers the exit.
       return;
     }
 

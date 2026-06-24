@@ -31,8 +31,8 @@ usage() {
 Usage: bash scripts/register-app.sh [options] [VM_NAME] [ZONE]
 
 Options:
-  --repo OWNER/REPO   Poll for the GitHub App installation on this repo and
-                      pre-fill REVIEWER_REPO + REVIEWER_APP_INSTALLATION_ID.
+  --repo OWNER/REPO   Optional. Constrain auto-detection to this repo; the
+                      page otherwise detects whichever repo you install on.
   --port PORT         Use a specific local Web Preview port.
   -h, --help          Show this help.
 EOF
@@ -139,7 +139,7 @@ Target VM:
   Zone:  $ZONE
 $(if [ -n "$target_repo" ]; then cat <<TARGET
 
-Target repo:
+Target repo (override):
   $target_repo
 TARGET
 fi)
@@ -149,16 +149,15 @@ Next steps once the server starts:
   1. Click the **Web Preview** button at the top-right of
      Cloud Shell (square icon with an arrow).
   2. Choose **Preview on port $PORT**. A new browser tab opens.
-  3. Follow the two-step page that loads:
+  3. Follow the page that loads:
        a. Click through to the pre-filled GitHub form and
           create the App, then generate a private key.
        b. Upload the .pem and paste the App ID.
-$(if [ -n "$target_repo" ]; then cat <<TARGET
-       c. Install the App on $target_repo; the page will detect the installation ID.
-TARGET
-fi)
+       c. Install the App on the repo you want it to review
+          (pick "Only select repositories" and choose one).
+          The page detects that repo and its installation ID.
 
-The server will exit on its own after registration completes$(if [ -n "$target_repo" ]; then printf ' and the repo installation is detected'; fi).
+The server will exit on its own once the repo installation is detected.
 ============================================================
 
 EOF
@@ -180,11 +179,17 @@ APP_ID="$(jq -r .id "$OUTPUT_DIR/app.json")"
 APP_SLUG="$(jq -r .slug "$OUTPUT_DIR/app.json")"
 APP_NAME="$(jq -r .name "$OUTPUT_DIR/app.json")"
 APP_INSTALLATION_ID="$(jq -r '.installation_id // ""' "$OUTPUT_DIR/app.json")"
+APP_REPO="$(jq -r '.repo // ""' "$OUTPUT_DIR/app.json")"
 ops_validate_uint "GitHub App ID" "$APP_ID"
 ops_require_nonempty "GitHub App slug" "$APP_SLUG"
 ops_require_nonempty "GitHub App name" "$APP_NAME"
 if [ -n "$APP_INSTALLATION_ID" ]; then
   ops_validate_uint "GitHub App installation ID" "$APP_INSTALLATION_ID"
+fi
+# --repo is an optional override; otherwise use the repo the page auto-detected.
+effective_repo="${target_repo:-$APP_REPO}"
+if [ -n "$effective_repo" ]; then
+  ops_validate_owner_repo "$effective_repo" "detected repo"
 fi
 
 echo
@@ -196,8 +201,9 @@ gcloud compute scp "$OUTPUT_DIR/app-key.pem" \
   --zone="$ZONE"
 
 # Pre-populate reviewer.env with the App ID so configure.sh's prompt defaults
-# to the right value. When --repo was supplied, also write the repo and
-# discovered installation ID. Idempotent: existing keys are replaced.
+# to the right value. The registration page auto-detects the installed repo and
+# its installation ID (and --repo can override the repo), so write those too
+# when available. Idempotent: existing keys are replaced.
 gcloud compute ssh "$VM_NAME" --zone="$ZONE" --command="$(cat <<REMOTE
 set -euo pipefail
 chmod 600 '$VM_KEY_PATH'
@@ -210,11 +216,11 @@ if [ -f '$VM_ENV_PATH' ]; then
   else
     printf 'REVIEWER_APP_ID=%s\n' '$APP_ID' >> '$VM_ENV_PATH'
   fi
-  if [ -n '$target_repo' ]; then
+  if [ -n '$effective_repo' ]; then
     if grep -qE '^REVIEWER_REPO=' '$VM_ENV_PATH'; then
-      sed -i 's|^REVIEWER_REPO=.*|REVIEWER_REPO=$target_repo|' '$VM_ENV_PATH'
+      sed -i 's|^REVIEWER_REPO=.*|REVIEWER_REPO=$effective_repo|' '$VM_ENV_PATH'
     else
-      printf 'REVIEWER_REPO=%s\n' '$target_repo' >> '$VM_ENV_PATH'
+      printf 'REVIEWER_REPO=%s\n' '$effective_repo' >> '$VM_ENV_PATH'
     fi
   fi
   if [ -n '$APP_INSTALLATION_ID' ]; then
@@ -238,8 +244,8 @@ GitHub App registered and key uploaded.
   App ID:     $APP_ID
   Slug:       $APP_SLUG
   Key on VM:  $VM_KEY_PATH
-$(if [ -n "$target_repo" ]; then cat <<TARGET
-  Repo:       $target_repo
+$(if [ -n "$effective_repo" ]; then cat <<TARGET
+  Repo:       $effective_repo
 TARGET
 fi)
 $(if [ -n "$APP_INSTALLATION_ID" ]; then cat <<TARGET

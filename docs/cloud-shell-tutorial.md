@@ -120,8 +120,9 @@ From Cloud Shell (still in the goobreview checkout):
 bash scripts/register-app.sh
 ```
 
-If you know the target repository, pass it now so the helper can save the
-installation ID after you install the App:
+The helper auto-detects whichever repo you install the App on, so you normally
+don't need to name it. To constrain detection to a specific repo (it will wait
+for the install to land there), pass `--repo`:
 
 ```bash
 bash scripts/register-app.sh --repo OWNER/REPO
@@ -138,7 +139,7 @@ This starts a tiny local server on port 8080 unless that port is already occupie
 1. Click the **Web Preview** button (top right of Cloud Shell) -> **Preview on port 8080** (or the fallback port printed in the terminal).
 2. In the new browser tab, click through to the **pre-filled GitHub form** (it already has the name, homepage, webhook setting, and the five permissions set). At the bottom click **Create GitHub App**.
 3. On the App's settings page that loads, click **Generate a private key** to download the `.pem`, and note the **App ID** at the top.
-4. Back on the Web Preview page, upload the `.pem` and paste the App ID. After it verifies, click **Install ... on a repo ->** and pick your target repo. If you passed `--repo`, keep the helper page open until it reports the installation ID.
+4. Back on the Web Preview page, upload the `.pem` and paste the App ID. After it verifies, click **Install ... on a repo ->**, pick **"Only select repositories"**, and choose the one repo you want reviewed. Keep the helper page open: it detects that repo and its installation ID automatically, reports them, and the script exits.
 
 When the script finishes, the private key is on the VM at `/var/lib/goobreview/example/app-key.pem` and the App ID is pre-filled in `reviewer.env`. GitHub may download the `.pem` to your browser's Downloads folder before you upload it to the helper; after the helper confirms the key is on the VM, delete the local download.
 
@@ -148,7 +149,7 @@ Quick check:
 bash scripts/status.sh
 ```
 
-The GitHub App preflight should now show an App ID and VM key. If you used `--repo`, it should also show an installation ID; otherwise configure can detect the target repo and installation ID when the App installation exposes exactly one repo.
+The GitHub App preflight should now show an App ID and VM key, plus the detected repo and installation ID. (If you closed the page before the install was detected, `configure.sh` falls back to detecting the target repo and installation ID when the App installation exposes exactly one repo.)
 
 Registering the App under an organization instead of your personal account? Pass the org name:
 
