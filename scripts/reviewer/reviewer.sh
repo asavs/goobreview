@@ -608,7 +608,7 @@ EOF
           review_actions=$((review_actions + 1))
           continue
         fi
-        if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body"; then
+        if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body" "$head_sha" '[]'; then
           clear_review_failure_attempts "$num" "$head_sha"
           log "Posted REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
           review_actions=$((review_actions + 1))
