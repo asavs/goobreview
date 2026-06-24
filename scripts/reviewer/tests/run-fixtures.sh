@@ -396,19 +396,29 @@ test_inline_review_comments_follow_diff_anchors() {
 
   # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by review_inline_comments_json.
   github_api_paginate_array() {
-    printf '%s\n' '{"filename":"src/app.py","patch":"@@ -40,2 +40,3 @@\n context\n-old\n+new\n+another"}'
+    printf '%s\n' '{"filename":"src/app.py","patch":"@@ -10,1 +10,0 @@\n-old-only\n@@ -40,2 +40,3 @@\n context\n-old\n+new\n+another"}'
   }
 
   body="### [P1] Render stays stale
 \`src/app.py:42\` is read from a ref that does not schedule a render.
 
 ### [P2] Not on this diff
-\`src/other.py:9\` is outside the changed lines."
+\`src/other.py:9\` is outside the changed lines.
+
+### [P2] Deleted line
+\`src/app.py:10\` was removed without a replacement.
+
+### [P2] Context-only line
+\`src/app.py:40\` is not itself changed.
+
+### [P2] Missing line
+\`src/app.py:99\` does not exist."
   comments=$(review_inline_comments_json 17 "$body")
 
-  assert_eq "inline-comment parser emits only verified anchors" "1" "$(printf '%s\n' "$comments" | jq 'length')"
+  assert_eq "inline-comment parser emits only verified anchors" "2" "$(printf '%s\n' "$comments" | jq 'length')"
   assert_eq "inline-comment parser prefers added side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[0].side')"
   assert_eq "inline-comment parser preserves finding body" "### [P1] Render stays stale" "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
+  assert_eq "inline-comment parser anchors deleted lines on the left" "LEFT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 10) | .side')"
 }
 
 
@@ -1591,7 +1601,7 @@ EOF
 
 test_reviewer_research_capture_posts_selected_review_only() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir config_dir status output
-  local source_dir tarball review_payload posted_body manifest research_dir
+  local source_dir tarball review_payload posted_body manifest research_dir dry_run_out dry_comments_json
 
   state_dir="$TMP_ROOT/research-state"
   runtime_dir="$TMP_ROOT/research-runtime"
@@ -1720,7 +1730,13 @@ while [ "$#" -gt 0 ]; do
 done
 case "$prompt" in
   *"Mauro, SHUT"*) printf 'linus review\nCOMMENT\n' ;;
-  *) printf 'control review\nAPPROVE\n' ;;
+  *)
+    if [ -n "${REVIEWER_DRY_RUN:-}" ]; then
+      printf '### [P1] README location\n`README.md:1` needs review.\nAPPROVE\n'
+    else
+      printf 'control review\nAPPROVE\n'
+    fi
+    ;;
 esac
 EOF
   chmod +x "$bin_dir/agy"
@@ -1775,6 +1791,25 @@ EOF
   research_dir="$(dirname "$manifest")"
   assert_contains "posted artifact preserves control response" "control review" "$research_dir/none/artifact.txt"
   assert_contains "counterfactual artifact preserves linus response" "linus review" "$research_dir/linus/artifact.txt"
+
+  dry_run_out="$TMP_ROOT/research-dry-run.txt"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_DRY_RUN=1 REVIEWER_DRY_RUN_OUT="$dry_run_out" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "dry-run inline-comment fixture reviewer exits successfully"
+  fi
+  pass "dry-run inline-comment fixture reviewer exits successfully"
+  assert_contains "dry-run artifact reports resolved inline comments" "Resolved inline comments: 1" "$dry_run_out"
+  awk '
+    /^===== RESOLVED INLINE COMMENTS START =====$/ { found = 1; next }
+    /^===== RESOLVED INLINE COMMENTS END =====$/ { exit }
+    found { print }
+  ' "$dry_run_out" > "$TMP_ROOT/research-dry-comments.json"
+  dry_comments_json="$TMP_ROOT/research-dry-comments.json"
+  assert_eq "dry-run artifact includes resolved inline comment path" "README.md" "$(jq -r '.[0].path' "$dry_comments_json")"
+  assert_eq "dry-run artifact includes resolved inline comment line" "1" "$(jq -r '.[0].line' "$dry_comments_json")"
 
   awk '
     found && /^===== AGY PROMPT PAYLOAD END =====$/ { exit }

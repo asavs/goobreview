@@ -106,14 +106,16 @@ write_dry_run_artifact() {
   local event="$3"
   local prompt_file="$4"
   local review_body="$5"
+  local inline_comments_json="${6:-[]}"
   local output_file="$DRY_RUN_OUT"
-  local required_checks_sha256
+  local required_checks_sha256 inline_comment_count
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
 
   [ -n "$output_file" ] || return 0
 
   mkdir -p "$(dirname "$output_file")"
   artifact_tmp=$(mktemp "$STATE_DIR/dry-artifact.XXXXXX")
+  inline_comment_count=$(printf '%s' "$inline_comments_json" | jq -r 'length') || fatal "invalid resolved inline-comments JSON"
   {
     printf 'GoobReview dry run\n'
     printf 'Repository: %s\n' "$REPO"
@@ -122,6 +124,7 @@ write_dry_run_artifact() {
     printf 'Posted personality: %s\n' "$POSTED_PERSONALITY"
     printf 'Personality file: %s\n' "$PERSONALITY_FILE"
     printf 'Parsed review event: %s\n' "$event"
+    printf 'Resolved inline comments: %s\n' "$inline_comment_count"
     printf 'Generated at: %s\n' "$(date -Is)"
     printf '\n===== AGY PROMPT PAYLOAD START =====\n'
     append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "dry-run prompt artifact"
@@ -129,6 +132,9 @@ write_dry_run_artifact() {
     printf '\n===== AGY RESPONSE START =====\n'
     printf '%s\n' "$review_body" | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "dry-run response artifact"
     printf '===== AGY RESPONSE END =====\n'
+    printf '\n===== RESOLVED INLINE COMMENTS START =====\n'
+    printf '%s\n' "$inline_comments_json" | jq . | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "dry-run inline-comments artifact"
+    printf '===== RESOLVED INLINE COMMENTS END =====\n'
   } >"$artifact_tmp"
   artifact_bytes=$(wc -c <"$artifact_tmp" | tr -d ' ')
   if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
@@ -757,7 +763,7 @@ EOF
   fi
 
   if [ -n "$DRY_RUN" ]; then
-    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review"
+    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json"
     rm -f "$prompt_tmp" "$agy_err_tmp"
     log "Dry run: would post $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))

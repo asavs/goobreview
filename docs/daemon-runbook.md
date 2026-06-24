@@ -61,7 +61,7 @@ scripts/dry-run.sh 123
 For a numbered PR, the dry run writes
 `$REVIEWER_STATE/dry-pr-123.txt`. The artifact includes:
 
-- run metadata;
+- run metadata, including the parsed event and resolved inline-review comments that would be submitted;
 - the exact Gemini prompt payload;
 - Gemini's full response, or stderr if Gemini failed.
 
