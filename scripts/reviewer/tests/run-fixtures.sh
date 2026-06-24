@@ -136,7 +136,7 @@ REQUEST_CHANGES'
   assert_eq "file and line references stay in body" "1" "$(printf '%s' "$valid" | review_body_before_verdict | grep -c 'src/auth.py:42')"
 
   locations=$(printf '%s\n' \
-    'See `src/auth.py:42` and src/auth.py:42-45.' \
+    "See \`src/auth.py:42\` and src/auth.py:42-45." \
     'The generated file dist/app.js:9 is not a second finding.' \
     '../outside.py:3 must not be accepted as a repository path.' |
     review_source_locations)
@@ -147,7 +147,7 @@ REQUEST_CHANGES'
     'No blocking findings.' \
     '' \
     '### [P1] Session can be spoofed' \
-    'The query string controls the effective user at `src/auth.py:42`.' \
+    "The query string controls the effective user at \`src/auth.py:42\`." \
     '' \
     '### [P2] Unrelated note' \
     'No source location.' |
@@ -399,11 +399,11 @@ test_inline_review_comments_follow_diff_anchors() {
     printf '%s\n' '{"filename":"src/app.py","patch":"@@ -40,2 +40,3 @@\n context\n-old\n+new\n+another"}'
   }
 
-  body='### [P1] Render stays stale
-`src/app.py:42` is read from a ref that does not schedule a render.
+  body="### [P1] Render stays stale
+\`src/app.py:42\` is read from a ref that does not schedule a render.
 
 ### [P2] Not on this diff
-`src/other.py:9` is outside the changed lines.'
+\`src/other.py:9\` is outside the changed lines."
   comments=$(review_inline_comments_json 17 "$body")
 
   assert_eq "inline-comment parser emits only verified anchors" "1" "$(printf '%s\n' "$comments" | jq 'length')"

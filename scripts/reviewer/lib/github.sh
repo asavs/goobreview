@@ -55,7 +55,9 @@ review_inline_comments_json() {
   while IFS= read -r -d '' section; do
     locations=$(printf '%s' "$section" | review_source_locations)
     while IFS=$'\t' read -r path line; do
-      [ -n "${path:-}" ] && [ -n "${line:-}" ] || continue
+      if [ -z "${path:-}" ] || [ -z "${line:-}" ]; then
+        continue
+      fi
       anchor=$(jq -c --arg path "$path" --argjson line "$line" \
         'select(.path == $path and .line == $line and .side == "RIGHT")' "$anchors" | head -n 1)
       if [ -z "$anchor" ]; then
