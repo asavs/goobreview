@@ -57,6 +57,28 @@ review_source_locations() {
     awk -F '\t' 'NF == 2 && $1 !~ /(^|\/)\.\.($|\/)/ { key = $1 FS $2; if (!seen[key]++) print }'
 }
 
+# Emit each Markdown finding section that cites at least one source location.
+# NUL separators preserve the review's original newlines without asking the
+# model to serialize a second data format. The caller validates the locations
+# against GitHub's diff before it treats a section as an inline comment.
+review_markdown_finding_sections() {
+  awk '
+    function emit() {
+      if (in_section && section ~ /[[:alnum:]_.][[:alnum:]_.+\/-]*\.[[:alnum:]_+-]+:[0-9]+/) {
+        printf "%s%c", section, 0
+      }
+    }
+    /^#{2,6}[[:space:]]+/ {
+      emit()
+      section = $0 ORS
+      in_section = 1
+      next
+    }
+    in_section { section = section $0 ORS }
+    END { emit() }
+  '
+}
+
 secure_install_file() {
   local src="$1"
   local dst="$2"

@@ -736,6 +736,26 @@ $review_body
 EOF
 )
 
+  if [ -z "$DRY_RUN" ]; then
+    if ! current_pr_json=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE"); then
+      rm -f "$prompt_tmp" "$agy_err_tmp"
+      record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to re-read PR head before posting review"
+      continue
+    fi
+    current_head_sha=$(printf '%s\n' "$current_pr_json" | jq -r '.head.sha // empty')
+    if [ "$current_head_sha" != "$head_sha" ]; then
+      rm -f "$prompt_tmp" "$agy_err_tmp"
+      log "PR #$num@$head_sha: head advanced to $current_head_sha before posting; discarding reviewed result"
+      continue
+    fi
+  fi
+
+  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body"); then
+    rm -f "$prompt_tmp" "$agy_err_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to resolve inline review anchors"
+    continue
+  fi
+
   if [ -n "$DRY_RUN" ]; then
     write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review"
     rm -f "$prompt_tmp" "$agy_err_tmp"
@@ -744,7 +764,7 @@ EOF
     continue
   fi
 
-  if post_review "$num" "$event" "$body"; then
+  if post_review "$num" "$event" "$body" "$head_sha" "$inline_comments_json"; then
     clear_review_failure_attempts "$num" "$head_sha"
     apply_review_labels "$num" "$event" || log "PR #$num: failed to apply review labels"
     capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prompt_tmp" "$review" "$event"

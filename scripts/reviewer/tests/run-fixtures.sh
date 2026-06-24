@@ -117,7 +117,7 @@ assert_file_mode() {
 }
 
 test_output_parser() {
-  local valid approve expected_body locations
+  local valid approve expected_body locations sections
 
   # shellcheck disable=SC2016
   valid='## Summary
@@ -141,6 +141,19 @@ REQUEST_CHANGES'
     '../outside.py:3 must not be accepted as a repository path.' |
     review_source_locations)
   assert_eq "source-location parser finds unique path and line pairs" $'src/auth.py\t42\ndist/app.js\t9' "$locations"
+
+  sections=$(printf '%s\n' \
+    '## Summary' \
+    'No blocking findings.' \
+    '' \
+    '### [P1] Session can be spoofed' \
+    'The query string controls the effective user at `src/auth.py:42`.' \
+    '' \
+    '### [P2] Unrelated note' \
+    'No source location.' |
+    review_markdown_finding_sections | tr '\0' '\n')
+  assert_contains "finding-section parser keeps cited finding heading" "### [P1] Session can be spoofed" <(printf '%s' "$sections")
+  assert_not_contains "finding-section parser skips uncited sections" "### [P2] Unrelated note" <(printf '%s' "$sections")
 
   if printf 'NOPE\n' | review_verdict_event >/dev/null; then
     fail "malformed verdict is rejected"
@@ -341,7 +354,7 @@ EOF
 }
 
 test_post_review_uses_rest_api() {
-  local captured_path captured_payload
+  local captured_path captured_payload inline_comments
 
   REPO="example/repo"
   LOG_FILE="$TMP_ROOT/post-review.log"
@@ -354,16 +367,48 @@ test_post_review_uses_rest_api() {
     printf '{"id": 1}\n'
   }
 
-  post_review 17 REQUEST_CHANGES "Please fix this."
+  inline_comments='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"This is stale."}]'
+  post_review 17 REQUEST_CHANGES "Please fix this." deadbeef "$inline_comments"
 
   assert_eq "post_review posts to pull reviews REST endpoint" "repos/example/repo/pulls/17/reviews" "$captured_path"
   assert_eq "post_review sends review event" "REQUEST_CHANGES" "$(printf '%s\n' "$captured_payload" | jq -r '.event')"
   assert_eq "post_review sends review body" "Please fix this." "$(printf '%s\n' "$captured_payload" | jq -r '.body')"
+  assert_eq "post_review ties review to analyzed head" "deadbeef" "$(printf '%s\n' "$captured_payload" | jq -r '.commit_id')"
+  assert_eq "post_review includes inline comments atomically" "src/app.py" "$(printf '%s\n' "$captured_payload" | jq -r '.comments[0].path')"
 
-  if post_review 17 NOPE "bad" >/dev/null 2>&1; then
+  if post_review 17 NOPE "bad" deadbeef '[]' >/dev/null 2>&1; then
     fail "post_review rejects invalid event"
   fi
   pass "post_review rejects invalid event"
+
+  if post_review 17 COMMENT "bad" deadbeef '{}' >/dev/null 2>&1; then
+    fail "post_review rejects non-array inline comments"
+  fi
+  pass "post_review rejects non-array inline comments"
+}
+
+test_inline_review_comments_follow_diff_anchors() {
+  local body comments
+
+  REPO="example/repo"
+  LOG_FILE="$TMP_ROOT/inline-comments.log"
+  : > "$LOG_FILE"
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by review_inline_comments_json.
+  github_api_paginate_array() {
+    printf '%s\n' '{"filename":"src/app.py","patch":"@@ -40,2 +40,3 @@\n context\n-old\n+new\n+another"}'
+  }
+
+  body='### [P1] Render stays stale
+`src/app.py:42` is read from a ref that does not schedule a render.
+
+### [P2] Not on this diff
+`src/other.py:9` is outside the changed lines.'
+  comments=$(review_inline_comments_json 17 "$body")
+
+  assert_eq "inline-comment parser emits only verified anchors" "1" "$(printf '%s\n' "$comments" | jq 'length')"
+  assert_eq "inline-comment parser prefers added side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[0].side')"
+  assert_eq "inline-comment parser preserves finding body" "### [P1] Render stays stale" "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
 }
 
 
@@ -1769,6 +1814,7 @@ test_reviewer_re_requested_review_bypasses_reviewed_sha_skip
 test_agy_invocation_isolates_review_context
 test_github_api_retries_and_logs
 test_post_review_uses_rest_api
+test_inline_review_comments_follow_diff_anchors
 test_check_ci_paginates_required_check_runs
 test_check_runs_summary_reports_only_needed_plumbing
 test_ci_states
