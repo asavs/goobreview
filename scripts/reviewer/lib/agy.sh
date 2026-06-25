@@ -41,7 +41,7 @@ set_agy_quota_backoff() {
 }
 
 run_agy_review() {
-  local prompt_file="$1" err_file="$2" worktree_dir="$3"
+  local prompt_file="$1" err_file="$2" worktree_dir="$3" personality_file="${4:-${PERSONALITY_FILE:-}}"
   local runtime_dir prompt
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
@@ -52,6 +52,9 @@ run_agy_review() {
 
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   mkdir -p "$runtime_dir"
+  if [ -n "$personality_file" ]; then
+    write_agents_md "$personality_file" "$runtime_dir/AGENTS.md"
+  fi
   prompt=$(cat "$prompt_file")
 
   (

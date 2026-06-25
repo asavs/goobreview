@@ -330,46 +330,6 @@ research_personality_file_for_arm() {
   esac
 }
 
-write_prompt_with_replaced_personality() {
-  local output_prompt_file="$1"
-  local personality_file="$2"
-  local source_prompt_file="$3"
-  local prompt_tail status
-
-  prompt_tail=$(mktemp "$STATE_DIR/research-prompt-tail.XXXXXX")
-  if ! awk '
-    found {
-      print
-      next
-    }
-    prev == "---" && $0 == "Reviewer Contract" {
-      print prev
-      print
-      found = 1
-      next
-    }
-    {
-      prev = $0
-    }
-    END {
-      if (!found) exit 1
-    }
-  ' "$source_prompt_file" >"$prompt_tail"; then
-    rm -f "$prompt_tail"
-    return 1
-  fi
-
-  status=0
-  : >"$output_prompt_file"
-  cat "$personality_file" >>"$output_prompt_file" || status=1
-  printf '\n' >>"$output_prompt_file" || status=1
-  cat "$prompt_tail" >>"$output_prompt_file" || status=1
-  rm -f "$prompt_tail"
-  if [ "$status" -eq 0 ]; then
-    validate_prompt_size "$output_prompt_file" || status=1
-  fi
-  return "$status"
-}
 
 resolve_research_capture_state() {
   RESEARCH_CAPTURE_ENABLED=0
@@ -416,7 +376,7 @@ capture_research_pair() {
   local posted_review="$8"
   local posted_event="$9"
   local run_id run_dir posted_arm counterfactual_arm posted_dir counterfactual_dir
-  local posted_file counterfactual_file manifest_tmp counterfactual_prompt counterfactual_err
+  local posted_file counterfactual_file manifest_tmp counterfactual_err
   local counterfactual_personality_file counterfactual_review counterfactual_event
   local generated_at required_checks_sha256 posted_personality_file
 
@@ -445,32 +405,26 @@ capture_research_pair() {
     return 0
   fi
 
-  counterfactual_prompt=$(mktemp "$STATE_DIR/research-prompt.$num.XXXXXX")
   counterfactual_err=$(mktemp "$STATE_DIR/research-agy.$num.err.XXXXXX")
-  if write_prompt_with_replaced_personality "$counterfactual_prompt" "$counterfactual_personality_file" "$posted_prompt_file"; then
-    if counterfactual_review=$(run_agy_review "$counterfactual_prompt" "$counterfactual_err" "$review_worktree"); then
-      cat "$counterfactual_err" >>"$LOG_FILE"
-      if [ -z "${counterfactual_review// }" ]; then
-        counterfactual_event="EMPTY_RESPONSE"
-      elif ! counterfactual_event=$(printf '%s' "$counterfactual_review" | review_verdict_event); then
-        counterfactual_event="INVALID"
-      fi
-    else
-      cat "$counterfactual_err" >>"$LOG_FILE"
-      counterfactual_event="AGY_FAILED"
-      counterfactual_review=$(cat "$counterfactual_err")
+  if counterfactual_review=$(run_agy_review "$posted_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file"); then
+    cat "$counterfactual_err" >>"$LOG_FILE"
+    if [ -z "${counterfactual_review// }" ]; then
+      counterfactual_event="EMPTY_RESPONSE"
+    elif ! counterfactual_event=$(printf '%s' "$counterfactual_review" | review_verdict_event); then
+      counterfactual_event="INVALID"
     fi
   else
-    counterfactual_event="PROMPT_FAILED"
-    counterfactual_review="Counterfactual prompt assembly failed."
+    cat "$counterfactual_err" >>"$LOG_FILE"
+    counterfactual_event="AGY_FAILED"
+    counterfactual_review=$(cat "$counterfactual_err")
   fi
 
-  if ! write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt" "$counterfactual_review"; then
+  if ! write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$posted_prompt_file" "$counterfactual_review"; then
     log "PR #$num@$head_sha: failed to write counterfactual research artifact"
-    rm -f "$counterfactual_prompt" "$counterfactual_err"
+    rm -f "$counterfactual_err"
     return 0
   fi
-  rm -f "$counterfactual_prompt" "$counterfactual_err"
+  rm -f "$counterfactual_err"
 
   manifest_tmp=$(mktemp "$STATE_DIR/research-manifest.XXXXXX")
   jq -n \
