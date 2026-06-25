@@ -79,6 +79,50 @@ review_markdown_finding_sections() {
   '
 }
 
+review_resolved_thread_handles() {
+  awk '
+    function heading_level(line) {
+      if (line ~ /^#{2,6}[[:space:]]+/) {
+        match(line, /^#+/)
+        return RLENGTH
+      }
+      return 0
+    }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      level = heading_level(line)
+      if (level > 0) {
+        title = line
+        sub(/^#{2,6}[[:space:]]+/, "", title)
+        lower = tolower(title)
+        if (lower ~ /(^|[^a-z])resolved([^a-z]|$)/ && lower ~ /prior/ && lower ~ /thread/) {
+          in_section = 1
+          section_level = level
+          next
+        }
+        if (in_section && level <= section_level) {
+          in_section = 0
+        }
+      }
+      if (!in_section) next
+      # One handle per bullet: strip any list marker, blockquote, and backticks,
+      # then take the leading slug token. Over-extracted prose words are harmless
+      # because github_resolvable_review_thread_ids_for_handles validates every
+      # token against the live thread-handle map before resolving anything.
+      token = line
+      sub(/^[[:space:]>]*([-*+][[:space:]]+|[0-9]+[.)][[:space:]]+)?/, "", token)
+      gsub(/`/, "", token)
+      sub(/^[[:space:]]+/, "", token)
+      if (match(token, /^[a-z0-9][a-z0-9-]*/)) {
+        handle = substr(token, RSTART, RLENGTH)
+        sub(/-+$/, "", handle)
+        if (handle != "" && !seen[handle]++) print handle
+      }
+    }
+  '
+}
+
 secure_install_file() {
   local src="$1"
   local dst="$2"
