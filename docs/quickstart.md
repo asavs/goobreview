@@ -46,7 +46,7 @@ Add `--repo OWNER/REPO` if the App has access to multiple repos. Add
 
 The most consequential product choice is **which style gets posted**: `none` posts the neutral control reviewer, while `linus` posts the blunt Linus-style reviewer. Research consent is separate: on public repositories only, it lets live runs retain paired control/Linus prompt+response artifacts for later analysis. Consent never changes which review style is posted.
 
-The second choice is the **blinding policy** in `config/reviewer.env`: `REVIEWER_INCLUDE_AUTHOR` (default `0` — the reviewer never learns the author's username), `REVIEWER_INCLUDE_DESCRIPTION`, and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (both default `1`, included as author claims to verify against the diff). The rest of the prompt — check-run rows, workflow/package-script context, the bot's previous review, the per-file diff, the snapshot pointer — is fixed; forks edit `scripts/reviewer/lib/prompt.sh` to change the shape.
+The second choice is the **blinding policy** in `config/reviewer.env`: `REVIEWER_INCLUDE_AUTHOR` (default `0` — the reviewer never learns the author's username), `REVIEWER_INCLUDE_DESCRIPTION` (default `0` — the PR body is omitted), and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (default `1` — commit subjects are included as compact orientation titles). The rest of the prompt — check-run rows, workflow/package-script context, the bot's previous review, the per-file diff, the snapshot pointer — is fixed; forks edit `scripts/reviewer/lib/prompt.sh` to change the shape.
 
 Live posting will not fall back to example config. Before enabling the scheduler, make sure `config/required-checks.json` exists, or set `REVIEWER_REQUIRED_CHECKS_FILE` to a valid deployment-specific file.
 
