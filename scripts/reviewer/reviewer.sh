@@ -278,7 +278,7 @@ write_prompt_with_replaced_personality() {
       print
       next
     }
-    prev == "---" && $0 == "Trust Boundary" {
+    prev == "---" && $0 == "Reviewer Contract" {
       print prev
       print
       found = 1
