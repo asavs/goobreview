@@ -31,7 +31,7 @@ scripts/configure.sh  # auto-detects target repo + installation ID when possible
 
 The `agy` step is intentionally interactive and uses Google Sign-In. Keep cached Google auth state out of this repo and checkout.
 
-`configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, asks which review style should be posted, asks whether public-repo research artifacts may be retained, and offers to create helper labels. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
+`configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, asks which review style should be posted, and asks whether public-repo research artifacts may be retained. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
 
 ```bash
 scripts/configure-inner.sh \
@@ -41,8 +41,7 @@ scripts/configure-inner.sh \
   --research-consent 0
 ```
 
-Add `--create-labels` only when you want the helper labels created. Add
-`--repo OWNER/REPO` if the App has access to multiple repos. Add
+Add `--repo OWNER/REPO` if the App has access to multiple repos. Add
 `--installation-id ID` if you already know it; otherwise the script discovers it.
 
 The most consequential product choice is **which style gets posted**: `none` posts the neutral control reviewer, while `linus` posts the blunt Linus-style reviewer. Research consent is separate: on public repositories only, it lets live runs retain paired control/Linus prompt+response artifacts for later analysis. Consent never changes which review style is posted.

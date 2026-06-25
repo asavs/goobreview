@@ -21,7 +21,6 @@ key_path=""
 personality=""
 posted_personality=""
 research_consent=""
-create_labels=0
 allow_missing_agy=0
 
 usage() {
@@ -45,7 +44,6 @@ Options:
   --research-consent 0|1     Whether public-repo paired research artifacts may
                              be retained. Default: 0.
   --personality PATH         Legacy personality-file override for old configs.
-  --create-labels           Create/update helper labels on the target repo.
   --allow-missing-agy       Warn instead of failing when Antigravity CLI auth is missing.
   --env-file PATH           Override config/reviewer.env path.
   -h, --help                Show this help.
@@ -81,9 +79,6 @@ while [ "$#" -gt 0 ]; do
     --research-consent)
       research_consent="${2:-}"
       shift
-      ;;
-    --create-labels)
-      create_labels=1
       ;;
     --allow-missing-agy)
       allow_missing_agy=1
@@ -220,14 +215,6 @@ fi
 required_checks="$CONFIG_DIR/required-checks.json"
 ops_copy_if_missing "$required_checks" "$CONFIG_DIR/required-checks.example.json" || exit 1
 
-if [ "$create_labels" -eq 1 ]; then
-  ops_require_command curl "curl is needed for App-token label creation; setup-vm.sh installs it."
-  if token=$("$APP_TOKEN_SH" 2>/dev/null); then
-    GH_TOKEN="$token" "$SCRIPT_DIR/reviewer/ensure-labels.sh"
-  else
-    ops_die "Could not mint a token to create labels. Make sure the App is installed on $repo."
-  fi
-fi
 
 ops_log "Configuration written:"
 cat <<EOF

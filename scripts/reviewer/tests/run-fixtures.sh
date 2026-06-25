@@ -515,6 +515,20 @@ test_review_thread_resolution_helpers() {
   assert_eq "resolver posts a confirming reply before resolving the thread" "thread-resolvable" "$(cat "$reply_calls_file")"
 }
 
+test_review_state_uses_github_reviews_only() {
+  if declare -F apply_review_labels >/dev/null; then
+    fail "reviewer does not retain label state helper"
+  fi
+  pass "reviewer does not retain label state helper"
+
+  if [ -e "$REVIEWER_DIR/ensure-labels.sh" ]; then
+    fail "reviewer does not ship label setup helper"
+  fi
+  pass "reviewer does not ship label setup helper"
+
+  assert_not_contains "review posting has no Issues API side effect" "/issues/" "$LIB_DIR/github.sh"
+}
+
 
 
 test_check_ci_paginates_required_check_runs() {
@@ -1891,7 +1905,6 @@ REVIEWER_RESEARCH_CONSENT=1
 REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/research-required.json
 REVIEWER_MAX_PRS=1
 REVIEWER_MAX_ATTEMPTS=1
-REVIEWER_APPLY_LABELS=0
 EOF
 
   status=0
@@ -1985,6 +1998,7 @@ test_github_api_retries_and_logs
 test_post_review_uses_rest_api
 test_inline_review_comments_follow_diff_anchors
 test_review_thread_resolution_helpers
+test_review_state_uses_github_reviews_only
 test_check_ci_paginates_required_check_runs
 test_check_runs_summary_reports_only_needed_plumbing
 test_ci_states
@@ -2002,7 +2016,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=230
+EXPECTED_ASSERTIONS=233
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

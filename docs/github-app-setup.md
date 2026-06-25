@@ -42,7 +42,7 @@ These are filled in automatically; this section is the reference if you ever nee
 |---|---|---|
 | Checks | Read-only | CI gate — reads check-runs before calling `agy` |
 | Contents | Read-only | Downloads the PR-head source snapshot for read-only review context |
-| Issues | Read & Write | Posts labels (`agent-reviewed`, etc.) via the Issues API |
+| Issues | Read & Write | Reserved for future issue or PR-conversation workflows; the reviewer does not currently call Issues endpoints |
 | Metadata | Read-only | Auto-selected; required for any repo API access |
 | Pull requests | Read & Write | Lists PRs and submits reviews |
 

@@ -202,9 +202,8 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Re-reads the PR head and unresolved bot-created review threads, then atomically posts the GitHub review event, summary, and any verified inline comments through the GitHub REST API. There is no line-matching dedup: the reviewer is shown its open threads by handle and asked to address each one explicitly, so a re-raised finding at most produces a visible duplicate thread rather than silently swallowing a genuine new finding.
-12. Applies optional labels.
-13. If `REVIEWER_AUTO_RESOLVE_BOT_THREADS=1`, resolves unresolved GitHub review threads originally opened by this bot only when the review body explicitly lists their handle (a slug derived from the thread's heading) in a `Resolved Prior Threads` section and GitHub reports the App can resolve them. Each resolution posts a confirming reply into the thread first, so it reads as a conversation turn rather than a silent state flip.
-14. If `REVIEWER_RESEARCH_CONSENT=1` and the target repository is public, saves paired control/Linus prompt+response artifacts under `REVIEWER_STATE/research-runs/`. The posted style is still the only review posted to GitHub; the other style is counterfactual research data.
+12. If `REVIEWER_AUTO_RESOLVE_BOT_THREADS=1`, resolves unresolved GitHub review threads originally opened by this bot only when the review body explicitly lists their handle (a slug derived from the thread's heading) in a `Resolved Prior Threads` section and GitHub reports the App can resolve them. Each resolution posts a confirming reply into the thread first, so it reads as a conversation turn rather than a silent state flip.
+13. If `REVIEWER_RESEARCH_CONSENT=1` and the target repository is public, saves paired control/Linus prompt+response artifacts under `REVIEWER_STATE/research-runs/`. The posted style is still the only review posted to GitHub; the other style is counterfactual research data.
 
 Queued skips, attempted reviews, and posted reviews are separate counters.
 Drafts, self-authored PRs, PRs outside `REVIEWER_ONLY_PR`, and
@@ -309,7 +308,6 @@ The engine prompt at `scripts/reviewer/review-prompt.md` only defines the parsed
 
 Env vars (set in `reviewer.env` or inline) beyond the required set:
 
-- `REVIEWER_APPLY_LABELS` — apply the helper labels after posting (default `1`; set `0` to disable). `scripts/reviewer/ensure-labels.sh` creates the labels; review posting never depends on them.
 - `REVIEWER_MAX_ATTEMPTS` — maximum non-skipped PRs to attempt in one tick. Defaults to `REVIEWER_MAX_PRS`. Reaching this limit logs `Reached REVIEWER_MAX_ATTEMPTS=...` and stops the tick.
 - `REVIEWER_IGNORE_AGY_BACKOFF` — set `1` to run even while an Antigravity quota backoff (`agy_backoff_until`) is active. `dry-run.sh` sets this automatically.
 - `REVIEWER_REQUIRED_CHECKS_JSON` + `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE=1` — override the required-check gate from the environment for one-off runs; both must be set, so a stray env var cannot loosen a production gate.

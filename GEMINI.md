@@ -115,8 +115,7 @@ scripts/configure-inner.sh \
 ```
 
 Add `--installation-id ID` only if discovery is not desired or has already been
-done. Add `--create-labels` only after asking the user. Add
-`--allow-missing-agy` only if the user intentionally wants to configure
+done. Add `--allow-missing-agy` only if the user intentionally wants to configure
 before authenticating Antigravity CLI.
 
 Antigravity CLI auth on the VM is manual:

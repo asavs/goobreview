@@ -32,7 +32,6 @@ INCLUDE_COMMIT_SUBJECTS="${REVIEWER_INCLUDE_COMMIT_SUBJECTS:-1}"
 RESEARCH_CONSENT="${REVIEWER_RESEARCH_CONSENT:-0}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
-APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
 AUTO_RESOLVE_BOT_THREADS="${REVIEWER_AUTO_RESOLVE_BOT_THREADS:-0}"
 FAILURE_MAX_ATTEMPTS="${REVIEWER_FAILURE_MAX_ATTEMPTS:-3}"
 INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
@@ -813,7 +812,6 @@ EOF
 
   if post_review "$num" "$event" "$body" "$head_sha" "$inline_comments_json"; then
     clear_review_failure_attempts "$num" "$head_sha"
-    apply_review_labels "$num" "$event" || log "PR #$num: failed to apply review labels"
     if [ "$AUTO_RESOLVE_BOT_THREADS" = "1" ]; then
       if auto_resolved_threads=$(github_resolve_review_thread_handles_json "$prompt_thread_handle_map_json" "$resolved_thread_handles" "$unresolved_bot_threads_json" "$head_sha" 2>>"$LOG_FILE"); then
         if [ "$auto_resolved_threads" -gt 0 ]; then
