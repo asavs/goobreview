@@ -867,7 +867,7 @@ test_prompt_assembly() {
     "CI Status" \
     "# GitHub Review Format" \
     "Trust Boundary" \
-    "PR" \
+    "Title: Test auth change" \
     "Commit Subjects" \
     "Prior Bot Review" \
     "Unresolved Prior Bot Threads" \
