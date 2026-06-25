@@ -125,6 +125,30 @@ github_api_post_json() {
   github_api_request POST "$1" "application/vnd.github+json" "$2"
 }
 
+github_api_graphql() {
+  local query="$1"
+  local variables="${2:-}"
+  local payload response
+
+  # Default to an empty object. A literal {} in the :- default would be
+  # brace-ambiguous and append a stray '}' to a non-empty payload.
+  [ -n "$variables" ] || variables='{}'
+  if ! printf '%s' "$variables" | jq -e 'type == "object"' >/dev/null; then
+    printf 'GitHub GraphQL variables must be a JSON object\n' >&2
+    return 1
+  fi
+
+  payload=$(jq -n --arg query "$query" --argjson variables "$variables" \
+    '{query: $query, variables: $variables}')
+  response=$(github_api_post_json "graphql" "$payload") || return 1
+  if printf '%s\n' "$response" | jq -e '(.errors // []) | length > 0' >/dev/null; then
+    printf 'GitHub GraphQL query failed: %s\n' \
+      "$(printf '%s\n' "$response" | jq -c '.errors')" >&2
+    return 1
+  fi
+  printf '%s\n' "$response"
+}
+
 github_api_patch_json() {
   github_api_request PATCH "$1" "application/vnd.github+json" "$2"
 }

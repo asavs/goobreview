@@ -43,6 +43,86 @@ review_body_before_verdict() {
   '
 }
 
+# Extract source locations mentioned in ordinary Markdown review prose. The
+# reviewer model remains free to write a conventional review; this parser
+# merely discovers path:line references that can later be verified against the
+# pull request diff and promoted to native GitHub review comments.
+#
+# Output is one unique path<TAB>line pair per line. A range such as
+# src/app.ts:42-45 resolves to its first line because a later validation step
+# decides whether a single-line or multi-line GitHub anchor is possible.
+review_source_locations() {
+  grep -oE '[[:alnum:]_.][[:alnum:]_.+/-]*\.[[:alnum:]_+-]+:[0-9]+(-[0-9]+)?' |
+    sed -E 's/:([0-9]+)-[0-9]+$/\t\1/; s/:/\t/' |
+    awk -F '\t' 'NF == 2 && $1 !~ /(^|\/)\.\.($|\/)/ { key = $1 FS $2; if (!seen[key]++) print }'
+}
+
+# Emit each Markdown finding section that cites at least one source location.
+# NUL separators preserve the review's original newlines without asking the
+# model to serialize a second data format. The caller validates the locations
+# against GitHub's diff before it treats a section as an inline comment.
+review_markdown_finding_sections() {
+  awk '
+    function emit() {
+      if (in_section && section ~ /[[:alnum:]_.][[:alnum:]_.+\/-]*\.[[:alnum:]_+-]+:[0-9]+/) {
+        printf "%s%c", section, 0
+      }
+    }
+    /^#{2,6}[[:space:]]+/ {
+      emit()
+      section = $0 ORS
+      in_section = 1
+      next
+    }
+    in_section { section = section $0 ORS }
+    END { emit() }
+  '
+}
+
+review_resolved_thread_handles() {
+  awk '
+    function heading_level(line) {
+      if (line ~ /^#{2,6}[[:space:]]+/) {
+        match(line, /^#+/)
+        return RLENGTH
+      }
+      return 0
+    }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      level = heading_level(line)
+      if (level > 0) {
+        title = line
+        sub(/^#{2,6}[[:space:]]+/, "", title)
+        lower = tolower(title)
+        if (lower ~ /(^|[^a-z])resolved([^a-z]|$)/ && lower ~ /prior/ && lower ~ /thread/) {
+          in_section = 1
+          section_level = level
+          next
+        }
+        if (in_section && level <= section_level) {
+          in_section = 0
+        }
+      }
+      if (!in_section) next
+      # One handle per bullet: strip any list marker, blockquote, and backticks,
+      # then take the leading slug token. Over-extracted prose words are harmless
+      # because github_resolvable_review_thread_ids_for_handles validates every
+      # token against the live thread-handle map before resolving anything.
+      token = line
+      sub(/^[[:space:]>]*([-*+][[:space:]]+|[0-9]+[.)][[:space:]]+)?/, "", token)
+      gsub(/`/, "", token)
+      sub(/^[[:space:]]+/, "", token)
+      if (match(token, /^[a-z0-9][a-z0-9-]*/)) {
+        handle = substr(token, RSTART, RLENGTH)
+        sub(/-+$/, "", handle)
+        if (handle != "" && !seen[handle]++) print handle
+      }
+    }
+  '
+}
+
 secure_install_file() {
   local src="$1"
   local dst="$2"

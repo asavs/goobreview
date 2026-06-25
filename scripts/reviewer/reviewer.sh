@@ -23,6 +23,8 @@ DIFF_MAX_BYTES="${REVIEWER_DIFF_MAX_BYTES:-120000}"
 DIFF_FILE_MAX_BYTES="${REVIEWER_DIFF_FILE_MAX_BYTES:-40000}"
 DESCRIPTION_MAX_BYTES="${REVIEWER_DESCRIPTION_MAX_BYTES:-12000}"
 PREVIOUS_REVIEW_MAX_BYTES="${REVIEWER_PREVIOUS_REVIEW_MAX_BYTES:-500}"
+PRIOR_THREAD_SUMMARY_LIMIT="${REVIEWER_PRIOR_THREAD_SUMMARY_LIMIT:-12}"
+PRIOR_THREAD_BODY_MAX_BYTES="${REVIEWER_PRIOR_THREAD_BODY_MAX_BYTES:-500}"
 COMMIT_SUBJECTS_MAX="${REVIEWER_COMMIT_SUBJECTS_MAX:-10}"
 INCLUDE_AUTHOR="${REVIEWER_INCLUDE_AUTHOR:-0}"
 INCLUDE_DESCRIPTION="${REVIEWER_INCLUDE_DESCRIPTION:-1}"
@@ -31,6 +33,7 @@ RESEARCH_CONSENT="${REVIEWER_RESEARCH_CONSENT:-0}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 APPLY_LABELS="${REVIEWER_APPLY_LABELS:-1}"
+AUTO_RESOLVE_BOT_THREADS="${REVIEWER_AUTO_RESOLVE_BOT_THREADS:-0}"
 FAILURE_MAX_ATTEMPTS="${REVIEWER_FAILURE_MAX_ATTEMPTS:-3}"
 INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
@@ -106,14 +109,17 @@ write_dry_run_artifact() {
   local event="$3"
   local prompt_file="$4"
   local review_body="$5"
+  local inline_comments_json="${6:-[]}"
+  local auto_resolve_threads="${7:-0}"
   local output_file="$DRY_RUN_OUT"
-  local required_checks_sha256
+  local required_checks_sha256 inline_comment_count
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
 
   [ -n "$output_file" ] || return 0
 
   mkdir -p "$(dirname "$output_file")"
   artifact_tmp=$(mktemp "$STATE_DIR/dry-artifact.XXXXXX")
+  inline_comment_count=$(printf '%s' "$inline_comments_json" | jq -r 'length') || fatal "invalid resolved inline-comments JSON"
   {
     printf 'GoobReview dry run\n'
     printf 'Repository: %s\n' "$REPO"
@@ -122,6 +128,8 @@ write_dry_run_artifact() {
     printf 'Posted personality: %s\n' "$POSTED_PERSONALITY"
     printf 'Personality file: %s\n' "$PERSONALITY_FILE"
     printf 'Parsed review event: %s\n' "$event"
+    printf 'Resolved inline comments: %s\n' "$inline_comment_count"
+    printf 'Selected bot threads to auto-resolve: %s\n' "$auto_resolve_threads"
     printf 'Generated at: %s\n' "$(date -Is)"
     printf '\n===== AGY PROMPT PAYLOAD START =====\n'
     append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "dry-run prompt artifact"
@@ -129,6 +137,9 @@ write_dry_run_artifact() {
     printf '\n===== AGY RESPONSE START =====\n'
     printf '%s\n' "$review_body" | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "dry-run response artifact"
     printf '===== AGY RESPONSE END =====\n'
+    printf '\n===== RESOLVED INLINE COMMENTS START =====\n'
+    printf '%s\n' "$inline_comments_json" | jq . | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "dry-run inline-comments artifact"
+    printf '===== RESOLVED INLINE COMMENTS END =====\n'
   } >"$artifact_tmp"
   artifact_bytes=$(wc -c <"$artifact_tmp" | tr -d ' ')
   if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
@@ -608,7 +619,7 @@ EOF
           review_actions=$((review_actions + 1))
           continue
         fi
-        if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body"; then
+        if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body" "$head_sha" '[]'; then
           clear_review_failure_attempts "$num" "$head_sha"
           log "Posted REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
           review_actions=$((review_actions + 1))
@@ -643,7 +654,23 @@ EOF
     continue
   fi
 
-  if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json"; then
+  if ! review_threads_json=$(github_pr_review_threads_json "$num" 2>>"$LOG_FILE"); then
+    rm -f "$prompt_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to read existing review threads"
+    continue
+  fi
+  if ! unresolved_bot_threads_json=$(github_unresolved_bot_review_threads_json "$review_threads_json" "$BOT_LOGIN" "$BOT_AUTHOR"); then
+    rm -f "$prompt_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to filter existing bot review threads"
+    continue
+  fi
+  if ! prompt_thread_handle_map_json=$(printf '%s\n' "$unresolved_bot_threads_json" | github_review_thread_handle_map_json); then
+    rm -f "$prompt_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to map bot review thread handles"
+    continue
+  fi
+
+  if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$unresolved_bot_threads_json"; then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to build agy prompt"
     continue
@@ -736,23 +763,72 @@ $review_body
 EOF
 )
 
-  if [ -n "$DRY_RUN" ]; then
-    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review"
+  if [ -z "$DRY_RUN" ]; then
+    if ! current_pr_json=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE"); then
+      rm -f "$prompt_tmp" "$agy_err_tmp"
+      record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to re-read PR head before posting review"
+      continue
+    fi
+    current_head_sha=$(printf '%s\n' "$current_pr_json" | jq -r '.head.sha // empty')
+    if [ "$current_head_sha" != "$head_sha" ]; then
+      rm -f "$prompt_tmp" "$agy_err_tmp"
+      log "PR #$num@$head_sha: head advanced to $current_head_sha before posting; discarding reviewed result"
+      continue
+    fi
+    if ! review_threads_json=$(github_pr_review_threads_json "$num" 2>>"$LOG_FILE"); then
+      rm -f "$prompt_tmp" "$agy_err_tmp"
+      record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to re-read review threads before posting review"
+      continue
+    fi
+    if ! unresolved_bot_threads_json=$(github_unresolved_bot_review_threads_json "$review_threads_json" "$BOT_LOGIN" "$BOT_AUTHOR"); then
+      rm -f "$prompt_tmp" "$agy_err_tmp"
+      record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to filter latest bot review threads before posting review"
+      continue
+    fi
+  fi
+
+  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body"); then
     rm -f "$prompt_tmp" "$agy_err_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to resolve inline review anchors"
+    continue
+  fi
+
+  resolved_thread_handles=$(mktemp "$STATE_DIR/resolved-thread-handles.$num.XXXXXX")
+  printf '%s\n' "$review_body" | review_resolved_thread_handles >"$resolved_thread_handles"
+  auto_resolve_threads=0
+  if [ "$AUTO_RESOLVE_BOT_THREADS" = "1" ]; then
+    auto_resolve_threads=$(github_resolvable_review_thread_ids_for_handles "$prompt_thread_handle_map_json" "$resolved_thread_handles" "$unresolved_bot_threads_json" | awk 'END { print NR + 0 }') || auto_resolve_threads=0
+  fi
+
+  if [ -n "$DRY_RUN" ]; then
+    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads"
+    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
     log "Dry run: would post $event review on PR #$num@$head_sha"
+    if [ "$auto_resolve_threads" -gt 0 ]; then
+      log "Dry run: would auto-resolve $auto_resolve_threads explicitly selected bot review thread(s) on PR #$num@$head_sha"
+    fi
     review_actions=$((review_actions + 1))
     continue
   fi
 
-  if post_review "$num" "$event" "$body"; then
+  if post_review "$num" "$event" "$body" "$head_sha" "$inline_comments_json"; then
     clear_review_failure_attempts "$num" "$head_sha"
     apply_review_labels "$num" "$event" || log "PR #$num: failed to apply review labels"
+    if [ "$AUTO_RESOLVE_BOT_THREADS" = "1" ]; then
+      if auto_resolved_threads=$(github_resolve_review_thread_handles_json "$prompt_thread_handle_map_json" "$resolved_thread_handles" "$unresolved_bot_threads_json" "$head_sha" 2>>"$LOG_FILE"); then
+        if [ "$auto_resolved_threads" -gt 0 ]; then
+          log "Auto-resolved $auto_resolved_threads explicitly selected bot review thread(s) on PR #$num@$head_sha"
+        fi
+      else
+        log "PR #$num@$head_sha: failed to auto-resolve one or more explicitly selected bot review threads"
+      fi
+    fi
     capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prompt_tmp" "$review" "$event"
-    rm -f "$prompt_tmp" "$agy_err_tmp"
+    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
   else
-    rm -f "$prompt_tmp" "$agy_err_tmp"
+    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
     record_review_failure_and_log "$num" "$head_sha" "Failed to post review on PR #$num@$head_sha"
   fi
 done <<< "$PRS"
