@@ -1884,6 +1884,7 @@ EOF
 
   cat > "$bin_dir/agy" <<'EOF'
 #!/usr/bin/env bash
+printf 'fake agy stderr trace\n' >&2
 prompt=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -1968,6 +1969,14 @@ EOF
     fail "dry-run inline-comment fixture reviewer exits successfully"
   fi
   pass "dry-run inline-comment fixture reviewer exits successfully"
+  assert_contains "dry-run artifact records agy execution context" "===== AGY EXECUTION CONTEXT START =====" "$dry_run_out"
+  assert_contains "dry-run artifact explains hidden agy layer" "Hidden Antigravity CLI system prompt/tool definitions: not observable by GoobReview" "$dry_run_out"
+  assert_contains "dry-run artifact records agy command template" "agy --sandbox --dangerously-skip-permissions" "$dry_run_out"
+  assert_contains "dry-run artifact records runtime cwd" "Runtime cwd: $runtime_dir/agy-runtime" "$dry_run_out"
+  assert_contains "dry-run artifact records snapshot path" "PR-head snapshot path:" "$dry_run_out"
+  assert_contains "dry-run artifact records prompt hash" "Prompt SHA256:" "$dry_run_out"
+  assert_contains "dry-run artifact records response hash" "Response SHA256:" "$dry_run_out"
+  assert_contains "dry-run artifact captures agy stderr" "fake agy stderr trace" "$dry_run_out"
   assert_contains "dry-run artifact reports resolved inline comments" "Resolved inline comments: 1" "$dry_run_out"
   awk '
     /^===== RESOLVED INLINE COMMENTS START =====$/ { found = 1; next }
@@ -2040,7 +2049,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=244
+EXPECTED_ASSERTIONS=252
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

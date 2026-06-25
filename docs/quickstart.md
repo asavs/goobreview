@@ -58,7 +58,7 @@ Still on the VM:
 scripts/dry-run.sh
 ```
 
-This runs the reviewer once against your target repo with `REVIEWER_DRY_RUN=1` so nothing is posted. It makes a fresh `agy` call and writes a dry-run artifact containing the exact prompt payload plus the response.
+This runs the reviewer once against your target repo with `REVIEWER_DRY_RUN=1` so nothing is posted. It makes a fresh `agy` call and writes a dry-run artifact containing a sanitized agy execution context, the exact prompt payload, agy stderr, and the response.
 
 To dry-run a specific PR:
 
@@ -78,7 +78,7 @@ Dry runs can target draft PRs and previously reviewed PR heads. They also bypass
 REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
 ```
 
-This writes a sibling `.launch.json` metadata file that records the target repo, config hashes, required-check list, and whether CI was bypassed.
+This writes a sibling `.launch.json` metadata file that records the target repo, config hashes, required-check list, prompt/response/stderr hashes, and whether CI was bypassed.
 
 To preview exactly what `agy` would receive without calling it:
 

@@ -62,8 +62,10 @@ For a numbered PR, the dry run writes
 `$REVIEWER_STATE/dry-pr-123.txt`. The artifact includes:
 
 - run metadata, including the parsed event, resolved inline-review comments that would be submitted, and any explicitly selected bot-owned threads that would be auto-resolved if enabled;
+- a sanitized agy execution context: command shape, model, timeout, runtime cwd, PR-head snapshot path/counts, prompt/response hashes, stderr hash, and a note that agy's injected system prompt and tool definitions are not observable from GoobReview;
 - the exact Gemini prompt payload;
-- Gemini's full response, or stderr if Gemini failed.
+- Gemini stderr;
+- Gemini's full response, or stderr as the response body if Gemini failed.
 
 Dry-run artifacts are stored under `REVIEWER_STATE` by default and are
 installed with mode `0600`. Before writing the artifact, the reviewer scans

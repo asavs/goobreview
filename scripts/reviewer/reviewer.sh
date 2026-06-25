@@ -113,15 +113,39 @@ write_dry_run_artifact() {
   local review_body="$5"
   local inline_comments_json="${6:-[]}"
   local auto_resolve_threads="${7:-0}"
+  local agy_err_file="${8:-}"
+  local worktree_dir="${9:-}"
   local output_file="$DRY_RUN_OUT"
   local required_checks_sha256 inline_comment_count
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
+  local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks
 
   [ -n "$output_file" ] || return 0
 
   mkdir -p "$(dirname "$output_file")"
   artifact_tmp=$(mktemp "$STATE_DIR/dry-artifact.XXXXXX")
   inline_comment_count=$(printf '%s' "$inline_comments_json" | jq -r 'length') || fatal "invalid resolved inline-comments JSON"
+  runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
+  agy_path=$(command -v agy 2>/dev/null || printf 'not found')
+  agy_version="not probed (avoids a second agy invocation)"
+  prompt_bytes=$(wc -c <"$prompt_file" | tr -d ' ')
+  prompt_sha=$(sha256sum "$prompt_file" | awk '{print $1}')
+  response_bytes=$(printf '%s' "$review_body" | wc -c | tr -d ' ')
+  response_sha=$(printf '%s' "$review_body" | sha256sum | awk '{print $1}')
+  if [ -n "$agy_err_file" ] && [ -f "$agy_err_file" ]; then
+    stderr_bytes=$(wc -c <"$agy_err_file" | tr -d ' ')
+    stderr_sha=$(sha256sum "$agy_err_file" | awk '{print $1}')
+  else
+    stderr_bytes=0
+    stderr_sha=
+  fi
+  if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then
+    snapshot_files=$(find "$worktree_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
+    snapshot_symlinks=$(find "$worktree_dir" -type l 2>/dev/null | wc -l | tr -d ' ')
+  else
+    snapshot_files=0
+    snapshot_symlinks=0
+  fi
   {
     printf 'GoobReview dry run\n'
     printf 'Repository: %s\n' "$REPO"
@@ -133,9 +157,37 @@ write_dry_run_artifact() {
     printf 'Resolved inline comments: %s\n' "$inline_comment_count"
     printf 'Selected bot threads to auto-resolve: %s\n' "$auto_resolve_threads"
     printf 'Generated at: %s\n' "$(date -Is)"
+    printf '\n===== AGY EXECUTION CONTEXT START =====\n'
+    printf 'Observable from GoobReview: prompt payload, agy stdout/stderr, process envelope, runtime cwd, and PR-head snapshot path/counts.\n'
+    printf 'Hidden Antigravity CLI system prompt/tool definitions: not observable by GoobReview; injected by agy outside this artifact.\n'
+    printf 'Command template: timeout %s agy --sandbox --dangerously-skip-permissions --print-timeout %ss --model %s --print <prompt-by-value>\n' "$AGY_TIMEOUT" "$AGY_TIMEOUT" "$AGY_MODEL"
+    printf 'Antigravity CLI path: %s\n' "$agy_path"
+    printf 'Antigravity CLI version probe: %s\n' "$agy_version"
+    printf 'Runtime cwd: %s\n' "$runtime_dir"
+    printf 'PR-head snapshot path: %s\n' "${worktree_dir:-unavailable}"
+    printf 'PR-head snapshot regular files: %s\n' "$snapshot_files"
+    printf 'PR-head snapshot symlinks: %s\n' "$snapshot_symlinks"
+    printf 'Prompt bytes: %s\n' "$prompt_bytes"
+    printf 'Prompt SHA256: %s\n' "$prompt_sha"
+    printf 'Response bytes: %s\n' "$response_bytes"
+    printf 'Response SHA256: %s\n' "$response_sha"
+    printf 'Agy stderr bytes: %s\n' "$stderr_bytes"
+    if [ -n "$stderr_sha" ]; then
+      printf 'Agy stderr SHA256: %s\n' "$stderr_sha"
+    fi
+    printf 'GitHub token environment removed before agy: yes\n'
+    printf 'GitHub App key environment removed before agy: yes\n'
+    printf '===== AGY EXECUTION CONTEXT END =====\n'
     printf '\n===== AGY PROMPT PAYLOAD START =====\n'
     append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "dry-run prompt artifact"
     printf '\n===== AGY PROMPT PAYLOAD END =====\n'
+    printf '\n===== AGY STDERR START =====\n'
+    if [ -n "$agy_err_file" ] && [ -f "$agy_err_file" ]; then
+      append_bounded_file "$agy_err_file" "$MAX_ARTIFACT_BYTES" "dry-run agy stderr artifact"
+    else
+      printf '[goobreview: no agy stderr captured]\n'
+    fi
+    printf '===== AGY STDERR END =====\n'
     printf '\n===== AGY RESPONSE START =====\n'
     printf '%s\n' "$review_body" | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "dry-run response artifact"
     printf '===== AGY RESPONSE END =====\n'
@@ -179,6 +231,12 @@ write_dry_run_artifact() {
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
     --arg dry_run_bypass_ci "${DRY_RUN_BYPASS_CI:-}" \
+    --arg prompt_bytes "$prompt_bytes" \
+    --arg prompt_sha256 "$prompt_sha" \
+    --arg response_bytes "$response_bytes" \
+    --arg response_sha256 "$response_sha" \
+    --arg agy_stderr_bytes "$stderr_bytes" \
+    --arg agy_stderr_sha256 "$stderr_sha" \
     --argjson required_checks "$EFFECTIVE_REQUIRED_CHECKS_JSON" \
     '{
       repo: $repo,
@@ -192,6 +250,12 @@ write_dry_run_artifact() {
       required_checks_file: $required_checks_file,
       required_checks_sha256: $required_checks_sha256,
       dry_run_bypass_ci: $dry_run_bypass_ci,
+      prompt_bytes: ($prompt_bytes | tonumber),
+      prompt_sha256: $prompt_sha256,
+      response_bytes: ($response_bytes | tonumber),
+      response_sha256: $response_sha256,
+      agy_stderr_bytes: ($agy_stderr_bytes | tonumber),
+      agy_stderr_sha256: $agy_stderr_sha256,
       required_checks: $required_checks
     }' >"${output_file}.launch.json.tmp"
   secure_install_file "${output_file}.launch.json.tmp" "${output_file}.launch.json" || fatal "failed to write dry-run launch metadata with mode 0600"
@@ -695,7 +759,7 @@ EOF
   if ! review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree"); then
     cat "$agy_err_tmp" >> "$LOG_FILE"
     if [ -n "$DRY_RUN" ]; then
-      write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")"
+      write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")" '[]' 0 "$agy_err_tmp" "$review_worktree"
     fi
     set_agy_quota_backoff "$agy_err_tmp" || true
     rm -f "$prompt_tmp" "$agy_err_tmp"
@@ -706,7 +770,7 @@ EOF
 
   if [ -z "${review// }" ]; then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$review")
-    write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review"
+    write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree"
     rm -f "$prompt_tmp" "$agy_err_tmp"
     if [ -z "$DRY_RUN" ]; then
       invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
@@ -725,7 +789,7 @@ EOF
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "INVALID_VERDICT" "$review")
-    write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review"
+    write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree"
     rm -f "$prompt_tmp" "$agy_err_tmp"
     verdict_line=$(printf '%s' "$review" | awk '
       {
@@ -803,7 +867,7 @@ EOF
   fi
 
   if [ -n "$DRY_RUN" ]; then
-    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads"
+    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads" "$agy_err_tmp" "$review_worktree"
     rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
     log "Dry run: would post $event review on PR #$num@$head_sha"
     if [ "$auto_resolve_threads" -gt 0 ]; then
