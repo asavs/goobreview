@@ -1,6 +1,6 @@
 [Unit]
 Description=Run GoobReview PR reviewer every minute
-Documentation=https://github.com/asavschaeffer/goobreview
+Documentation=https://github.com/asavs/goobreview
 
 [Timer]
 OnBootSec=1min

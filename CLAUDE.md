@@ -10,7 +10,7 @@ Implications for editing:
 
 - The daemon runs on someone else's machine, often via cron or systemd. There's no local dev server or build step. The test suite is `scripts/reviewer/tests/run-fixtures.sh` (covers parser, CI-gate, prompt assembly, and Gemini invocation isolation); it runs in CI and is the canonical check for reviewer-core behavior.
 - `sync-worktree.sh` **refuses to sync a dirty checkout**. Any new per-deployment config file under `config/` that isn't gitignored will brick every deployed VM on next tick. The ignored per-deployment files are `reviewer.env` and `required-checks.json`; only their `.example.*` siblings are committed. Adding another local config file means updating `.gitignore`, config resolution, setup docs, and `configure.sh` in the same PR. Personality gallery files in `config/personalities/` are committed verbatim; users select the posted style with `REVIEWER_POSTED_PERSONALITY=none|linus`, and `REVIEWER_PERSONALITY_FILE` remains only a legacy/internal escape hatch.
-- Forks/template instantiations rely on `.github/workflows/template-cleanup.yml` rewriting every `asavschaeffer/goobreview` literal to the new `owner/repo` on first push to `main`. Hardcode that string in new docs/scripts the same way existing ones do — don't introduce an alternate spelling, or fork personalization will silently miss it.
+- Forks/template instantiations rely on `.github/workflows/template-cleanup.yml` rewriting every `asavs/goobreview` literal to the new `owner/repo` on first push to `main`. Hardcode that string in new docs/scripts the same way existing ones do — don't introduce an alternate spelling, or fork personalization will silently miss it.
 
 ## Architecture
 

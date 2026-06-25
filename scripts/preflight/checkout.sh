@@ -127,7 +127,7 @@ fi
 
 detected_owner_repo="$(ops_to_owner_repo "$local_origin")"
 if [ -z "$detected_owner_repo" ]; then
-  detected_owner_repo="asavschaeffer/goobreview"
+  detected_owner_repo="asavs/goobreview"
 fi
 
 setup_vm_url="${GOOBREVIEW_SETUP_VM_URL:-https://raw.githubusercontent.com/${detected_owner_repo}/main/scripts/setup-vm.sh}"

@@ -9,7 +9,7 @@ credentials, tokens, and other secret material.
 
 ## Outcome
 
-- PR: [#75](https://github.com/asavschaeffer/goobreview/pull/75)
+- PR: [#75](https://github.com/asavs/goobreview/pull/75)
 - Final head: `8f40d7eb96d4c0cc862c7db3ef222ffce3b44e92`
 - Mergeability: `true`
 - Linux validation: run #132, `success`

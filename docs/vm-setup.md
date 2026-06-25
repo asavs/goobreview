@@ -52,7 +52,7 @@ the Cloud Shell bootstrap uses. It installs base packages,
 Antigravity CLI, the checkout, the state directory, and optional swap:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/asavschaeffer/goobreview/main/scripts/setup-vm.sh | bash
+curl -fsSL https://raw.githubusercontent.com/asavs/goobreview/main/scripts/setup-vm.sh | bash
 ```
 
 For your own public template copy, replace the URL and repo:
@@ -144,7 +144,7 @@ Use one stable checkout and state directory per reviewer identity:
 ```bash
 sudo mkdir -p /opt/goobreview/example /var/lib/goobreview/example
 sudo chown -R "$USER:$USER" /opt/goobreview/example /var/lib/goobreview/example
-git clone https://github.com/asavschaeffer/goobreview.git /opt/goobreview/example
+git clone https://github.com/asavs/goobreview.git /opt/goobreview/example
 cd /opt/goobreview/example
 git checkout --detach origin/main
 ```

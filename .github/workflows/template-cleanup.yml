@@ -2,7 +2,7 @@ name: Template cleanup
 
 # Runs once on the first push to `main` of any repo created from this template
 # via "Use this template" on GitHub. Rewrites hardcoded references to the
-# upstream `asavschaeffer/goobreview` repo so committed docs, scripts,
+# upstream `asavs/goobreview` repo so committed docs, scripts,
 # manifests, workflows, and examples all point at the new repo.
 #
 # Becomes a no-op after the first run (no remaining matches → no commit).
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   cleanup:
-    if: github.repository != 'asavschaeffer/goobreview'
+    if: github.repository != 'asavs/goobreview'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,13 +27,13 @@ jobs:
           NEW_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          mapfile -t files < <(git grep -l 'asavschaeffer/goobreview' -- . || true)
+          mapfile -t files < <(git grep -l 'asavs/goobreview' -- . || true)
           if [ ${#files[@]} -eq 0 ]; then
             echo "Nothing to personalize."
             exit 0
           fi
           for f in "${files[@]}"; do
-            sed -i "s|asavschaeffer/goobreview|${NEW_REPO}|g" "$f"
+            sed -i "s|asavs/goobreview|${NEW_REPO}|g" "$f"
           done
           echo "Personalized ${#files[@]} file(s)."
 

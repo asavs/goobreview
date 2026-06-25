@@ -31,7 +31,7 @@ project).
 
 **Commands:**
 ```bash
-git clone https://github.com/asavschaeffer/goobreview.git
+git clone https://github.com/asavs/goobreview.git
 cd goobreview
 bash scripts/bootstrap-gcp.sh
 ```

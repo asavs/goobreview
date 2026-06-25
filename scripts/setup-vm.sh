@@ -4,7 +4,7 @@
 # or directly from inside the VM as the regular login user (not root).
 set -euo pipefail
 
-REPO_URL="${GOOBREVIEW_REPO_URL:-https://github.com/asavschaeffer/goobreview.git}"
+REPO_URL="${GOOBREVIEW_REPO_URL:-https://github.com/asavs/goobreview.git}"
 CHECKOUT_DIR="${GOOBREVIEW_CHECKOUT_DIR:-/opt/goobreview/example}"
 STATE_DIR="${GOOBREVIEW_STATE_DIR:-/var/lib/goobreview/example}"
 TARGET_USER="${GOOBREVIEW_USER:-${USER:-$(id -un)}}"

@@ -90,7 +90,7 @@ jobs:
       - name: Template cleanup coverage
         run: |
           set -euo pipefail
-          mapfile -t files < <(git grep -l 'asavschaeffer/goobreview' -- . || true)
+          mapfile -t files < <(git grep -l 'asavs/goobreview' -- . || true)
           printf '%s\n' "${files[@]}" | grep -Fxq 'config/app-manifest.json'
           printf '%s\n' "${files[@]}" | grep -Fxq 'deploy/systemd/goobreview.service.example'
           printf '%s\n' "${files[@]}" | grep -Fxq 'deploy/systemd/goobreview.timer.example'

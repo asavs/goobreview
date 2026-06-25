@@ -1,6 +1,6 @@
 [Unit]
 Description=Run GoobReview PR reviewer once
-Documentation=https://github.com/asavschaeffer/goobreview
+Documentation=https://github.com/asavs/goobreview
 Wants=network-online.target
 After=network-online.target
 

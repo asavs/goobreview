@@ -10,7 +10,7 @@ DEFAULT_MACHINE_TYPE="e2-micro"
 DEFAULT_IMAGE_FAMILY="ubuntu-2404-lts-amd64"
 DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_DISK_SIZE="20GB"
-UPSTREAM_REPO="asavschaeffer/goobreview"
+UPSTREAM_REPO="asavs/goobreview"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

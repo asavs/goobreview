@@ -234,7 +234,7 @@ setup_checkout_repo() {
   printf 'hello\n' > "$repo/README.md"
   git -C "$repo" add README.md scripts/preflight/checkout.sh scripts/lib/ops.sh
   git -C "$repo" commit -m "initial" >/dev/null
-  git -C "$repo" remote add origin https://github.com/asavschaeffer/goobreview
+  git -C "$repo" remote add origin https://github.com/asavs/goobreview
 
   printf '%s' "$repo"
 }
@@ -287,7 +287,7 @@ vm_reachable=true
 vm_checkout_present=true
 vm_branch=$(git -C "$repo" symbolic-ref --quiet --short HEAD)
 vm_head=$head
-vm_origin=https://github.com/asavschaeffer/goobreview
+vm_origin=https://github.com/asavs/goobreview
 vm_status_count=0
 vm_dirty=$dirty
 EOF
@@ -475,7 +475,7 @@ test_checkout_explicit_setup_url_passes_strict() {
   out="$TMP_ROOT/checkout-explicit.report"
 
   run_checkout_preflight_with_setup_url "$repo" "$out" \
-    "https://raw.githubusercontent.com/asavschaeffer/goobreview/feature-sync/scripts/setup-vm.sh" \
+    "https://raw.githubusercontent.com/asavs/goobreview/feature-sync/scripts/setup-vm.sh" \
     --report --strict
 
   assert_contains "checkout explicit setup URL clears mismatch" "setup_ref_mismatch='false'" "$out"

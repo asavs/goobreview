@@ -20,7 +20,7 @@ GoobReview provisions a small VM into a durable reviewer-identity daemon that wa
 
 Onboarding aims at zero diagnosis: `gcloud` commands, organized by scripts, executed by Antigravity CLI in Cloud Shell. The only steps left to you are account custody boundaries such as Google auth if Cloud Shell has no active `gcloud` account, billing consent, the GitHub App form in your browser, and Antigravity CLI sign-in.
 
-[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/asavschaeffer/goobreview&cloudshell_tutorial=docs/cloud-shell-tutorial.md)
+[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/asavs/goobreview&cloudshell_tutorial=docs/cloud-shell-tutorial.md)
 
 Click the button to open this repo in [Google Cloud Shell](https://cloud.google.com/shell). Cloud Shell is a browser terminal with `gcloud` preinstalled and usually already authenticated to your Google account - no local installs needed. If the current shell has no active `gcloud` account, `scripts/status.sh` tells you the exact auth step before Gemini starts driving setup. The tutorial pane follows [docs/cloud-shell-tutorial.md](docs/cloud-shell-tutorial.md), which is the shortest path through provisioning, App registration, VM configuration, a dry run, and scheduler enablement.
 

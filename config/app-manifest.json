@@ -1,6 +1,6 @@
 {
   "name": "goob-reviewer",
-  "url": "https://github.com/asavschaeffer/goobreview",
+  "url": "https://github.com/asavs/goobreview",
   "description": "Polls a target repo for open non-draft PRs, asks Antigravity CLI to review them, and posts APPROVE / REQUEST_CHANGES / COMMENT reviews as a bot identity.",
   "public": false,
   "hook_attributes": {

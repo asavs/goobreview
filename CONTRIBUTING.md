@@ -57,9 +57,9 @@ it unless you are intentionally changing the engine's output contract.
 
 ### Personalizing A Fork
 
-Click **Use this template** on GitHub rather than **Fork**: it creates a fresh repo with full ownership, and `.github/workflows/template-cleanup.yml` runs once on the first push to rewrite every `asavschaeffer/goobreview` reference (Cloud Shell button URL, bootstrap script, clone URL) to your new `owner/repo`. After that first commit, the workflow becomes a self-suppressing no-op.
+Click **Use this template** on GitHub rather than **Fork**: it creates a fresh repo with full ownership, and `.github/workflows/template-cleanup.yml` runs once on the first push to rewrite every `asavs/goobreview` reference (Cloud Shell button URL, bootstrap script, clone URL) to your new `owner/repo`. After that first commit, the workflow becomes a self-suppressing no-op.
 
-If you fork instead, the cleanup workflow won't fire until a push to `main`. Either make an empty commit or run a one-time replacement across tracked files, such as `git grep -lz 'asavschaeffer/goobreview' -- . | xargs -0 sed -i "s|asavschaeffer/goobreview|YOUR/REPO|g"`.
+If you fork instead, the cleanup workflow won't fire until a push to `main`. Either make an empty commit or run a one-time replacement across tracked files, such as `git grep -lz 'asavs/goobreview' -- . | xargs -0 sed -i "s|asavs/goobreview|YOUR/REPO|g"`.
 
 ## Safety Rules
 
