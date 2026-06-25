@@ -151,22 +151,67 @@ append_commit_subjects() {
   rm -f "$subjects_file"
 }
 
-# CI results are deterministic GitHub-side facts: the PR ran its own checks
-# and GitHub holds the outcomes. Passing the check-run list lets the reviewer
-# see what automation already verified instead of taking anyone's word for it.
 append_ci_status() {
   local ci_state="$1"
   local head_sha="$2"
 
   prompt_section "CI Status"
-  case "$ci_state" in
-    success)
-      printf 'Required GitHub Actions checks passed for this PR head. GitHub check runs for this commit (name, status, conclusion):\n\n'
-      github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || printf '[goobreview: check-run summary unavailable]\n'
-      printf '\nThese results are CI output reported by GitHub, not author claims. Do not re-verify what these checks already cover; focus review effort on what automation cannot check.\n'
-      ;;
-    *) printf 'CI: required-check gate state is %s.\n' "$ci_state" ;;
-  esac
+  printf 'Required-check gate: %s\n' "$ci_state"
+  printf 'Head SHA: %s\n\n' "$head_sha"
+  printf 'GitHub check runs (name, status, conclusion, url):\n'
+  github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || printf '[goobreview: check-run summary unavailable]\n'
+}
+
+append_ci_coverage_context() {
+  local worktree_dir="$1"
+  local workflow_limit="${CI_WORKFLOW_FILE_LIMIT:-8}"
+  local workflow_max_bytes="${CI_WORKFLOW_FILE_MAX_BYTES:-12000}"
+  local package_limit="${CI_PACKAGE_SCRIPT_FILE_LIMIT:-12}"
+  local workflow_dir workflow_file workflow_count=0 package_file package_count=0 rel scripts_json
+
+  [ -n "$worktree_dir" ] || return 0
+
+  prompt_section "CI Coverage Context (PR-Head Source)"
+  printf 'Workflow files and package scripts from the PR-head snapshot. Use these to judge what passing checks actually exercise.\n'
+
+  workflow_dir="$worktree_dir/.github/workflows"
+  printf '\nWorkflow files:\n'
+  if [ -d "$workflow_dir" ] && [ ! -L "$workflow_dir" ]; then
+    while IFS= read -r -d '' workflow_file; do
+      workflow_count=$((workflow_count + 1))
+      if [ "$workflow_count" -gt "$workflow_limit" ]; then
+        printf '[goobreview: workflow file list truncated after %s file(s)]\n' "$workflow_limit"
+        break
+      fi
+      rel="${workflow_file#"$worktree_dir"/}"
+      printf '\n%s:\n```yaml\n' "$rel"
+      append_bounded_file "$workflow_file" "$workflow_max_bytes" "$rel"
+      printf '\n```\n'
+    done < <(find "$workflow_dir" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 | sort -z)
+  fi
+  if [ "$workflow_count" -eq 0 ]; then
+    printf '[goobreview: no workflow files found]\n'
+  fi
+
+  printf '\nPackage scripts:\n'
+  while IFS= read -r -d '' package_file; do
+    scripts_json=$(jq -c 'select((.scripts // {}) | length > 0) | {name: (.name // null), scripts: .scripts}' "$package_file" 2>/dev/null || true)
+    [ -n "$scripts_json" ] || continue
+    package_count=$((package_count + 1))
+    if [ "$package_count" -gt "$package_limit" ]; then
+      printf '[goobreview: package script list truncated after %s file(s)]\n' "$package_limit"
+      break
+    fi
+    rel="${package_file#"$worktree_dir"/}"
+    printf '\n%s:\n```json\n' "$rel"
+    printf '%s\n' "$scripts_json" | jq .
+    printf '```\n'
+  done < <(find "$worktree_dir" \
+      \( -path '*/.git' -o -path '*/node_modules' -o -path '*/dist' -o -path '*/build' \) -prune \
+      -o -type f -name package.json -print0 | sort -z)
+  if [ "$package_count" -eq 0 ]; then
+    printf '[goobreview: no package scripts found]\n'
+  fi
 }
 
 append_previous_bot_review() {
@@ -457,6 +502,9 @@ build_review_prompt() {
   fi
   if [ "$status" -eq 0 ]; then
     append_ci_status "$ci_state" "$head_sha" >>"$output_prompt_file" || status=1
+  fi
+  if [ "$status" -eq 0 ]; then
+    append_ci_coverage_context "$worktree_dir" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ]; then
     append_previous_bot_review "$head_sha" "$previous_bot_reviews_json" >>"$output_prompt_file" || status=1

@@ -621,7 +621,7 @@ test_check_runs_summary_reports_only_needed_plumbing() {
     printf '%s\n' '{"total_count":2,"fetched_count":2,"pages_fetched":1,"complete":true,"check_runs":[{"name":"a","status":"completed","conclusion":"success"},{"name":"b","status":"completed","conclusion":"failure"}]}'
   }
   output=$(github_check_runs_summary sha123)
-  assert_contains "check-run summary includes first result row" "$(printf 'a\tcompleted\tsuccess')" <(printf '%s\n' "$output")
+  assert_contains "check-run summary includes first result row" "$(printf 'a\tcompleted\tsuccess\t-')" <(printf '%s\n' "$output")
   assert_not_contains "check-run summary omits complete plumbing" "Check-run data: complete" <(printf '%s\n' "$output")
   assert_not_contains "check-run summary omits all-results plumbing" "Showing all 2 check runs." <(printf '%s\n' "$output")
 
@@ -765,6 +765,18 @@ test_prompt_assembly() {
   PREVIOUS_REVIEW_MAX_BYTES=500
   mkdir -p "$worktree_dir/client"
   printf 'Client guidance.\n' > "$worktree_dir/client/GUIDELINES.md"
+  mkdir -p "$worktree_dir/.github/workflows" "$worktree_dir/client"
+  printf '%s\n' \
+    'name: CI' \
+    'on: [pull_request]' \
+    'jobs:' \
+    '  test:' \
+    '    runs-on: ubuntu-latest' \
+    '    steps:' \
+    '      - uses: actions/checkout@v4' \
+    '      - run: npm test' > "$worktree_dir/.github/workflows/ci.yml"
+  printf '%s\n' '{"name":"root","scripts":{"test":"vitest run","build":"vite build"}}' > "$worktree_dir/package.json"
+  printf '%s\n' '{"name":"client","scripts":{"typecheck":"tsc --noEmit"}}' > "$worktree_dir/client/package.json"
 
   REPO="example/repo"
   BOT_LOGIN="goobreview[bot]"
@@ -844,7 +856,7 @@ test_prompt_assembly() {
 
   # shellcheck disable=SC2317 # Mocked check summary is invoked indirectly by append_ci_status.
   github_check_runs_summary() {
-    printf 'unit-tests\tcompleted\tsuccess\n'
+    printf 'unit-tests\tcompleted\tsuccess\thttps://github.com/example/repo/actions/runs/1\n'
   }
 
   build_review_prompt 999 "$prompt_file" success abc123 "$worktree_dir" "$pr_metadata_json" "$previous_bot_reviews_json" "$prior_bot_threads_json"
@@ -856,6 +868,7 @@ test_prompt_assembly() {
     "PR Metadata" \
     "Commit Subjects" \
     "CI Status" \
+    "CI Coverage Context" \
     "Your Prior Review" \
     "Prior Bot Inline Review Threads" \
     "Read-Only Source Snapshot" \
@@ -878,10 +891,15 @@ test_prompt_assembly() {
   assert_contains "prompt shows a concise middle-commit omission marker" "[goobreview: 1 commit subjects omitted between the first 5 and last 5]" "$prompt_file"
   assert_not_contains "prompt omits commit subjects from the middle" "- Refactor session cache" "$prompt_file"
   assert_contains "prompt retains the last commit subject" "- Final auth cleanup" "$prompt_file"
-  assert_contains "prompt reports the required-check gate" "Required GitHub Actions checks passed for this PR head." "$prompt_file"
+  assert_contains "prompt reports the required-check gate" "Required-check gate: success" "$prompt_file"
+  assert_contains "prompt reports the checked head SHA" "Head SHA: abc123" "$prompt_file"
   assert_contains "prompt includes GitHub check-run results" "$(printf 'unit-tests\tcompleted\tsuccess')" "$prompt_file"
-  assert_contains "prompt frames check results as CI output" "CI output reported by GitHub, not author claims" "$prompt_file"
-  assert_contains "prompt aims review beyond CI coverage" "focus review effort on what automation cannot check" "$prompt_file"
+  assert_contains "prompt includes GitHub check-run URL" "https://github.com/example/repo/actions/runs/1" "$prompt_file"
+  assert_not_contains "prompt avoids CI pass/fail commentary" "Do not re-verify what these checks already cover" "$prompt_file"
+  assert_contains "prompt includes workflow source context" ".github/workflows/ci.yml:" "$prompt_file"
+  assert_contains "prompt includes workflow command" "      - run: npm test" "$prompt_file"
+  assert_contains "prompt includes root package scripts" '"test": "vitest run"' "$prompt_file"
+  assert_contains "prompt includes nested package scripts" '"typecheck": "tsc --noEmit"' "$prompt_file"
   assert_contains "prompt includes previous bot review subject section" "Your Prior Review Subject (Own Output; May Quote Untrusted PR Content)" "$prompt_file"
   assert_contains "prompt normalizes prior changes-requested event" "Previous review event: REQUEST_CHANGES" "$prompt_file"
   assert_contains "prompt includes only prior bot review subject" "## Auth fallback handling" "$prompt_file"
@@ -2016,7 +2034,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=233
+EXPECTED_ASSERTIONS=238
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

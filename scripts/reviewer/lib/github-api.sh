@@ -236,6 +236,6 @@ github_check_runs_summary() {
       , if $count > $limit then
           "Showing first " + ($limit|tostring) + " of " + ($count|tostring) + " check runs; summary intentionally truncated."
         else empty end
-      , ($runs[:$limit][] | [.name, .status, (.conclusion // "-")] | @tsv)
+      , ($runs[:$limit][] | [.name, .status, (.conclusion // "-"), (.html_url // "-")] | @tsv)
     '
 }
