@@ -3,7 +3,12 @@ name: Template cleanup
 # Runs once on the first push to `main` of any repo created from this template
 # via "Use this template" on GitHub. Rewrites hardcoded references to the
 # upstream `asavs/goobreview` repo so committed docs, scripts,
-# manifests, workflows, and examples all point at the new repo.
+# manifests, and examples all point at the new repo.
+#
+# Workflow files under .github/workflows/ are excluded: GITHUB_TOKEN cannot
+# push to workflow files, so those references stay unreplaced. The skip guard
+# below and the linux-validation coverage check both work correctly unreplaced
+# in forks (the guard evaluates against the fork's actual repo name).
 #
 # Becomes a no-op after the first run (no remaining matches → no commit).
 # The job is also skipped on the upstream template repo itself.
@@ -27,7 +32,7 @@ jobs:
           NEW_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          mapfile -t files < <(git grep -l 'asavs/goobreview' -- . || true)
+          mapfile -t files < <(git grep -l 'asavs/goobreview' -- . ':!.github/workflows/' || true)
           if [ ${#files[@]} -eq 0 ]; then
             echo "Nothing to personalize."
             exit 0
