@@ -216,7 +216,7 @@ recommendation="Run scripts/dry-run.sh and inspect the generated artifact before
 if [ "$state_present" -ne 1 ]; then
   recommendation="Run scripts/configure.sh and scripts/dry-run.sh to create runtime state."
 elif [ -z "$latest_launch_metadata_path" ]; then
-  recommendation="Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh and inspect the generated artifact before enabling cron."
+  recommendation="Run scripts/dry-run.sh and inspect the generated artifact before enabling cron."
 elif [ "$cron_state" = "true" ]; then
   recommendation="Scheduler appears installed; inspect logs under $state_dir."
 else

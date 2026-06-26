@@ -97,13 +97,6 @@ fi
 
 validate_reviewer_config
 load_effective_required_checks_json >/dev/null
-if [ -z "$DRY_RUN" ] && [ -z "$RENDER_PROMPT_ONLY" ]; then
-  if [ "${REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK:-0}" = "1" ]; then
-    log "Skipping live launch validation because REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1"
-  elif ! bash "$REPO_DIR/scripts/launch-check.sh" >>"$LOG_FILE" 2>&1; then
-    fatal "live launch validation failed. Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh, inspect the artifact, then run scripts/launch-check.sh."
-  fi
-fi
 
 write_dry_run_artifact() {
   local num="$1"

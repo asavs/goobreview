@@ -212,8 +212,20 @@ else
 fi
 
 required_checks_ready=0
+required_checks_valid=0
+required_checks_count=""
+review_trigger="unknown"
 if [ -f "$required_checks" ]; then
   required_checks_ready=1
+  if jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' "$required_checks" >/dev/null 2>&1; then
+    required_checks_valid=1
+    required_checks_count="$(jq 'length' "$required_checks")"
+    if [ "$required_checks_count" -eq 0 ]; then
+      review_trigger="every ready PR head"
+    else
+      review_trigger="every ready PR head after required checks pass"
+    fi
+  fi
 fi
 
 agy_auth=0
@@ -236,6 +248,8 @@ elif [ "$personality_ready" -ne 1 ]; then
   recommendation="Select REVIEWER_POSTED_PERSONALITY=none or linus with scripts/configure.sh."
 elif [ "$required_checks_ready" -ne 1 ]; then
   recommendation="Run scripts/configure.sh to create required-checks.json."
+elif [ "$required_checks_valid" -ne 1 ]; then
+  recommendation="Fix required-checks.json; expected a JSON array of nonempty strings."
 elif [ "$agy_auth" -ne 1 ]; then
   recommendation="Run agy once on the VM and complete Google sign-in."
 fi
@@ -256,6 +270,9 @@ if [ "$report" -eq 1 ]; then
   print_field "personality_file" "$personality_file"
   print_field "personality_file_present" "$(bool "$personality_ready")"
   print_field "required_checks_present" "$(bool "$required_checks_ready")"
+  print_field "required_checks_valid" "$(bool "$required_checks_valid")"
+  print_field "required_checks_count" "$required_checks_count"
+  print_field "review_trigger" "$review_trigger"
   print_field "reviewer_state" "$state_dir"
   print_field "agy_auth_present" "$(bool "$agy_auth")"
   print_field "recommendation" "$recommendation"
@@ -276,6 +293,8 @@ posted personality:     $posted_personality
 research consent:       $(bool "$research_consent")
 personality valid:      $(bool "$personality_ready")${personality_file:+ ($personality_file)}
 required checks file:   $(bool "$required_checks_ready") ($required_checks)
+required checks valid:  $(bool "$required_checks_valid")${required_checks_count:+ ($required_checks_count)}
+review trigger:         $review_trigger
 Antigravity auth dir:   $(bool "$agy_auth") ($HOME/.gemini/antigravity-cli)
 
 Next: $recommendation

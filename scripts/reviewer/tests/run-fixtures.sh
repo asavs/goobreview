@@ -1480,7 +1480,6 @@ EOF
   env_file="$TMP_ROOT/re-request.env"
   cat > "$env_file" <<EOF
 REVIEWER_REPO=example/repo
-REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1
 REVIEWER_STATE=$state_dir
 REVIEWER_RUNTIME_STATE=$runtime_dir
 REVIEWER_APP_ID=1
@@ -1746,7 +1745,6 @@ EOF
   env_file="$TMP_ROOT/failure-cap.env"
   cat > "$env_file" <<EOF
 REVIEWER_REPO=example/repo
-REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1
 REVIEWER_STATE=$state_dir
 REVIEWER_RUNTIME_STATE=$runtime_dir
 REVIEWER_APP_ID=1
@@ -1918,7 +1916,6 @@ EOF
   env_file="$TMP_ROOT/research.env"
   cat > "$env_file" <<EOF
 REVIEWER_REPO=example/repo
-REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1
 REVIEWER_STATE=$state_dir
 REVIEWER_RUNTIME_STATE=$runtime_dir
 REVIEWER_CONFIG_DIR=$config_dir

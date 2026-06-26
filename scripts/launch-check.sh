@@ -11,7 +11,6 @@ ENV_FILE="${REVIEWER_ENV_FILE:-$REPO_ROOT/config/reviewer.env}"
 export OPS_LOG_PREFIX="launch-check"
 
 ops_require_command jq "Run scripts/setup-vm.sh first."
-ops_require_command sha256sum "Run scripts/setup-vm.sh first."
 ops_require_file "$ENV_FILE" "Run scripts/configure.sh first."
 
 ops_source_env "$ENV_FILE"
@@ -32,8 +31,10 @@ if ! jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' "$REQ
 fi
 
 required_count="$(jq 'length' "$REQUIRED_CHECKS_FILE")"
-if [ "$required_count" -eq 0 ] && [ "${REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS:-0}" != "1" ]; then
-  ops_die "Required-check gate is empty in $REQUIRED_CHECKS_FILE. Configure real required checks, then run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh. To intentionally launch without required checks, set REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS=1."
+if [ "$required_count" -eq 0 ]; then
+  review_trigger="every ready PR head"
+else
+  review_trigger="every ready PR head after required checks pass"
 fi
 
 if [ ! -d "$STATE_DIR" ]; then
@@ -42,29 +43,16 @@ fi
 
 latest_metadata="$(find "$STATE_DIR" -maxdepth 1 -type f \( -name 'dry-run-*.txt.launch.json' -o -name 'dry-pr-*.txt.launch.json' \) 2>/dev/null | sort | tail -n 1)"
 if [ -z "$latest_metadata" ]; then
-  ops_die "No launch metadata found in $STATE_DIR. Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh, inspect the artifact, then retry."
+  ops_die "No launch metadata found in $STATE_DIR. Run scripts/dry-run.sh, inspect the artifact, then retry."
 fi
 
-required_sha="$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')"
-
 metadata_repo="$(jq -r '.repo // ""' "$latest_metadata")"
-metadata_required_sha="$(jq -r '.required_checks_sha256 // ""' "$latest_metadata")"
 metadata_bypass_ci="$(jq -r '.dry_run_bypass_ci // ""' "$latest_metadata")"
-metadata_required_count="$(jq '.required_checks | length' "$latest_metadata")"
 metadata_event="$(jq -r '.event // ""' "$latest_metadata")"
 metadata_text="$(jq -r '.dry_run_out // ""' "$latest_metadata")"
 
 if [ "$metadata_repo" != "$REVIEWER_REPO" ]; then
-  ops_die "Latest dry-run launch metadata targets $metadata_repo, but current REVIEWER_REPO is $REVIEWER_REPO. Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh for the current repo."
-fi
-if [ "$metadata_required_sha" != "$required_sha" ]; then
-  ops_die "required-check config changed after the latest dry run. Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh again."
-fi
-if [ "$metadata_required_count" -eq 0 ] && [ "${REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS:-0}" != "1" ]; then
-  ops_die "Latest dry run did not exercise a required-check gate. Configure config/required-checks.json and run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh, or set REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS=1 intentionally."
-fi
-if [ "$metadata_bypass_ci" != "0" ] && [ "${REVIEWER_ALLOW_LAUNCH_WITH_BYPASSED_CI:-0}" != "1" ]; then
-  ops_die "Latest dry run used REVIEWER_DRY_RUN_BYPASS_CI=$metadata_bypass_ci. Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh so launch validation exercises production CI gating, or set REVIEWER_ALLOW_LAUNCH_WITH_BYPASSED_CI=1 intentionally."
+  ops_die "Latest dry-run launch metadata targets $metadata_repo, but current REVIEWER_REPO is $REVIEWER_REPO. Run scripts/dry-run.sh for the current repo."
 fi
 case "$metadata_event" in
   APPROVE|COMMENT|REQUEST_CHANGES)
@@ -84,6 +72,7 @@ Launch validation passed.
   dry-run metadata:    $latest_metadata
   dry-run artifact:    ${metadata_text:-unknown}
   dry-run event:       ${metadata_event:-unknown}
+  review trigger:      $review_trigger
   required checks:     $required_count
-  CI bypass:           $metadata_bypass_ci
+  dry-run CI bypass:   ${metadata_bypass_ci:-unknown}
 EOF

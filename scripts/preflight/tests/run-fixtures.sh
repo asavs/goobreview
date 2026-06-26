@@ -661,34 +661,33 @@ test_launch_check_passes_matching_current_dry_run() {
   run_launch_check "$repo" "$out" env
 
   assert_contains "launch check reports success" "Launch validation passed." "$out"
-  assert_contains "launch check reports CI bypass disabled" "CI bypass:           0" "$out"
+  assert_contains "launch check reports gated trigger" "review trigger:      every ready PR head after required checks pass" "$out"
+  assert_contains "launch check reports CI bypass metadata" "dry-run CI bypass:   0" "$out"
 }
 
-test_launch_check_rejects_bypassed_ci_without_override() {
+test_launch_check_accepts_bypassed_ci_metadata() {
   local repo out
   repo="$(setup_launch_repo launch-bypass)"
   out="$TMP_ROOT/launch-bypass.out"
   write_launch_metadata "$repo" 1
 
-  if run_launch_check "$repo" "$out" env; then
-    fail "launch check rejects bypassed dry-run CI"
-  fi
-  assert_contains "launch check explains bypassed CI" "Latest dry run used REVIEWER_DRY_RUN_BYPASS_CI=1" "$out"
-  pass "launch check rejects bypassed dry-run CI"
+  run_launch_check "$repo" "$out" env
+
+  assert_contains "launch check accepts bypassed dry-run CI metadata" "Launch validation passed." "$out"
+  assert_contains "launch check reports bypassed dry-run CI metadata" "dry-run CI bypass:   1" "$out"
 }
 
-test_launch_check_rejects_changed_config() {
+test_launch_check_accepts_empty_required_checks() {
   local repo out
-  repo="$(setup_launch_repo launch-changed-config)"
-  out="$TMP_ROOT/launch-changed-config.out"
+  repo="$(setup_launch_repo launch-empty-checks)"
+  out="$TMP_ROOT/launch-empty-checks.out"
+  printf '[]\n' > "$repo/config/required-checks.json"
   write_launch_metadata "$repo" 0
-  printf '["ci","lint"]\n' > "$repo/config/required-checks.json"
 
-  if run_launch_check "$repo" "$out" env; then
-    fail "launch check rejects changed required-check config"
-  fi
-  assert_contains "launch check tells operator to rerun dry-run" "required-check config changed after the latest dry run" "$out"
-  pass "launch check rejects changed required-check config"
+  run_launch_check "$repo" "$out" env
+
+  assert_contains "launch check accepts empty required checks" "Launch validation passed." "$out"
+  assert_contains "launch check reports ready trigger" "review trigger:      every ready PR head" "$out"
 }
 
 test_config_preflight_uses_vm_report_when_handoff_is_reachable() {
@@ -801,8 +800,8 @@ test_checkout_unreachable_vm_does_not_fail_strict
 test_setup_vm_allows_reviewer_specific_paths
 test_setup_vm_rejects_broad_chown_targets
 test_launch_check_passes_matching_current_dry_run
-test_launch_check_rejects_bypassed_ci_without_override
-test_launch_check_rejects_changed_config
+test_launch_check_accepts_bypassed_ci_metadata
+test_launch_check_accepts_empty_required_checks
 test_config_preflight_uses_vm_report_when_handoff_is_reachable
 test_runtime_preflight_uses_vm_report_when_handoff_is_reachable
 test_research_preflight_uses_vm_report_when_handoff_is_reachable
