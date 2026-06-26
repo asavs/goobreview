@@ -40,21 +40,26 @@ set_agy_quota_backoff() {
   log "Antigravity quota exhausted; backing off until $(format_epoch_utc "$until")"
 }
 
-# agy loads context files (global GEMINI.md / AGENTS.md) from the operator's
-# home directory regardless of working directory, merging them into every
-# review as trusted instructions outside the daemon-supplied AGENTS.md and the
-# PR-head snapshot. That is a standing prompt-injection surface (security issue
-# #106): anyone who can write the reviewer account's home directory steers
-# verdicts without touching a PR. List any such files so callers can warn;
-# removing them restores the snapshot as agy's sole project context.
+# agy loads context files from the operator's home directory regardless of
+# working directory, merging them into every review as trusted instructions
+# outside the daemon-supplied AGENTS.md and the PR-head snapshot. That is a
+# standing prompt-injection surface (security issue #106): anyone who can write
+# the reviewer account's home directory steers verdicts without touching a PR.
+# List any such files so callers can warn; removing them restores the snapshot
+# as agy's sole project context.
+#
+# The paths below are the auto-load surface confirmed by live VM testing
+# (agy 1.0.10): the global ~/.gemini/ config dir loads both GEMINI.md and
+# AGENTS.md, and the home root loads GEMINI.md. Notably ~/AGENTS.md (home root)
+# is NOT loaded, so it is deliberately excluded -- warning on a non-vector would
+# be a false positive. Re-test and extend if agy's loading behavior changes.
 home_agy_context_files() {
   local home="${HOME:-}" candidate
   [ -n "$home" ] || return 0
   for candidate in \
     "$home/.gemini/GEMINI.md" \
     "$home/GEMINI.md" \
-    "$home/.gemini/AGENTS.md" \
-    "$home/AGENTS.md"; do
+    "$home/.gemini/AGENTS.md"; do
     if [ -e "$candidate" ]; then
       printf '%s\n' "$candidate"
     fi
