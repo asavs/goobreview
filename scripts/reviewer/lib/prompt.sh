@@ -22,6 +22,7 @@ write_agents_md() {
   local output_file="$2"
   local ci_state="${3:-}"
   local head_sha="${4:-}"
+  local worktree_dir="${5:-}"
   local output_dir tmp status
 
   [ -n "$personality_file" ] && [ -f "$personality_file" ] || return 1
@@ -38,6 +39,7 @@ write_agents_md() {
       append_reviewer_contract &&
       append_ci_status "$ci_state" "$head_sha" &&
       append_response_format &&
+      append_source_snapshot_hint "$worktree_dir" &&
       append_trust_boundary
   } >"$tmp" || status=1
 
@@ -549,9 +551,6 @@ build_review_prompt() {
   fi
   if [ "$status" -eq 0 ]; then
     append_ci_coverage_context "$worktree_dir" >>"$output_prompt_file" || status=1
-  fi
-  if [ "$status" -eq 0 ]; then
-    append_source_snapshot_hint "$worktree_dir" >>"$output_prompt_file" || status=1
   fi
   if [ "$status" -eq 0 ]; then
     append_diff "$changed_files_json" "$expected_changed_files" "$worktree_dir" >>"$output_prompt_file" || status=1
