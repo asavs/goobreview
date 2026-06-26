@@ -67,6 +67,17 @@ home_agy_context_files() {
   return 0
 }
 
+# Fail-closed gate for issue #106. When REVIEWER_REFUSE_ON_HOME_CONTEXT=1 the
+# daemon declines to review at all while home-dir context files are present,
+# rather than running agy with operator/co-tenant content merged in as trusted
+# instructions. Off by default (the warning is the baseline); intended for
+# shared or multi-tenant VMs where the home dir is not solely operator-owned.
+should_refuse_for_home_context() {
+  [ "${REFUSE_ON_HOME_CONTEXT:-0}" = "1" ] || return 1
+  [ -n "$(home_agy_context_files)" ] || return 1
+  return 0
+}
+
 warn_home_agy_context_files() {
   local files file
   files=$(home_agy_context_files)
