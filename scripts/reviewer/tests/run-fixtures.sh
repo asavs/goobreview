@@ -1358,6 +1358,13 @@ test_agy_warns_on_home_context_files() {
   assert_contains "issue-106 lists home-level GEMINI.md" "$home/GEMINI.md" <(home_agy_context_files)
   assert_contains "issue-106 lists global gemini GEMINI.md" "$home/.gemini/GEMINI.md" <(home_agy_context_files)
 
+  # ~/.gemini/AGENTS.md is a confirmed auto-load vector; ~/AGENTS.md (home root)
+  # is NOT loaded by agy, so flagging it would be a false positive.
+  printf 'Override.\n' > "$home/.gemini/AGENTS.md"
+  printf 'Override.\n' > "$home/AGENTS.md"
+  assert_contains "issue-106 lists global gemini AGENTS.md" "$home/.gemini/AGENTS.md" <(home_agy_context_files)
+  assert_not_contains "issue-106 excludes non-vector home-root AGENTS.md" "$home/AGENTS.md" <(home_agy_context_files)
+
   warn_home_agy_context_files
   assert_contains "issue-106 warning names the offending file" "$home/GEMINI.md" "$warn_log"
   assert_contains "issue-106 warning cites the security issue" "security issue #106" "$warn_log"
@@ -2079,7 +2086,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=275
+EXPECTED_ASSERTIONS=277
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
