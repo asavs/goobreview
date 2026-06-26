@@ -112,7 +112,7 @@ write_dry_run_artifact() {
   local output_file="$DRY_RUN_OUT"
   local required_checks_sha256 inline_comment_count
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
-  local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks agents_md_tmp agents_md_bytes agents_md_sha
+  local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks agents_md_tmp agents_md_bytes agents_md_sha home_agy_context
 
   [ -n "$output_file" ] || return 0
 
@@ -144,6 +144,8 @@ write_dry_run_artifact() {
     snapshot_files=0
     snapshot_symlinks=0
   fi
+  home_agy_context=$(home_agy_context_files | paste -sd ',' -)
+  [ -n "$home_agy_context" ] || home_agy_context="none"
   {
     printf 'GoobReview dry run\n'
     printf 'Repository: %s\n' "$REPO"
@@ -162,6 +164,7 @@ write_dry_run_artifact() {
     printf 'Antigravity CLI path: %s\n' "$agy_path"
     printf 'Antigravity CLI version probe: %s\n' "$agy_version"
     printf 'Runtime cwd: %s\n' "$runtime_dir"
+    printf 'Home-directory agy context files (auto-loaded; security issue #106): %s\n' "$home_agy_context"
     printf 'PR-head snapshot path: %s\n' "${worktree_dir:-unavailable}"
     printf 'PR-head snapshot regular files: %s\n' "$snapshot_files"
     printf 'PR-head snapshot symlinks: %s\n' "$snapshot_symlinks"
@@ -503,6 +506,12 @@ if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$IGNORE_AGY_BACKOFF" ]; then
     log "Antigravity quota backoff active for ${remaining}s"
     exit 0
   fi
+fi
+
+# agy will run this tick; flag any home-directory context files it would
+# auto-load as trusted instructions outside the daemon's prompt (issue #106).
+if [ -z "$RENDER_PROMPT_ONLY" ]; then
+  warn_home_agy_context_files
 fi
 
 GH_TOKEN=$("$SCRIPT_DIR/get-installation-token.sh" token 2>>"$LOG_FILE") || fatal "failed to mint installation token"

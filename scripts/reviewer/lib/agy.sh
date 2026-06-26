@@ -40,6 +40,41 @@ set_agy_quota_backoff() {
   log "Antigravity quota exhausted; backing off until $(format_epoch_utc "$until")"
 }
 
+# agy loads context files (global GEMINI.md / AGENTS.md) from the operator's
+# home directory regardless of working directory, merging them into every
+# review as trusted instructions outside the daemon-supplied AGENTS.md and the
+# PR-head snapshot. That is a standing prompt-injection surface (security issue
+# #106): anyone who can write the reviewer account's home directory steers
+# verdicts without touching a PR. List any such files so callers can warn;
+# removing them restores the snapshot as agy's sole project context.
+home_agy_context_files() {
+  local home="${HOME:-}" candidate
+  [ -n "$home" ] || return 0
+  for candidate in \
+    "$home/.gemini/GEMINI.md" \
+    "$home/GEMINI.md" \
+    "$home/.gemini/AGENTS.md" \
+    "$home/AGENTS.md"; do
+    if [ -e "$candidate" ]; then
+      printf '%s\n' "$candidate"
+    fi
+  done
+  return 0
+}
+
+warn_home_agy_context_files() {
+  local files file
+  files=$(home_agy_context_files)
+  [ -n "$files" ] || return 0
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    log "WARNING: home-directory agy context file will be auto-loaded as trusted instructions for every review: $file (security issue #106; agy context is no longer limited to the daemon AGENTS.md and PR-head snapshot -- remove it unless intentional)"
+  done <<EOF
+$files
+EOF
+  return 0
+}
+
 run_agy_review() {
   local prompt_file="$1" err_file="$2" worktree_dir="$3" personality_file="${4:-${PERSONALITY_FILE:-}}"
   local ci_state="${5:-}"
