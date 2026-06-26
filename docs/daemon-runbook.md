@@ -62,7 +62,8 @@ For a numbered PR, the dry run writes
 `$REVIEWER_STATE/dry-pr-123.txt`. The artifact includes:
 
 - run metadata, including the parsed event, resolved inline-review comments that would be submitted, and any explicitly selected bot-owned threads that would be auto-resolved if enabled;
-- a sanitized agy execution context: command shape, model, timeout, runtime cwd, PR-head snapshot path/counts, prompt/response hashes, stderr hash, and a note that agy's injected system prompt and tool definitions are not observable from GoobReview;
+- a sanitized agy execution context: command shape, model, timeout, runtime cwd, PR-head snapshot path/counts, runtime `AGENTS.md`/prompt/response hashes, stderr hash, and a note that agy's injected system prompt and tool definitions are not observable from GoobReview;
+- the daemon-generated runtime `AGENTS.md` containing trusted reviewer instructions and GitHub API facts;
 - the exact Gemini prompt payload;
 - Gemini stderr;
 - Gemini's full response, or stderr as the response body if Gemini failed.
@@ -200,7 +201,7 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
 6. Counts the PR against `REVIEWER_MAX_ATTEMPTS`, then applies the required-check gate.
 7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current` and neutralizes any symlinks into metadata stubs before prompt assembly or Gemini access.
-8. Builds the prompt with trusted material first: the configured posted style (`REVIEWER_POSTED_PERSONALITY=none` uses `control.md`; `linus` uses `linus.md`), a shared evidence-first reviewer contract, GitHub check-run rows with run URLs, and the GitHub review formatting rule. A single trust boundary then separates untrusted PR material: compact PR orientation (title, base branch, and head branch; author and PR body blinded by default), commit subjects, the subject of the prior bot review on the same PR (not its full body), unresolved bot-created inline review threads from GitHub's durable thread state, workflow files and package scripts from the PR-head snapshot, the snapshot mount path with a pointer at the repo's own `AGENTS.md`/`CONTRIBUTING.md`/`GUIDELINES.md` conventions, and the per-file diff with changed-file index and whole-file omission markers (lockfiles plus the repo's `.gitattributes` `linguist-generated` patterns). Composition is fixed in `scripts/reviewer/lib/prompt.sh`; posted style, research consent, blinding policy, and budgets come from `reviewer.env`.
+8. Writes trusted material to the isolated agy runtime `AGENTS.md`: the configured posted style (`REVIEWER_POSTED_PERSONALITY=none` uses `control.md`; `linus` uses `linus.md`), a shared evidence-first reviewer contract, GitHub check-run rows with run URLs, the GitHub review formatting rule, and the trust boundary. The `--print` prompt then carries untrusted PR material: compact PR orientation (title, base branch, and head branch; author and PR body blinded by default), commit subjects, the subject of the prior bot review on the same PR (not its full body), unresolved bot-created inline review threads from GitHub's durable thread state, workflow files and package scripts from the PR-head snapshot, the snapshot mount path with a pointer at the repo's own `AGENTS.md`/`CONTRIBUTING.md`/`GUIDELINES.md` conventions, and the per-file diff with changed-file index and whole-file omission markers (lockfiles plus the repo's `.gitattributes` `linguist-generated` patterns). Composition is fixed in `scripts/reviewer/lib/prompt.sh`; posted style, research consent, blinding policy, and budgets come from `reviewer.env`.
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Re-reads the PR head and unresolved bot-created review threads, then atomically posts the GitHub review event, summary, and any verified inline comments through the GitHub REST API. There is no line-matching dedup: the reviewer is shown its open threads by handle and asked to address each one explicitly, so a re-raised finding at most produces a visible duplicate thread rather than silently swallowing a genuine new finding.
@@ -296,7 +297,7 @@ REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
 scripts/launch-check.sh
 ```
 
-The first command writes the normal dry-run artifact and a sibling `.launch.json` file. The second confirms that the launch metadata still matches the current target repo and required-check config.
+The first command writes the normal dry-run artifact and a sibling `.launch.json` file with runtime `AGENTS.md`, prompt, response, and stderr hashes. The second confirms that the launch metadata still matches the current target repo and required-check config.
 
 Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim. Operators choose the posted style with `REVIEWER_POSTED_PERSONALITY=none|linus`; the legacy `REVIEWER_PERSONALITY_FILE` path remains as an escape hatch for old configs when `REVIEWER_POSTED_PERSONALITY` is unset. To try Linus in a dry run without editing config:
 

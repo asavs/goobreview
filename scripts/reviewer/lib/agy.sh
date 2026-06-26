@@ -41,7 +41,9 @@ set_agy_quota_backoff() {
 }
 
 run_agy_review() {
-  local prompt_file="$1" err_file="$2" worktree_dir="$3"
+  local prompt_file="$1" err_file="$2" worktree_dir="$3" personality_file="${4:-${PERSONALITY_FILE:-}}"
+  local ci_state="${5:-}"
+  local head_sha="${6:-}"
   local runtime_dir prompt
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
@@ -52,6 +54,11 @@ run_agy_review() {
 
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   mkdir -p "$runtime_dir"
+  rm -f "$runtime_dir/AGENTS.md"
+  if ! write_agents_md "$personality_file" "$runtime_dir/AGENTS.md" "$ci_state" "$head_sha"; then
+    printf 'Failed to write trusted runtime AGENTS.md; refusing agy invocation.\n' >"$err_file"
+    return 1
+  fi
   prompt=$(cat "$prompt_file")
 
   (
