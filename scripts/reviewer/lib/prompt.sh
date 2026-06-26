@@ -20,13 +20,35 @@ append_trust_boundary() {
 write_agents_md() {
   local personality_file="$1"
   local output_file="$2"
+  local ci_state="${3:-}"
+  local head_sha="${4:-}"
+  local output_dir tmp status
 
+  [ -n "$personality_file" ] && [ -f "$personality_file" ] || return 1
+  [ -n "$output_file" ] || return 1
+  [ -n "$ci_state" ] || return 1
+  [ -n "$head_sha" ] || return 1
+
+  output_dir=$(dirname "$output_file")
+  mkdir -p "$output_dir" || return 1
+  tmp=$(mktemp "$output_dir/AGENTS.md.XXXXXX") || return 1
+  status=0
   {
-    cat "$personality_file"
-    append_reviewer_contract
-    append_response_format
-    append_trust_boundary
-  } >"$output_file"
+    cat "$personality_file" &&
+      append_reviewer_contract &&
+      append_ci_status "$ci_state" "$head_sha" &&
+      append_response_format &&
+      append_trust_boundary
+  } >"$tmp" || status=1
+
+  if [ "$status" -eq 0 ]; then
+    mv "$tmp" "$output_file" || status=1
+  fi
+  if [ "$status" -ne 0 ]; then
+    rm -f "$tmp"
+    return 1
+  fi
+  return 0
 }
 
 append_truncation_marker() {
@@ -510,12 +532,9 @@ build_review_prompt() {
   # The payload composition is fixed: forks that want a different shape edit
   # this function. Deployment policy is limited to the REVIEWER_INCLUDE_*
   # blinding flags and the byte/count budgets in reviewer.env.
-  # Trusted instructions (personality, contract, format, trust boundary) are
-  # written to AGENTS.md by run_agy_review; this file is pure PR data.
+  # Trusted instructions and GitHub API facts are written to AGENTS.md by
+  # run_agy_review; this file is pure PR data.
   : >"$output_prompt_file"
-  if [ "$status" -eq 0 ]; then
-    append_ci_status "$ci_state" "$head_sha" >>"$output_prompt_file" || status=1
-  fi
   if [ "$status" -eq 0 ]; then
     append_pr_metadata "$num" "$pr_metadata_json" >>"$output_prompt_file" || status=1
   fi

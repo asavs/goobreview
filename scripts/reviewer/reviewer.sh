@@ -115,6 +115,7 @@ write_dry_run_artifact() {
   local auto_resolve_threads="${7:-0}"
   local agy_err_file="${8:-}"
   local worktree_dir="${9:-}"
+  local ci_state="${10:-}"
   local output_file="$DRY_RUN_OUT"
   local required_checks_sha256 inline_comment_count
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
@@ -140,9 +141,7 @@ write_dry_run_artifact() {
     stderr_sha=
   fi
   agents_md_tmp=$(mktemp "$STATE_DIR/dry-agents-md.XXXXXX")
-  if [ -n "${PERSONALITY_FILE:-}" ]; then
-    write_agents_md "$PERSONALITY_FILE" "$agents_md_tmp"
-  fi
+  write_agents_md "$PERSONALITY_FILE" "$agents_md_tmp" "$ci_state" "$head_sha" || fatal "failed to render dry-run AGENTS.md artifact"
   agents_md_bytes=$(wc -c <"$agents_md_tmp" | tr -d ' ')
   agents_md_sha=$(sha256sum "$agents_md_tmp" | awk '{print $1}')
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then
@@ -243,6 +242,8 @@ write_dry_run_artifact() {
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
     --arg dry_run_bypass_ci "${DRY_RUN_BYPASS_CI:-}" \
+    --arg agents_md_bytes "$agents_md_bytes" \
+    --arg agents_md_sha256 "$agents_md_sha" \
     --arg prompt_bytes "$prompt_bytes" \
     --arg prompt_sha256 "$prompt_sha" \
     --arg response_bytes "$response_bytes" \
@@ -262,6 +263,8 @@ write_dry_run_artifact() {
       required_checks_file: $required_checks_file,
       required_checks_sha256: $required_checks_sha256,
       dry_run_bypass_ci: $dry_run_bypass_ci,
+      agents_md_bytes: ($agents_md_bytes | tonumber),
+      agents_md_sha256: $agents_md_sha256,
       prompt_bytes: ($prompt_bytes | tonumber),
       prompt_sha256: $prompt_sha256,
       response_bytes: ($response_bytes | tonumber),
@@ -285,13 +288,17 @@ write_research_review_artifact() {
   local event="$7"
   local prompt_file="$8"
   local review_body="$9"
+  local ci_state="${10:-}"
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes agents_md_tmp agents_md_bytes agents_md_sha
 
   mkdir -p "$(dirname "$output_file")"
   chmod 700 "$(dirname "$output_file")" 2>/dev/null || true
   artifact_tmp=$(mktemp "$STATE_DIR/research-artifact.XXXXXX")
   agents_md_tmp=$(mktemp "$STATE_DIR/research-agents-md.XXXXXX")
-  write_agents_md "$personality_file" "$agents_md_tmp"
+  write_agents_md "$personality_file" "$agents_md_tmp" "$ci_state" "$head_sha" || {
+    rm -f "$artifact_tmp" "$agents_md_tmp"
+    return 1
+  }
   agents_md_bytes=$(wc -c <"$agents_md_tmp" | tr -d ' ')
   agents_md_sha=$(sha256sum "$agents_md_tmp" | awk '{print $1}')
   {
@@ -421,13 +428,13 @@ capture_research_pair() {
   posted_personality_file="$PERSONALITY_FILE"
   counterfactual_personality_file="$(research_personality_file_for_arm "$counterfactual_arm")" || return 0
 
-  if ! write_research_review_artifact "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review"; then
+  if ! write_research_review_artifact "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review" "$ci_state"; then
     log "PR #$num@$head_sha: failed to write posted research artifact"
     return 0
   fi
 
   counterfactual_err=$(mktemp "$STATE_DIR/research-agy.$num.err.XXXXXX")
-  if counterfactual_review=$(run_agy_review "$posted_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file"); then
+  if counterfactual_review=$(run_agy_review "$posted_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha"); then
     cat "$counterfactual_err" >>"$LOG_FILE"
     if [ -z "${counterfactual_review// }" ]; then
       counterfactual_event="EMPTY_RESPONSE"
@@ -440,7 +447,7 @@ capture_research_pair() {
     counterfactual_review=$(cat "$counterfactual_err")
   fi
 
-  if ! write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$posted_prompt_file" "$counterfactual_review"; then
+  if ! write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$posted_prompt_file" "$counterfactual_review" "$ci_state"; then
     log "PR #$num@$head_sha: failed to write counterfactual research artifact"
     rm -f "$counterfactual_err"
     return 0
@@ -731,10 +738,10 @@ EOF
   fi
 
   agy_err_tmp=$(mktemp "$STATE_DIR/agy.$num.err.XXXXXX")
-  if ! review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree"); then
+  if ! review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree" "$PERSONALITY_FILE" "$ci_state" "$head_sha"); then
     cat "$agy_err_tmp" >> "$LOG_FILE"
     if [ -n "$DRY_RUN" ]; then
-      write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")" '[]' 0 "$agy_err_tmp" "$review_worktree"
+      write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
     fi
     set_agy_quota_backoff "$agy_err_tmp" || true
     rm -f "$prompt_tmp" "$agy_err_tmp"
@@ -745,7 +752,7 @@ EOF
 
   if [ -z "${review// }" ]; then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$review")
-    write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree"
+    write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
     rm -f "$prompt_tmp" "$agy_err_tmp"
     if [ -z "$DRY_RUN" ]; then
       invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
@@ -764,7 +771,7 @@ EOF
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "INVALID_VERDICT" "$review")
-    write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree"
+    write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
     rm -f "$prompt_tmp" "$agy_err_tmp"
     verdict_line=$(printf '%s' "$review" | awk '
       {
@@ -842,7 +849,7 @@ EOF
   fi
 
   if [ -n "$DRY_RUN" ]; then
-    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads" "$agy_err_tmp" "$review_worktree"
+    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads" "$agy_err_tmp" "$review_worktree" "$ci_state"
     rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
     log "Dry run: would post $event review on PR #$num@$head_sha"
     if [ "$auto_resolve_threads" -gt 0 ]; then
