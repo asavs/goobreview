@@ -48,3 +48,25 @@ vm_remote_dependency_probe() {
     done
   ' 2>/dev/null || true
 }
+
+# Run an existing VM-side preflight sensor in report mode. The Cloud Shell
+# checkout may not have the VM's ignored config/state files, so status sensors
+# can use this to report the VM-side truth without copying secrets back.
+vm_remote_preflight_report() {
+  local vm_name="$1" zone="$2" checkout="$3" env_file="$4" sensor="$5" timeout_seconds="${6:-30}"
+  local quoted_checkout quoted_env
+
+  case "$sensor" in
+    config|research|runtime) ;;
+    *) return 2 ;;
+  esac
+  command -v timeout >/dev/null 2>&1 || return 2
+
+  quoted_checkout="$(ops_shell_quote "$checkout")"
+  quoted_env="$(ops_shell_quote "$env_file")"
+  timeout "$timeout_seconds" gcloud compute ssh "$vm_name" --zone="$zone" --quiet --command="
+    set -eu
+    cd $quoted_checkout
+    REVIEWER_ENV_FILE=$quoted_env bash scripts/preflight/$sensor.sh --report
+  " 2>/dev/null || true
+}

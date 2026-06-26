@@ -1258,6 +1258,8 @@ EOF
 diff --git a/README.md b/README.md
 + Document that GH_TOKEN and GITHUB_TOKEN are unset before Gemini runs.
 + Mention REVIEWER_APP_PRIVATE_KEY_PATH by name without printing its value.
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 EOF
   install_secret_scanned_artifact "$normal_src" "$normal_dst"
   assert_contains "ordinary artifact text is preserved" "GH_TOKEN and GITHUB_TOKEN are unset" "$normal_dst"

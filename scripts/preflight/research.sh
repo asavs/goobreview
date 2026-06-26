@@ -4,9 +4,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+STATE_FILE="$REPO_ROOT/.goobreview-cloud-shell.env"
 ENV_FILE="${REVIEWER_ENV_FILE:-$REPO_ROOT/config/reviewer.env}"
 # shellcheck disable=SC1091
 . "$REPO_ROOT/scripts/lib/ops.sh"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/vm.sh"
 export OPS_LOG_PREFIX="preflight-research"
 
 report=0
@@ -123,6 +126,7 @@ repo_visibility="unknown"
 capture_state="disabled"
 recommendation="Set REVIEWER_RESEARCH_CONSENT=1 to retain paired public-repo research artifacts."
 upload_state="local-only"
+research_scope="local"
 
 if [ -f "$ENV_FILE" ]; then
   env_file_present=1
@@ -133,6 +137,70 @@ if [ -f "$ENV_FILE" ]; then
   [ -z "$posted_personality" ] && posted_personality="none"
   [ -z "$research_consent" ] && research_consent="0"
   [ -z "$state_from_env" ] || state_dir="$state_from_env"
+fi
+
+if [ -f "$STATE_FILE" ] && command -v gcloud >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+  vm_name="${GOOBREVIEW_VM_NAME:-goobreview-1}"
+  zone="${GOOBREVIEW_ZONE:-us-central1-a}"
+  vm_checkout="${GOOBREVIEW_VM_CHECKOUT:-/opt/goobreview/example}"
+  vm_env_path="${GOOBREVIEW_VM_ENV_PATH:-$vm_checkout/config/reviewer.env}"
+  if vm_instance_exists "$vm_name" "$zone" && vm_ssh_reachable "$vm_name" "$zone" 15; then
+    remote_report="$(vm_remote_preflight_report "$vm_name" "$zone" "$vm_checkout" "$vm_env_path" research 45)"
+    if [ -n "$remote_report" ]; then
+      research_scope="vm"
+      ENV_FILE="$(ops_report_value env_file "$remote_report")"
+      env_file_present="$(ops_report_bool_int env_file_present "$remote_report")"
+      repo="$(ops_report_value reviewer_repo "$remote_report")"
+      posted_personality="$(ops_report_value posted_personality "$remote_report")"
+      research_consent="$(ops_report_value research_consent "$remote_report")"
+      repo_visibility="$(ops_report_value repo_visibility "$remote_report")"
+      capture_state="$(ops_report_value research_capture_state "$remote_report")"
+      research_root="$(ops_report_value research_root "$remote_report")"
+      research_root_present="$(ops_report_bool_int research_root_present "$remote_report")"
+      latest_run="$(ops_report_value latest_research_run "$remote_report")"
+      latest_manifest="$(ops_report_value latest_research_manifest "$remote_report")"
+      upload_state="$(ops_report_value research_upload_state "$remote_report")"
+      recommendation="$(ops_report_value recommendation "$remote_report")"
+      if [ "$report" -eq 1 ]; then
+        print_field "research_scope" "$research_scope"
+        print_field "vm_name" "$vm_name"
+        print_field "zone" "$zone"
+        print_field "env_file" "$ENV_FILE"
+        print_field "env_file_present" "$(bool "$env_file_present")"
+        print_field "reviewer_repo" "$repo"
+        print_field "posted_personality" "$posted_personality"
+        print_field "research_consent" "$research_consent"
+        print_field "repo_visibility" "$repo_visibility"
+        print_field "research_capture_state" "$capture_state"
+        print_field "research_root" "$research_root"
+        print_field "research_root_present" "$(bool "$research_root_present")"
+        print_field "latest_research_run" "$latest_run"
+        print_field "latest_research_manifest" "$latest_manifest"
+        print_field "research_upload_state" "$upload_state"
+        print_field "recommendation" "$recommendation"
+        exit 0
+      fi
+      cat <<EOF
+Research artifact preflight
+---------------------------
+research source:         VM ($vm_name/$zone)
+target repo:             ${repo:-unset}
+posted personality:      $posted_personality
+research consent:        $(bool "$research_consent")
+repo visibility:         $repo_visibility
+capture state:           $capture_state
+research root:           $research_root
+latest research run:     ${latest_run:-none}
+latest manifest:         ${latest_manifest:-none}
+artifact upload:         $upload_state (bucket export not implemented yet)
+
+Next: $recommendation
+EOF
+      exit 0
+    fi
+  fi
 fi
 
 research_root="$state_dir/research-runs"
@@ -181,6 +249,7 @@ case "$research_consent" in
 esac
 
 if [ "$report" -eq 1 ]; then
+  print_field "research_scope" "$research_scope"
   print_field "env_file" "$ENV_FILE"
   print_field "env_file_present" "$(bool "$env_file_present")"
   print_field "reviewer_repo" "$repo"
@@ -200,6 +269,7 @@ fi
 cat <<EOF
 Research artifact preflight
 ---------------------------
+research source:         local
 target repo:             ${repo:-unset}
 posted personality:      $posted_personality
 research consent:        $(bool "$research_consent")

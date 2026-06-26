@@ -168,6 +168,25 @@ case "$cmd" in
     esac
     ;;
 
+  compute:instances)
+    case "$fixture" in
+      remote-preflight) echo "goobreview-1" ;;
+      *) exit 2 ;;
+    esac
+    ;;
+
+  compute:ssh)
+    case "$fixture" in
+      remote-preflight)
+        case "$*" in
+          *"--command=true"*|*"--command true"*) ;;
+          *) cat "$REMOTE_PREFLIGHT_REPORT" ;;
+        esac
+        ;;
+      *) exit 2 ;;
+    esac
+    ;;
+
   *)
     echo "unexpected gcloud call: $*" >&2
     exit 2
@@ -322,6 +341,43 @@ run_launch_check() {
   shift 2
 
   (cd "$repo" && "$@" bash scripts/launch-check.sh) > "$out" 2>&1
+}
+
+setup_remote_preflight_repo() {
+  local name="$1" repo
+  repo="$TMP_ROOT/$name"
+
+  mkdir -p "$repo/scripts/preflight" "$repo/scripts/lib"
+  cp "$PREFLIGHT_DIR/config.sh" "$repo/scripts/preflight/config.sh"
+  cp "$PREFLIGHT_DIR/research.sh" "$repo/scripts/preflight/research.sh"
+  cp "$PREFLIGHT_DIR/runtime.sh" "$repo/scripts/preflight/runtime.sh"
+  cp "$PREFLIGHT_DIR/../lib/ops.sh" "$repo/scripts/lib/ops.sh"
+  cp "$PREFLIGHT_DIR/../lib/vm.sh" "$repo/scripts/lib/vm.sh"
+  cat > "$repo/.goobreview-cloud-shell.env" <<'EOF'
+GOOBREVIEW_VM_NAME='goobreview-1'
+GOOBREVIEW_ZONE='us-central1-a'
+GOOBREVIEW_VM_CHECKOUT='/opt/goobreview/example'
+EOF
+
+  printf '%s' "$repo"
+}
+
+run_remote_config_preflight() {
+  local repo="$1" report_file="$2" out="$3"
+  PATH="$FAKE_BIN:$PATH" GCLOUD_FIXTURE=remote-preflight REMOTE_PREFLIGHT_REPORT="$report_file" \
+    bash "$repo/scripts/preflight/config.sh" --report > "$out"
+}
+
+run_remote_runtime_preflight() {
+  local repo="$1" report_file="$2" out="$3"
+  PATH="$FAKE_BIN:$PATH" GCLOUD_FIXTURE=remote-preflight REMOTE_PREFLIGHT_REPORT="$report_file" \
+    bash "$repo/scripts/preflight/runtime.sh" --report > "$out"
+}
+
+run_remote_research_preflight() {
+  local repo="$1" report_file="$2" out="$3"
+  PATH="$FAKE_BIN:$PATH" GCLOUD_FIXTURE=remote-preflight REMOTE_PREFLIGHT_REPORT="$report_file" \
+    bash "$repo/scripts/preflight/research.sh" --report > "$out"
 }
 
 assert_contains() {
@@ -635,6 +691,96 @@ test_launch_check_rejects_changed_config() {
   pass "launch check rejects changed required-check config"
 }
 
+test_config_preflight_uses_vm_report_when_handoff_is_reachable() {
+  local repo remote out
+  repo="$(setup_remote_preflight_repo remote-config)"
+  remote="$TMP_ROOT/remote-config.report"
+  out="$TMP_ROOT/remote-config.out"
+  cat > "$remote" <<'EOF'
+env_file='/opt/goobreview/example/config/reviewer.env'
+env_file_present='true'
+reviewer_repo='owner/repo'
+reviewer_repo_set='true'
+app_id_set='true'
+installation_id_set='true'
+private_key_path='/var/lib/goobreview/example/app-key.pem'
+private_key_present='true'
+private_key_readable='true'
+posted_personality='none'
+research_consent='0'
+personality_file='config/personalities/control.md'
+personality_file_present='true'
+required_checks_present='true'
+reviewer_state='/var/lib/goobreview/example'
+agy_auth_present='true'
+recommendation='Config looks ready for dry-run.'
+EOF
+
+  run_remote_config_preflight "$repo" "$remote" "$out"
+
+  assert_contains "config remote scope is reported" "config_scope='vm'" "$out"
+  assert_contains "config remote env is reported" "env_file='/opt/goobreview/example/config/reviewer.env'" "$out"
+  assert_contains "config remote key state is reported" "private_key_present='true'" "$out"
+}
+
+test_runtime_preflight_uses_vm_report_when_handoff_is_reachable() {
+  local repo remote out
+  repo="$(setup_remote_preflight_repo remote-runtime)"
+  remote="$TMP_ROOT/remote-runtime.report"
+  out="$TMP_ROOT/remote-runtime.out"
+  cat > "$remote" <<'EOF'
+state_dir='/var/lib/goobreview/example'
+state_dir_present='true'
+dry_run_count='1'
+latest_dry_run='/var/lib/goobreview/example/dry-run-1.txt'
+latest_dry_run_mtime='2026-06-25 00:00:00'
+latest_launch_metadata='/var/lib/goobreview/example/dry-run-1.txt.launch.json'
+latest_launch_metadata_mtime='2026-06-25 00:00:01'
+cron_installed='false'
+log_file='/var/lib/goobreview/example/log.txt'
+log_mtime=''
+cron_log='/var/lib/goobreview/example/cron.log'
+cron_log_mtime=''
+sync_log='/var/lib/goobreview/example/sync.log'
+sync_log_mtime=''
+recommendation='Launch metadata exists; run scripts/launch-check.sh, then scripts/enable-cron.sh when ready.'
+EOF
+
+  run_remote_runtime_preflight "$repo" "$remote" "$out"
+
+  assert_contains "runtime remote scope is reported" "runtime_scope='vm'" "$out"
+  assert_contains "runtime remote dry-run count is reported" "dry_run_count='1'" "$out"
+  assert_contains "runtime remote launch metadata is reported" "latest_launch_metadata='/var/lib/goobreview/example/dry-run-1.txt.launch.json'" "$out"
+}
+
+test_research_preflight_uses_vm_report_when_handoff_is_reachable() {
+  local repo remote out
+  repo="$(setup_remote_preflight_repo remote-research)"
+  remote="$TMP_ROOT/remote-research.report"
+  out="$TMP_ROOT/remote-research.out"
+  cat > "$remote" <<'EOF'
+env_file='/opt/goobreview/example/config/reviewer.env'
+env_file_present='true'
+reviewer_repo='owner/repo'
+posted_personality='none'
+research_consent='1'
+repo_visibility='public'
+research_capture_state='enabled'
+research_root='/var/lib/goobreview/example/research-runs'
+research_root_present='true'
+latest_research_run='/var/lib/goobreview/example/research-runs/control/pr-1'
+latest_research_manifest='/var/lib/goobreview/example/research-runs/control/pr-1/manifest.json'
+research_upload_state='local-only'
+recommendation='Research capture is enabled for public live reviews. Artifacts remain local in v1.'
+EOF
+
+  run_remote_research_preflight "$repo" "$remote" "$out"
+
+  assert_contains "research remote scope is reported" "research_scope='vm'" "$out"
+  assert_contains "research remote capture state is reported" "research_capture_state='enabled'" "$out"
+  assert_contains "research remote manifest is reported" "latest_research_manifest='/var/lib/goobreview/example/research-runs/control/pr-1/manifest.json'" "$out"
+}
+
 test_unauthenticated_gcloud_stops_before_project_inference
 test_no_active_project_lists_billing_ready_projects
 test_no_active_project_infers_billing_account_from_projects
@@ -657,5 +803,8 @@ test_setup_vm_rejects_broad_chown_targets
 test_launch_check_passes_matching_current_dry_run
 test_launch_check_rejects_bypassed_ci_without_override
 test_launch_check_rejects_changed_config
+test_config_preflight_uses_vm_report_when_handoff_is_reachable
+test_runtime_preflight_uses_vm_report_when_handoff_is_reachable
+test_research_preflight_uses_vm_report_when_handoff_is_reachable
 
 printf 'passed %s preflight fixture assertions\n' "$pass_count"
