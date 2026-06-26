@@ -74,7 +74,13 @@ For a specific PR, the artifact is written to:
 $REVIEWER_STATE/dry-pr-123.txt
 ```
 
-Dry runs can target draft PRs and previously reviewed PR heads. They also bypass the required-CI gate by default so you can test prompt behavior before CI has finished. Each successful dry run writes a sibling `.launch.json` metadata file that records the target repo, required-check list, runtime `AGENTS.md`/prompt/response/stderr hashes, and whether CI was bypassed.
+Dry runs can target draft PRs and previously reviewed PR heads. They also bypass the required-CI gate by default so you can test prompt behavior before CI has finished. Before launching live scheduling, run at least one dry run with production CI gating enabled:
+
+```bash
+REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
+```
+
+Each successful dry run writes a sibling `.launch.json` metadata file that records the target repo, config hashes, required-check list, runtime `AGENTS.md`/prompt/response/stderr hashes, and whether CI was bypassed.
 
 To preview exactly what `agy` would receive without calling it:
 
