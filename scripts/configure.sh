@@ -28,6 +28,52 @@ maybe_edit() {
   fi
 }
 
+choose_review_trigger() {
+  local required_checks_file="$CONFIG_DIR/required-checks.json"
+  local default_idx=0 pick existing_count
+
+  if [ -f "$required_checks_file" ]; then
+    existing_count="$(jq 'length' "$required_checks_file" 2>/dev/null || printf '')"
+    if [ "$existing_count" = "0" ]; then
+      default_idx=1
+    fi
+  fi
+
+  log "When should GoobReview call the reviewer for a PR head?"
+  log "  0) [$( [ "$default_idx" -eq 0 ] && printf '*' || printf ' ' )] after CI passes - wait for listed GitHub checks before calling agy"
+  log "  1) [$( [ "$default_idx" -eq 1 ] && printf '*' || printf ' ' )] each ready head - call agy on every non-draft PR head without waiting for CI"
+  pick="$(ask 'Pick review timing by number' "$default_idx")"
+  case "$pick" in
+    1) REVIEW_TRIGGER="when-ready" ;;
+    *) REVIEW_TRIGGER="after-ci" ;;
+  esac
+}
+
+apply_review_trigger() {
+  local trigger="$1" required_checks_file="$CONFIG_DIR/required-checks.json"
+
+  case "$trigger" in
+    when-ready)
+      printf '[]\n' > "$required_checks_file"
+      log "Configured review timing: every ready PR head (required-check gate disabled)."
+      ;;
+    after-ci)
+      log "Configured review timing: after listed CI checks pass."
+      maybe_edit "$required_checks_file"
+      if jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' "$required_checks_file" >/dev/null; then
+        if [ "$(jq 'length' "$required_checks_file")" -eq 0 ]; then
+          ops_warn "required-checks.json is empty, so live reviews will run on every ready PR head until check names are added."
+        fi
+      else
+        ops_die "Invalid required-check config in $required_checks_file; expected a JSON array of nonempty strings."
+      fi
+      ;;
+    *)
+      ops_die "Unknown review trigger: $trigger"
+      ;;
+  esac
+}
+
 discover_repo_from_app() {
   local discovered repo_from_app installation_from_app
 
@@ -191,6 +237,9 @@ else
   research_consent=0
 fi
 
+REVIEW_TRIGGER=""
+choose_review_trigger
+
 inner_args=(
   --env-file "$ENV_FILE"
   --repo "$repo"
@@ -208,11 +257,11 @@ fi
 
 bash "$INNER_SH" "${inner_args[@]}"
 
+apply_review_trigger "$REVIEW_TRIGGER"
+
 if confirm "Open reviewer.env in $EDITOR_CMD to review other settings?"; then
   "$EDITOR_CMD" "$ENV_FILE"
 fi
-
-maybe_edit "$CONFIG_DIR/required-checks.json"
 
 log "Done. Next steps:"
 cat <<EOF

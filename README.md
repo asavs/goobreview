@@ -2,13 +2,13 @@
 
 A free end-to-end pull request reviewer powered by seldom utilized Google & GitHub resources.
 
-GoobReview provisions a small VM into a durable reviewer-identity daemon that waits for CI, reviews PRs and posts `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews.
+GoobReview provisions a small VM into a durable reviewer-identity daemon that reviews each ready PR head after configured CI passes, or immediately when you choose fast feedback, and posts `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` reviews.
 
 ## What It Does
 
 - Polls open, non-draft pull requests.
 - Skips PRs authored by the authenticated reviewer account.
-- Gates reviews on configured GitHub check-run names.
+- Gates reviews on configured GitHub check-run names, or reviews every ready PR head without waiting for CI when `config/required-checks.json` is `[]`.
 - Sends a fixed, GitHub-native prompt to Antigravity CLI (`agy`): personality, compact PR metadata with the author's description as claims to verify, commit subjects, check-run results, previous bot review, per-file diff with a changed-file index, and output format. The author username is blinded by default; blinding policy is set in `reviewer.env`.
 - Runs `agy` from a daemon-owned runtime directory with the cached PR-head source snapshot attached as read-only context.
 - Can render the exact `agy` prompt text for a PR without posting or calling `agy`.
@@ -41,7 +41,7 @@ Three ways to shape what your reviewer does, in order of impact:
 1. **`REVIEWER_POSTED_PERSONALITY` in `config/reviewer.env`** - which style is posted to GitHub: `none` uses `config/personalities/control.md`, and `linus` uses `config/personalities/linus.md`.
 2. **`REVIEWER_RESEARCH_CONSENT` in `config/reviewer.env`** - whether public live reviews may retain paired control/Linus prompt+response artifacts under `REVIEWER_STATE/research-runs/`. Consent never changes which style is posted.
 3. **`REVIEWER_INCLUDE_*` flags in `config/reviewer.env`** - blinding policy: whether the reviewer sees the author username (off by default), the PR description, and the commit subjects. The prompt composition itself is fixed; if you want a different payload shape, fork and edit `scripts/reviewer/lib/prompt.sh` - the fork is the customization system, same as the personality gallery.
-3. **`config/required-checks.json`** - exact GitHub check-run names that must pass before `agy` is called.
+4. **`config/required-checks.json`** - exact GitHub check-run names that must pass before `agy` is called for each ready PR head, or `[]` to review without waiting for CI.
 
 The target repo shapes its own review context with conventions it likely already uses: `AGENTS.md` / `CONTRIBUTING.md` / `GUIDELINES.md` files are pointed out to the reviewer, and diffs for files marked `linguist-generated` in `.gitattributes` are omitted the same way GitHub's own Files Changed tab collapses them.
 

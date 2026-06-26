@@ -80,9 +80,9 @@ diffs or docs that mention environment variable names without printing values.
 Dry runs do not post reviews, do not mark PRs reviewed, can target draft
 PRs by number, and bypass the required-CI gate by default so prompt
 configuration can be tested before CI is terminal. Set
-`REVIEWER_DRY_RUN_BYPASS_CI=0` to keep production CI gating during a dry
-run. Set `REVIEWER_DRY_RUN_OUT=/path/to/file.txt` to choose a different
-artifact path.
+`REVIEWER_DRY_RUN_BYPASS_CI=0` when you specifically want a dry run to wait
+for the configured check gate. Set `REVIEWER_DRY_RUN_OUT=/path/to/file.txt`
+to choose a different artifact path.
 
 Render the exact prompt text for one PR without calling agy
 or posting a review:
@@ -125,7 +125,7 @@ For emergency/manual operation only, set
 continue from the current checkout after a sync failure. Leave it unset or
 `0` for scheduled live operation.
 
-`scripts/enable-cron.sh` runs `scripts/launch-check.sh` before installing the cron entry. Live `reviewer.sh` ticks run the same validation before posting. The launch check requires current live config files, matching dry-run launch metadata, nonempty required checks, and a dry run that used production CI gating (`REVIEWER_DRY_RUN_BYPASS_CI=0`). To bypass scheduler validation deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1`. To bypass live tick validation deliberately, set `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1`. Narrower launch-check bypasses are `REVIEWER_ALLOW_LAUNCH_WITH_BYPASSED_CI=1` and `REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS=1`.
+`scripts/enable-cron.sh` runs `scripts/launch-check.sh` before installing the cron entry. The launch check requires current live config files and a successful dry-run metadata artifact for the current target repo. Required checks may be nonempty, meaning "review every ready PR head after those checks pass," or `[]`, meaning "review every ready PR head without waiting for CI." To bypass scheduler validation deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1`.
 
 ## Systemd Timer
 
@@ -282,7 +282,7 @@ REVIEWER_STATE=/var/lib/goobreview/example \
 The reviewer reads two gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` writes them interactively, and the example files themselves carry the authoritative inline documentation:
 
 - **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_POSTED_PERSONALITY` (`none` or `linus`; default `none`). `REVIEWER_RESEARCH_CONSENT` defaults to `0`; when set to `1`, public live reviews retain paired control/Linus artifacts under `REVIEWER_STATE/research-runs/`. Also carries the blinding policy: `REVIEWER_INCLUDE_AUTHOR` and `REVIEWER_INCLUDE_DESCRIPTION` (default `0`), and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (default `1`).
-- **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon fetches all check-run pages for the PR head before deciding whether a required check is missing, waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
+- **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon fetches all check-run pages for the PR head before deciding whether a required check is missing, waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "review every ready PR head without waiting for CI" and is valid for repos without CI or teams that want immediate feedback.
 
 GitHub API calls are bounded by default. Shell-based REST calls use `REVIEWER_GITHUB_CONNECT_TIMEOUT` (default `10` seconds), `REVIEWER_GITHUB_MAX_TIME` (default `60` seconds), `REVIEWER_GITHUB_RETRIES` (default `2` retries for safe transient GET failures such as network errors, 5xx, 429, or rate-limit-like 403 responses), and `REVIEWER_GITHUB_RETRY_SLEEP` (default `1` second between attempts). The App-token helper (`get-installation-token.sh`) uses `REVIEWER_GITHUB_FETCH_TIMEOUT` (default `60` seconds) as its per-request `curl --max-time`. Failed GitHub API calls log the method, path, curl status, HTTP status, attempt count, and a short redacted response snippet so operators can distinguish auth/configuration errors from transient GitHub failures without leaking tokens. Check-run summaries include whether the fetched data is complete and whether the displayed rows were intentionally truncated; set `REVIEWER_CHECK_RUN_SUMMARY_LIMIT` (default `200`) to change the display limit without changing required-check gating.
 
@@ -293,11 +293,11 @@ Live posting requires real deployment config. `scripts/reviewer/reviewer.sh` ref
 Before enabling cron or another live daemon, run:
 
 ```bash
-REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
+scripts/dry-run.sh
 scripts/launch-check.sh
 ```
 
-The first command writes the normal dry-run artifact and a sibling `.launch.json` file with runtime `AGENTS.md`, prompt, response, and stderr hashes. The second confirms that the launch metadata still matches the current target repo and required-check config.
+The first command writes the normal dry-run artifact and a sibling `.launch.json` file with runtime `AGENTS.md`, prompt, response, and stderr hashes. The second confirms that the latest launch metadata targets the current repo and reports the selected review trigger from the current required-check config.
 
 Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim. Operators choose the posted style with `REVIEWER_POSTED_PERSONALITY=none|linus`; the legacy `REVIEWER_PERSONALITY_FILE` path remains as an escape hatch for old configs when `REVIEWER_POSTED_PERSONALITY` is unset. To try Linus in a dry run without editing config:
 
@@ -314,7 +314,6 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 - `REVIEWER_MAX_ATTEMPTS` — maximum non-skipped PRs to attempt in one tick. Defaults to `REVIEWER_MAX_PRS`. Reaching this limit logs `Reached REVIEWER_MAX_ATTEMPTS=...` and stops the tick.
 - `REVIEWER_IGNORE_AGY_BACKOFF` — set `1` to run even while an Antigravity quota backoff (`agy_backoff_until`) is active. `dry-run.sh` sets this automatically.
 - `REVIEWER_REQUIRED_CHECKS_JSON` + `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE=1` — override the required-check gate from the environment for one-off runs; both must be set, so a stray env var cannot loosen a production gate.
-- `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK` — emergency bypass for the live tick launch gate. Prefer rerunning `REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh` and `scripts/launch-check.sh`.
 - `REVIEWER_SYNC_REMOTE`, `REVIEWER_SYNC_BRANCH`, `REVIEWER_SYNC_LOG` — which remote/branch `sync-worktree.sh` tracks (default `origin`/`main`) and where it logs.
 - `REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE` — emergency/manual override; set to `1` only when you intentionally want a scheduler tick to run from the current checkout after sync fails. Default `0` fails closed.
 - `REVIEWER_ONLY_PR` — restrict a run (including `merge-gate.sh`) to a single PR number.
