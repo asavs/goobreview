@@ -1987,24 +1987,12 @@ EOF
   awk '
     found && /^===== AGY PROMPT PAYLOAD END =====$/ { exit }
     found { print; next }
-    prev == "---" && $0 == "Reviewer Contract" {
-      print prev
-      print
-      found = 1
-      next
-    }
-    { prev = $0 }
+    /^===== AGY PROMPT PAYLOAD START =====$/ { found = 1 }
   ' "$research_dir/none/artifact.txt" > "$TMP_ROOT/research-none-tail.txt"
   awk '
     found && /^===== AGY PROMPT PAYLOAD END =====$/ { exit }
     found { print; next }
-    prev == "---" && $0 == "Reviewer Contract" {
-      print prev
-      print
-      found = 1
-      next
-    }
-    { prev = $0 }
+    /^===== AGY PROMPT PAYLOAD START =====$/ { found = 1 }
   ' "$research_dir/linus/artifact.txt" > "$TMP_ROOT/research-linus-tail.txt"
   assert_eq "research arms share identical non-personality prompt payload" \
     "$(sha256sum "$TMP_ROOT/research-none-tail.txt" | awk '{print $1}')" \
