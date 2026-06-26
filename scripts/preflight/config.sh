@@ -4,10 +4,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+STATE_FILE="$REPO_ROOT/.goobreview-cloud-shell.env"
 ENV_FILE="${REVIEWER_ENV_FILE:-$REPO_ROOT/config/reviewer.env}"
 CONFIG_DIR="$REPO_ROOT/config"
 # shellcheck disable=SC1091
 . "$REPO_ROOT/scripts/lib/ops.sh"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/vm.sh"
 export OPS_LOG_PREFIX="preflight-config"
 
 report=0
@@ -76,6 +79,7 @@ research_consent="0"
 personality_file=""
 posted_personality_valid=1
 required_checks="$CONFIG_DIR/required-checks.json"
+config_scope="local"
 
 if [ -f "$ENV_FILE" ]; then
   file_present=1
@@ -91,6 +95,80 @@ if [ -f "$ENV_FILE" ]; then
 fi
 [ -n "$posted_personality" ] || posted_personality="none"
 [ -n "$research_consent" ] || research_consent="0"
+
+if [ -f "$STATE_FILE" ] && command -v gcloud >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+  vm_name="${GOOBREVIEW_VM_NAME:-goobreview-1}"
+  zone="${GOOBREVIEW_ZONE:-us-central1-a}"
+  vm_checkout="${GOOBREVIEW_VM_CHECKOUT:-/opt/goobreview/example}"
+  vm_env_path="${GOOBREVIEW_VM_ENV_PATH:-$vm_checkout/config/reviewer.env}"
+  if vm_instance_exists "$vm_name" "$zone" && vm_ssh_reachable "$vm_name" "$zone" 15; then
+    remote_report="$(vm_remote_preflight_report "$vm_name" "$zone" "$vm_checkout" "$vm_env_path" config 30)"
+    if [ -n "$remote_report" ]; then
+      config_scope="vm"
+      ENV_FILE="$(ops_report_value env_file "$remote_report")"
+      file_present="$(ops_report_bool_int env_file_present "$remote_report")"
+      repo="$(ops_report_value reviewer_repo "$remote_report")"
+      repo_ready="$(ops_report_value reviewer_repo_set "$remote_report")"
+      app_id_ready="$(ops_report_value app_id_set "$remote_report")"
+      installation_ready="$(ops_report_value installation_id_set "$remote_report")"
+      key_path="$(ops_report_value private_key_path "$remote_report")"
+      key_present="$(ops_report_bool_int private_key_present "$remote_report")"
+      key_readable="$(ops_report_bool_int private_key_readable "$remote_report")"
+      posted_personality="$(ops_report_value posted_personality "$remote_report")"
+      research_consent="$(ops_report_value research_consent "$remote_report")"
+      personality_file="$(ops_report_value personality_file "$remote_report")"
+      personality_ready="$(ops_report_bool_int personality_file_present "$remote_report")"
+      required_checks_ready="$(ops_report_bool_int required_checks_present "$remote_report")"
+      state_dir="$(ops_report_value reviewer_state "$remote_report")"
+      agy_auth="$(ops_report_bool_int agy_auth_present "$remote_report")"
+      recommendation="$(ops_report_value recommendation "$remote_report")"
+      if [ "$report" -eq 1 ]; then
+        print_field "config_scope" "$config_scope"
+        print_field "vm_name" "$vm_name"
+        print_field "zone" "$zone"
+        print_field "env_file" "$ENV_FILE"
+        print_field "env_file_present" "$(bool "$file_present")"
+        print_field "reviewer_repo" "$repo"
+        print_field "reviewer_repo_set" "$repo_ready"
+        print_field "app_id_set" "$app_id_ready"
+        print_field "installation_id_set" "$installation_ready"
+        print_field "private_key_path" "$key_path"
+        print_field "private_key_present" "$(bool "$key_present")"
+        print_field "private_key_readable" "$(bool "$key_readable")"
+        print_field "posted_personality" "$posted_personality"
+        print_field "research_consent" "$research_consent"
+        print_field "personality_file" "$personality_file"
+        print_field "personality_file_present" "$(bool "$personality_ready")"
+        print_field "required_checks_present" "$(bool "$required_checks_ready")"
+        print_field "reviewer_state" "$state_dir"
+        print_field "agy_auth_present" "$(bool "$agy_auth")"
+        print_field "recommendation" "$recommendation"
+        exit 0
+      fi
+      cat <<EOF
+Config preflight
+----------------
+config source:          VM ($vm_name/$zone)
+reviewer.env:           $(bool "$file_present") ($ENV_FILE)
+target repo set:        $repo_ready${repo:+ ($repo)}
+App ID set:             $app_id_ready
+installation ID set:    $installation_ready
+private key present:    $(bool "$key_present")${key_path:+ ($key_path)}
+private key readable:   $(bool "$key_readable")
+posted personality:     $posted_personality
+research consent:       $(bool "$research_consent")
+personality valid:      $(bool "$personality_ready")${personality_file:+ ($personality_file)}
+required checks file:   $(bool "$required_checks_ready")
+Antigravity auth dir:   $(bool "$agy_auth")
+
+Next: $recommendation
+EOF
+      exit 0
+    fi
+  fi
+fi
 
 repo_ready="$(present "$repo" "owner/repo")"
 app_id_ready="$(present "$app_id")"
@@ -163,6 +241,7 @@ elif [ "$agy_auth" -ne 1 ]; then
 fi
 
 if [ "$report" -eq 1 ]; then
+  print_field "config_scope" "$config_scope"
   print_field "env_file" "$ENV_FILE"
   print_field "env_file_present" "$(bool "$file_present")"
   print_field "reviewer_repo" "$repo"
@@ -186,6 +265,7 @@ fi
 cat <<EOF
 Config preflight
 ----------------
+config source:          local
 reviewer.env:           $(bool "$file_present") ($ENV_FILE)
 target repo set:        $repo_ready${repo:+ ($repo)}
 App ID set:             $app_id_ready

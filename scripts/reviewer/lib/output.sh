@@ -148,7 +148,7 @@ artifact_secret_scan() {
 (^|[^A-Za-z0-9_])(GH_TOKEN|GITHUB_TOKEN|GITHUB_PAT|REVIEWER_APP_PRIVATE_KEY_PATH|GEMINI_API_KEY|GOOGLE_API_KEY|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_CLOUD_PROJECT|GCLOUD_PROJECT|CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AZURE_CLIENT_SECRET)[[:space:]]*[:=][[:space:]]*['"]?[^[:space:]'",]{3,}
 EOF
 
-  if grep -Eiq -f "$pattern_file" "$file"; then
+  if awk '/[[:space:]]*[:=][[:space:]]*['\''"]?\$\{\{/ { next } { print }' "$file" | grep -Eiq -f "$pattern_file"; then
     rm -f "$pattern_file"
     printf 'sensitive credential assignment\n'
     return 1

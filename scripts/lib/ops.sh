@@ -188,3 +188,19 @@ ops_to_owner_repo() {
 ops_shell_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
+
+ops_report_value() {
+  local key="$1" data="$2"
+  REPORT_KEY="$key" REPORT_DATA="$data" bash -c '
+    set -euo pipefail
+    eval "$REPORT_DATA"
+    eval "printf \"%s\" \"\${$REPORT_KEY-}\""
+  '
+}
+
+ops_report_bool_int() {
+  case "$(ops_report_value "$1" "$2")" in
+    1|true|True|TRUE|yes) printf '1' ;;
+    *) printf '0' ;;
+  esac
+}
