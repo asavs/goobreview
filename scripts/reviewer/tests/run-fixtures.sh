@@ -1980,7 +1980,7 @@ EOF
   assert_contains "dry-run artifact records agents.md hash in execution context" "AGENTS.MD SHA256:" "$dry_run_out"
   assert_contains "dry-run artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$dry_run_out"
   assert_contains "dry-run artifact agents.md has personality content" "## Role" "$dry_run_out"
-  assert_contains "dry-run artifact agents.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$dry_run_out"
+  assert_contains "dry-run artifact agents.md has format contract" "Use REQUEST_CHANGES only for concrete issues that should block merge." "$dry_run_out"
   assert_contains "dry-run artifact captures agy stderr" "fake agy stderr trace" "$dry_run_out"
   assert_contains "dry-run artifact reports resolved inline comments" "Resolved inline comments: 1" "$dry_run_out"
   awk '
