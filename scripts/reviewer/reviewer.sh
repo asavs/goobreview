@@ -33,6 +33,7 @@ INCLUDE_AUTHOR="${REVIEWER_INCLUDE_AUTHOR:-0}"
 INCLUDE_DESCRIPTION="${REVIEWER_INCLUDE_DESCRIPTION:-0}"
 INCLUDE_COMMIT_SUBJECTS="${REVIEWER_INCLUDE_COMMIT_SUBJECTS:-1}"
 RESEARCH_CONSENT="${REVIEWER_RESEARCH_CONSENT:-0}"
+REFUSE_ON_HOME_CONTEXT="${REVIEWER_REFUSE_ON_HOME_CONTEXT:-0}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 AUTO_RESOLVE_BOT_THREADS="${REVIEWER_AUTO_RESOLVE_BOT_THREADS:-0}"
@@ -510,8 +511,14 @@ fi
 
 # agy will run this tick; flag any home-directory context files it would
 # auto-load as trusted instructions outside the daemon's prompt (issue #106).
+# With REVIEWER_REFUSE_ON_HOME_CONTEXT=1, fail closed for the whole tick rather
+# than review with that content in agy's context.
 if [ -z "$RENDER_PROMPT_ONLY" ]; then
   warn_home_agy_context_files
+  if should_refuse_for_home_context; then
+    log "Refusing this tick: home-directory agy context files present and REVIEWER_REFUSE_ON_HOME_CONTEXT=1 (security issue #106); remove them or unset the flag"
+    exit 0
+  fi
 fi
 
 GH_TOKEN=$("$SCRIPT_DIR/get-installation-token.sh" token 2>>"$LOG_FILE") || fatal "failed to mint installation token"
