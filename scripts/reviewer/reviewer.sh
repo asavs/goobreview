@@ -118,7 +118,7 @@ write_dry_run_artifact() {
   local output_file="$DRY_RUN_OUT"
   local required_checks_sha256 inline_comment_count
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
-  local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks
+  local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks agents_md_tmp agents_md_bytes agents_md_sha
 
   [ -n "$output_file" ] || return 0
 
@@ -139,6 +139,12 @@ write_dry_run_artifact() {
     stderr_bytes=0
     stderr_sha=
   fi
+  agents_md_tmp=$(mktemp "$STATE_DIR/dry-agents-md.XXXXXX")
+  if [ -n "${PERSONALITY_FILE:-}" ]; then
+    write_agents_md "$PERSONALITY_FILE" "$agents_md_tmp"
+  fi
+  agents_md_bytes=$(wc -c <"$agents_md_tmp" | tr -d ' ')
+  agents_md_sha=$(sha256sum "$agents_md_tmp" | awk '{print $1}')
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then
     snapshot_files=$(find "$worktree_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
     snapshot_symlinks=$(find "$worktree_dir" -type l 2>/dev/null | wc -l | tr -d ' ')
@@ -175,9 +181,14 @@ write_dry_run_artifact() {
     if [ -n "$stderr_sha" ]; then
       printf 'Agy stderr SHA256: %s\n' "$stderr_sha"
     fi
+    printf 'AGENTS.MD bytes: %s\n' "$agents_md_bytes"
+    printf 'AGENTS.MD SHA256: %s\n' "$agents_md_sha"
     printf 'GitHub token environment removed before agy: yes\n'
     printf 'GitHub App key environment removed before agy: yes\n'
     printf '===== AGY EXECUTION CONTEXT END =====\n'
+    printf '\n===== AGY AGENTS.MD START =====\n'
+    append_bounded_file "$agents_md_tmp" "$MAX_ARTIFACT_BYTES" "dry-run agents-md artifact"
+    printf '\n===== AGY AGENTS.MD END =====\n'
     printf '\n===== AGY PROMPT PAYLOAD START =====\n'
     append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "dry-run prompt artifact"
     printf '\n===== AGY PROMPT PAYLOAD END =====\n'
@@ -218,6 +229,7 @@ write_dry_run_artifact() {
     artifact_tmp=""
   fi
   [ -z "$artifact_tmp" ] || rm -f "$artifact_tmp"
+  rm -f "$agents_md_tmp"
   required_checks_sha256=$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')
   jq -n \
     --arg repo "$REPO" \
@@ -273,11 +285,15 @@ write_research_review_artifact() {
   local event="$7"
   local prompt_file="$8"
   local review_body="$9"
-  local artifact_tmp artifact_bytes marker marker_bytes body_bytes
+  local artifact_tmp artifact_bytes marker marker_bytes body_bytes agents_md_tmp agents_md_bytes agents_md_sha
 
   mkdir -p "$(dirname "$output_file")"
   chmod 700 "$(dirname "$output_file")" 2>/dev/null || true
   artifact_tmp=$(mktemp "$STATE_DIR/research-artifact.XXXXXX")
+  agents_md_tmp=$(mktemp "$STATE_DIR/research-agents-md.XXXXXX")
+  write_agents_md "$personality_file" "$agents_md_tmp"
+  agents_md_bytes=$(wc -c <"$agents_md_tmp" | tr -d ' ')
+  agents_md_sha=$(sha256sum "$agents_md_tmp" | awk '{print $1}')
   {
     printf 'GoobReview research artifact\n'
     printf 'Repository: %s\n' "$REPO"
@@ -288,7 +304,12 @@ write_research_review_artifact() {
     printf 'Posted personality: %s\n' "$POSTED_PERSONALITY"
     printf 'Personality file: %s\n' "$personality_file"
     printf 'Parsed review event: %s\n' "$event"
+    printf 'AGENTS.MD bytes: %s\n' "$agents_md_bytes"
+    printf 'AGENTS.MD SHA256: %s\n' "$agents_md_sha"
     printf 'Generated at: %s\n' "$(date -Is)"
+    printf '\n===== AGY AGENTS.MD START =====\n'
+    append_bounded_file "$agents_md_tmp" "$MAX_ARTIFACT_BYTES" "research agents-md artifact"
+    printf '\n===== AGY AGENTS.MD END =====\n'
     printf '\n===== AGY PROMPT PAYLOAD START =====\n'
     append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "research prompt artifact"
     printf '\n===== AGY PROMPT PAYLOAD END =====\n'
@@ -309,17 +330,17 @@ write_research_review_artifact() {
       printf '%s' "$marker" >>"$artifact_tmp.truncated"
     fi
     install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || {
-      rm -f "$artifact_tmp" "$artifact_tmp.truncated"
+      rm -f "$artifact_tmp" "$artifact_tmp.truncated" "$agents_md_tmp"
       return 1
     }
     rm -f "$artifact_tmp.truncated"
   else
     install_secret_scanned_artifact "$artifact_tmp" "$output_file" || {
-      rm -f "$artifact_tmp"
+      rm -f "$artifact_tmp" "$agents_md_tmp"
       return 1
     }
   fi
-  rm -f "$artifact_tmp"
+  rm -f "$artifact_tmp" "$agents_md_tmp"
 }
 
 research_personality_file_for_arm() {

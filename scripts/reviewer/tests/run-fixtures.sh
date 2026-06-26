@@ -1956,6 +1956,10 @@ EOF
   research_dir="$(dirname "$manifest")"
   assert_contains "posted artifact preserves control response" "control review" "$research_dir/none/artifact.txt"
   assert_contains "counterfactual artifact preserves linus response" "linus review" "$research_dir/linus/artifact.txt"
+  assert_contains "posted artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$research_dir/none/artifact.txt"
+  assert_contains "counterfactual artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$research_dir/linus/artifact.txt"
+  assert_contains "posted artifact agents.md reflects control personality" "## Role" "$research_dir/none/artifact.txt"
+  assert_contains "counterfactual artifact agents.md reflects linus personality" "Mauro, SHUT" "$research_dir/linus/artifact.txt"
 
   dry_run_out="$TMP_ROOT/research-dry-run.txt"
   status=0
@@ -1973,6 +1977,10 @@ EOF
   assert_contains "dry-run artifact records snapshot path" "PR-head snapshot path:" "$dry_run_out"
   assert_contains "dry-run artifact records prompt hash" "Prompt SHA256:" "$dry_run_out"
   assert_contains "dry-run artifact records response hash" "Response SHA256:" "$dry_run_out"
+  assert_contains "dry-run artifact records agents.md hash in execution context" "AGENTS.MD SHA256:" "$dry_run_out"
+  assert_contains "dry-run artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$dry_run_out"
+  assert_contains "dry-run artifact agents.md has personality content" "## Role" "$dry_run_out"
+  assert_contains "dry-run artifact agents.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$dry_run_out"
   assert_contains "dry-run artifact captures agy stderr" "fake agy stderr trace" "$dry_run_out"
   assert_contains "dry-run artifact reports resolved inline comments" "Resolved inline comments: 1" "$dry_run_out"
   awk '
@@ -2034,7 +2042,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=256
+EXPECTED_ASSERTIONS=264
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
