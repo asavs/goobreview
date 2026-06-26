@@ -134,7 +134,7 @@ write_dry_run_artifact() {
     stderr_sha=
   fi
   agents_md_tmp=$(mktemp "$STATE_DIR/dry-agents-md.XXXXXX")
-  write_agents_md "$PERSONALITY_FILE" "$agents_md_tmp" "$ci_state" "$head_sha" || fatal "failed to render dry-run AGENTS.md artifact"
+  write_agents_md "$PERSONALITY_FILE" "$agents_md_tmp" "$ci_state" "$head_sha" "$worktree_dir" || fatal "failed to render dry-run AGENTS.md artifact"
   agents_md_bytes=$(wc -c <"$agents_md_tmp" | tr -d ' ')
   agents_md_sha=$(sha256sum "$agents_md_tmp" | awk '{print $1}')
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then

@@ -90,7 +90,7 @@ run_agy_review() {
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   mkdir -p "$runtime_dir"
   rm -f "$runtime_dir/AGENTS.md"
-  if ! write_agents_md "$personality_file" "$runtime_dir/AGENTS.md" "$ci_state" "$head_sha"; then
+  if ! write_agents_md "$personality_file" "$runtime_dir/AGENTS.md" "$ci_state" "$head_sha" "$worktree_dir"; then
     printf 'Failed to write trusted runtime AGENTS.md; refusing agy invocation.\n' >"$err_file"
     return 1
   fi
