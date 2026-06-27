@@ -2140,6 +2140,7 @@ This PR changes the auth path.
     '`deploy/nginx/mog.conf:43` alias causes a loop.' |
     review_body_without_promoted_sections "$h1_promoted_json")
   assert_not_contains "dedup filter strips promoted h1 section from body" "Alias redirect loop" <(printf '%s\n' "$h1_filtered")
+}
 
 test_unresolved_thread_replies_parser() {
   local replies
