@@ -15,13 +15,13 @@ github_review_changed_line_anchors() {
             | .new = ($h.new | tonumber)
           elif .old == null then .
           elif ($raw | startswith("+")) then
-            .anchors += [{path: $path, line: .new, side: "RIGHT"}]
+            .anchors += [{path: $path, line: .new, side: "RIGHT", introduced: true}]
             | .new += 1
           elif ($raw | startswith("-")) then
-            .anchors += [{path: $path, line: .old, side: "LEFT"}]
+            .anchors += [{path: $path, line: .old, side: "LEFT", introduced: false}]
             | .old += 1
           elif ($raw | startswith("\\ No newline")) then .
-          else .anchors += [{path: $path, line: .new, side: "RIGHT"}] | .old += 1 | .new += 1
+          else .anchors += [{path: $path, line: .new, side: "RIGHT", introduced: false}] | .old += 1 | .new += 1
           end)
     | .anchors[]
   '
@@ -352,7 +352,7 @@ review_inline_comments_json() {
   local num="$1"
   local review_body="$2"
   local snapshot_root="${3:-}"
-  local changed_files anchors comments seen section locations path start_line end_line anchor side has_range
+  local changed_files anchors comments seen section locations path start_line end_line anchor side anchor_introduced has_range chosen_anchor chosen_side chosen_start chosen_end chosen_has_range chosen_anchor_introduced finding_introduced
 
   changed_files=$(mktemp)
   anchors=$(mktemp)
@@ -372,6 +372,13 @@ review_inline_comments_json() {
 
   while IFS= read -r -d '' section; do
     locations=$(printf '%s' "$section" | review_source_locations "$snapshot_root")
+    chosen_anchor=""
+    chosen_side=""
+    chosen_start=""
+    chosen_end=""
+    chosen_has_range=0
+    chosen_anchor_introduced=false
+    finding_introduced=false
     while IFS=$'\t' read -r path start_line end_line; do
       if [ -z "${path:-}" ] || [ -z "${start_line:-}" ]; then
         continue
@@ -384,7 +391,14 @@ review_inline_comments_json() {
           map(select(.path == $path and .side == "RIGHT" and .line >= $start and .line <= $end)) as $hits
           | if (($hits | length) == ($end - $start + 1)
                 and (($hits | map(.line) | sort) == [range($start; $end + 1)]))
-            then {path: $path, start_line: $start, line: $end, side: "RIGHT", start_side: "RIGHT"}
+            then {
+              path: $path,
+              start_line: $start,
+              line: $end,
+              side: "RIGHT",
+              start_side: "RIGHT",
+              introduced: (all($hits[]; .introduced == true))
+            }
             else empty
             end
         ' "$anchors")
@@ -403,23 +417,71 @@ review_inline_comments_json() {
       [ -n "$anchor" ] || continue
 
       side=$(printf '%s' "$anchor" | jq -r '.side')
+      anchor_introduced=$(printf '%s' "$anchor" | jq -r '.introduced == true')
+      if [ "$anchor_introduced" = "true" ]; then
+        finding_introduced=true
+      fi
+      if [ -n "$chosen_anchor" ]; then
+        continue
+      fi
       if grep -Fqx -- "$path"$'\t'"$start_line"$'\t'"$end_line"$'\t'"$side" "$seen"; then
-        break
+        continue
       fi
       printf '%s\t%s\t%s\t%s\n' "$path" "$start_line" "$end_line" "$side" >>"$seen"
-      if [ "$has_range" -eq 1 ]; then
-        jq -n --arg path "$path" --argjson start_line "$start_line" --argjson line "$end_line" --arg side "$side" --arg body "$section" \
-          '{path: $path, start_line: $start_line, start_side: $side, line: $line, side: $side, body: $body}' >>"$comments"
-      else
-        jq -n --arg path "$path" --argjson line "$start_line" --arg side "$side" --arg body "$section" \
-          '{path: $path, line: $line, side: $side, body: $body}' >>"$comments"
-      fi
-      break
+      chosen_anchor="$anchor"
+      chosen_side="$side"
+      chosen_start="$start_line"
+      chosen_end="$end_line"
+      chosen_has_range="$has_range"
+      chosen_anchor_introduced="$anchor_introduced"
     done <<<"$locations"
+    [ -n "$chosen_anchor" ] || continue
+    if [ "$chosen_has_range" -eq 1 ]; then
+      jq -n \
+        --arg path "$(printf '%s' "$chosen_anchor" | jq -r '.path')" \
+        --argjson start_line "$chosen_start" \
+        --argjson line "$chosen_end" \
+        --arg side "$chosen_side" \
+        --argjson anchor_introduced "$chosen_anchor_introduced" \
+        --argjson finding_introduced "$finding_introduced" \
+        --arg body "$section" \
+        '{path: $path, start_line: $start_line, start_side: $side, line: $line, side: $side, body: $body,
+          _goobreview_anchor_introduced: $anchor_introduced,
+          _goobreview_finding_introduced: $finding_introduced}' >>"$comments"
+    else
+      jq -n \
+        --arg path "$(printf '%s' "$chosen_anchor" | jq -r '.path')" \
+        --argjson line "$chosen_start" \
+        --arg side "$chosen_side" \
+        --argjson anchor_introduced "$chosen_anchor_introduced" \
+        --argjson finding_introduced "$finding_introduced" \
+        --arg body "$section" \
+        '{path: $path, line: $line, side: $side, body: $body,
+          _goobreview_anchor_introduced: $anchor_introduced,
+          _goobreview_finding_introduced: $finding_introduced}' >>"$comments"
+    fi
   done < <(printf '%s' "$review_body" | review_markdown_finding_sections)
 
   jq -s . "$comments"
   rm -f "$changed_files" "$anchors" "$comments" "$seen"
+}
+
+review_inline_comments_pr_scoped_count() {
+  jq '[.[]? | select(._goobreview_finding_introduced == true)] | length'
+}
+
+review_event_after_scope_guard() {
+  local event="$1"
+  local inline_comments_json="$2"
+  local inline_comment_count pr_scoped_inline_comment_count
+
+  inline_comment_count=$(printf '%s\n' "$inline_comments_json" | jq 'length') || return 1
+  pr_scoped_inline_comment_count=$(printf '%s\n' "$inline_comments_json" | review_inline_comments_pr_scoped_count) || return 1
+  if [ "$event" = "REQUEST_CHANGES" ] && [ "$inline_comment_count" -gt 0 ] && [ "$pr_scoped_inline_comment_count" -eq 0 ]; then
+    printf 'COMMENT\n'
+  else
+    printf '%s\n' "$event"
+  fi
 }
 
 post_review() {
@@ -441,6 +503,7 @@ post_review() {
   fi
 
   payload=$(jq -n --arg event "$event" --arg body "$body" --arg commit_id "$head_sha" --argjson comments "$comments_json" \
-    '{event: $event, body: $body, commit_id: $commit_id} + if ($comments | length) > 0 then {comments: $comments} else {} end')
+    '($comments | map(with_entries(select(.key | startswith("_goobreview_") | not)))) as $post_comments
+    | {event: $event, body: $body, commit_id: $commit_id} + if ($post_comments | length) > 0 then {comments: $post_comments} else {} end')
   github_api_post_json "repos/$REPO/pulls/$num/reviews" "$payload" >/dev/null
 }

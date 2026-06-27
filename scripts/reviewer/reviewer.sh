@@ -842,8 +842,27 @@ EOF
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to resolve inline review anchors"
     continue
   fi
+  scope_downgraded=0
+  scoped_event=$(review_event_after_scope_guard "$event" "$inline_comments_json") || {
+    rm -f "$prompt_tmp" "$agy_err_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to evaluate inline review scope"
+    continue
+  }
+  if [ "$event" = "REQUEST_CHANGES" ] && [ "$scoped_event" = "COMMENT" ]; then
+    log "PR #$num@$head_sha: downgraded REQUEST_CHANGES to COMMENT because all anchored findings target pre-existing or context lines"
+    scope_downgraded=1
+  fi
+  event="$scoped_event"
 
   filtered_body=$(printf '%s\n' "$review_body" | review_body_without_promoted_sections "$inline_comments_json")
+  if [ "$scope_downgraded" -eq 1 ]; then
+    filtered_body=$(cat <<EOF
+$filtered_body
+
+[goobreview: posted as COMMENT because all anchored findings resolved to pre-existing or context lines, so they were not treated as blocking for this PR.]
+EOF
+)
+  fi
   body=$(cat <<EOF
 $filtered_body
 

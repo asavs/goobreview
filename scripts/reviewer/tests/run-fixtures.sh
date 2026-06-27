@@ -413,7 +413,7 @@ test_post_review_uses_rest_api() {
   }
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review body.
-  inline_comments='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"This is stale.\n\n```suggestion\nrender()\n```"}]'
+  inline_comments='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"This is stale.\n\n```suggestion\nrender()\n```","_goobreview_anchor_introduced":true,"_goobreview_finding_introduced":true}]'
   post_review 17 REQUEST_CHANGES "Please fix this." deadbeef "$inline_comments"
 
   assert_eq "post_review posts to pull reviews REST endpoint" "repos/example/repo/pulls/17/reviews" "$captured_path"
@@ -422,6 +422,7 @@ test_post_review_uses_rest_api() {
   assert_eq "post_review ties review to analyzed head" "deadbeef" "$(printf '%s\n' "$captured_payload" | jq -r '.commit_id')"
   assert_eq "post_review includes inline comments atomically" "src/app.py" "$(printf '%s\n' "$captured_payload" | jq -r '.comments[0].path')"
   assert_contains "post_review preserves suggestion fences in inline comment body" '```suggestion' <(printf '%s\n' "$captured_payload" | jq -r '.comments[0].body')
+  assert_eq "post_review strips internal scope metadata" "false" "$(printf '%s\n' "$captured_payload" | jq 'any(.comments[0] | keys[]; startswith("_goobreview_"))')"
 
   if post_review 17 NOPE "bad" deadbeef '[]' >/dev/null 2>&1; then
     fail "post_review rejects invalid event"
@@ -443,7 +444,7 @@ test_inline_review_comments_follow_diff_anchors() {
 
   # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by review_inline_comments_json.
   github_api_paginate_array() {
-    printf '%s\n' '{"filename":"src/app.py","patch":"@@ -10,1 +10,0 @@\n-old-only\n@@ -40,2 +40,4 @@\n context\n-old\n+new\n+another\n+third"}'
+    printf '%s\n' '{"filename":"src/app.py","patch":"@@ -10,1 +10,0 @@\n-old-only\n@@ -40,3 +40,5 @@\n context\n-old\n+new\n+another\n+third\n context-after"}'
   }
 
   body="### [P1] Render stays stale
@@ -472,6 +473,9 @@ setState(other)
 ### [P2] Context-only line
 \`src/app.py:40\` is not itself changed.
 
+### [P1] Old symptom has new cause
+\`src/app.py:44\` fails only because \`src/app.py:42\` now passes the new value.
+
 ### [P2] Incomplete range
 \`src/app.py:43-99\` starts on the diff but extends outside it.
 
@@ -479,12 +483,20 @@ setState(other)
 \`src/app.py:99\` does not exist."
   comments=$(review_inline_comments_json 17 "$body")
 
-  assert_eq "inline-comment parser emits verified anchors including context lines" "5" "$(printf '%s\n' "$comments" | jq 'length')"
+  assert_eq "inline-comment parser emits verified anchors including context lines" "6" "$(printf '%s\n' "$comments" | jq 'length')"
   assert_eq "inline-comment parser prefers added side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[0].side')"
   assert_eq "inline-comment parser preserves finding body" "### [P1] Render stays stale" "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
   assert_contains "inline-comment parser preserves valid suggestion fence" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 43) | .body')
   assert_eq "inline-comment parser emits multi-line suggestion start_line" "42" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Suggest direct replacement")) | .start_line')"
   assert_eq "inline-comment parser emits multi-line suggestion start_side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Suggest direct replacement")) | .start_side')"
+  assert_eq "inline-comment parser marks introduced findings as PR-scoped" "true" "$(printf '%s\n' "$comments" | jq -r '.[0]._goobreview_finding_introduced')"
+  assert_eq "inline-comment parser marks context-only findings as out of scope" "false" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Context-only line")) | ._goobreview_finding_introduced')"
+  assert_eq "inline-comment parser keeps old-symptom new-cause findings PR-scoped" "true" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Old symptom has new cause")) | ._goobreview_finding_introduced')"
+  assert_eq "inline-comment parser records old-symptom anchor separately" "false" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Old symptom has new cause")) | ._goobreview_anchor_introduced')"
+  assert_eq "inline-comment parser counts PR-scoped findings" "4" "$(printf '%s\n' "$comments" | review_inline_comments_pr_scoped_count)"
+  assert_eq "scope guard preserves request changes with any PR-scoped finding" "REQUEST_CHANGES" "$(review_event_after_scope_guard REQUEST_CHANGES "$comments")"
+  assert_eq "scope guard downgrades all out-of-scope blocking findings" "COMMENT" "$(review_event_after_scope_guard REQUEST_CHANGES '[{"_goobreview_finding_introduced":false}]')"
+  assert_eq "scope guard leaves body-only blocking findings alone" "REQUEST_CHANGES" "$(review_event_after_scope_guard REQUEST_CHANGES '[]')"
   assert_not_contains "inline-comment parser omits malformed suggestion fence from native comments" "Malformed suggestion" <(printf '%s\n' "$comments" | jq -r '.[].body')
   assert_eq "inline-comment parser anchors deleted lines on the left" "LEFT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 10) | .side')"
   assert_eq "inline-comment parser anchors context lines on the right" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 40) | .side')"
@@ -2248,7 +2260,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=304
+EXPECTED_ASSERTIONS=313
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
