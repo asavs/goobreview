@@ -21,7 +21,7 @@ github_review_changed_line_anchors() {
             .anchors += [{path: $path, line: .old, side: "LEFT"}]
             | .old += 1
           elif ($raw | startswith("\\ No newline")) then .
-          else .old += 1 | .new += 1
+          else .anchors += [{path: $path, line: .new, side: "RIGHT"}] | .old += 1 | .new += 1
           end)
     | .anchors[]
   '
@@ -351,6 +351,7 @@ github_reply_still_open_thread_handles_json() {
 review_inline_comments_json() {
   local num="$1"
   local review_body="$2"
+  local snapshot_root="${3:-}"
   local changed_files anchors comments seen section locations path line anchor side
 
   changed_files=$(mktemp)
@@ -370,7 +371,7 @@ review_inline_comments_json() {
   fi
 
   while IFS= read -r -d '' section; do
-    locations=$(printf '%s' "$section" | review_source_locations)
+    locations=$(printf '%s' "$section" | review_source_locations "$snapshot_root")
     while IFS=$'\t' read -r path line; do
       if [ -z "${path:-}" ] || [ -z "${line:-}" ]; then
         continue

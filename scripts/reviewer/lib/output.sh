@@ -52,7 +52,17 @@ review_body_before_verdict() {
 # src/app.ts:42-45 resolves to its first line because a later validation step
 # decides whether a single-line or multi-line GitHub anchor is possible.
 review_source_locations() {
-  grep -oE '[[:alnum:]_.][[:alnum:]_.+/-]*\.[[:alnum:]_+-]+:[0-9]+(-[0-9]+)?' |
+  local snapshot_root="${1:-}"
+  {
+    if [ -n "$snapshot_root" ]; then
+      local escaped_root
+      escaped_root=$(printf '%s' "$snapshot_root" | sed 's/[\\&|]/\\&/g')
+      sed -E "s|\(file://${escaped_root}/([^)#]*)#L([0-9]+)[^)]*\)|\1:\2|g"
+    else
+      cat
+    fi
+  } |
+    grep -oE '[[:alnum:]_.][[:alnum:]_.+/-]*\.[[:alnum:]_+-]+:[0-9]+(-[0-9]+)?' |
     sed -E 's/:([0-9]+)-[0-9]+$/\t\1/; s/:/\t/' |
     awk -F '\t' 'NF == 2 && $1 !~ /(^|\/)\.\.($|\/)/ { key = $1 FS $2; if (!seen[key]++) print }'
 }

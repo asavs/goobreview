@@ -142,6 +142,12 @@ REQUEST_CHANGES'
     review_source_locations)
   assert_eq "source-location parser finds unique path and line pairs" $'src/auth.py\t42\ndist/app.js\t9' "$locations"
 
+  file_url_locations=$(printf '%s\n' \
+    "[Player.tsx:530](file:///tmp/test-snap/client/src/Player.tsx#L530-L535)" |
+    review_source_locations "/tmp/test-snap")
+  assert_contains "source-location parser extracts repo-relative path from file-url link" \
+    $'client/src/Player.tsx\t530' <(printf '%s\n' "$file_url_locations")
+
   sections=$(printf '%s\n' \
     '## Summary' \
     'No blocking findings.' \
@@ -462,12 +468,13 @@ setState(other)
 \`src/app.py:99\` does not exist."
   comments=$(review_inline_comments_json 17 "$body")
 
-  assert_eq "inline-comment parser emits only verified anchors with balanced suggestion fences" "3" "$(printf '%s\n' "$comments" | jq 'length')"
+  assert_eq "inline-comment parser emits verified anchors including context lines" "4" "$(printf '%s\n' "$comments" | jq 'length')"
   assert_eq "inline-comment parser prefers added side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[0].side')"
   assert_eq "inline-comment parser preserves finding body" "### [P1] Render stays stale" "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
   assert_contains "inline-comment parser preserves valid suggestion fence" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 43) | .body')
   assert_not_contains "inline-comment parser omits malformed suggestion fence from native comments" "Malformed suggestion" <(printf '%s\n' "$comments" | jq -r '.[].body')
   assert_eq "inline-comment parser anchors deleted lines on the left" "LEFT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 10) | .side')"
+  assert_eq "inline-comment parser anchors context lines on the right" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 40) | .side')"
 }
 
 test_review_thread_resolution_helpers() {
@@ -2218,7 +2225,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=297
+EXPECTED_ASSERTIONS=299
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

@@ -837,7 +837,7 @@ EOF
     fi
   fi
 
-  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body"); then
+  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body" "$review_worktree"); then
     rm -f "$prompt_tmp" "$agy_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to resolve inline review anchors"
     continue
