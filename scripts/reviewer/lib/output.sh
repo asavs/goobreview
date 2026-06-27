@@ -48,23 +48,32 @@ review_body_before_verdict() {
 # merely discovers path:line references that can later be verified against the
 # pull request diff and promoted to native GitHub review comments.
 #
-# Output is one unique path<TAB>line pair per line. A range such as
-# src/app.ts:42-45 resolves to its first line because a later validation step
-# decides whether a single-line or multi-line GitHub anchor is possible.
+# Output is one unique path<TAB>start-line<TAB>end-line tuple per line. Single
+# line citations repeat the same line in both numeric fields so callers can
+# treat every location uniformly.
 review_source_locations() {
   local snapshot_root="${1:-}"
   {
     if [ -n "$snapshot_root" ]; then
       local escaped_root
       escaped_root=$(printf '%s' "$snapshot_root" | sed 's/[\\&|]/\\&/g')
-      sed -E "s|\(file://${escaped_root}/([^)#]*)#L([0-9]+)[^)]*\)|\1:\2|g"
+      sed -E \
+        -e "s|\[[^]]*\]\(file://${escaped_root}/([^)#]*)#L([0-9]+)-L?([0-9]+)[^)]*\)|\1:\2-\3|g" \
+        -e "s|\[[^]]*\]\(file://${escaped_root}/([^)#]*)#L([0-9]+)[^)]*\)|\1:\2|g" \
+        -e "s|\(file://${escaped_root}/([^)#]*)#L([0-9]+)-L?([0-9]+)[^)]*\)|\1:\2-\3|g" \
+        -e "s|\(file://${escaped_root}/([^)#]*)#L([0-9]+)[^)]*\)|\1:\2|g"
     else
       cat
     fi
   } |
     grep -oE '[[:alnum:]_.][[:alnum:]_.+/-]*\.[[:alnum:]_+-]+:[0-9]+(-[0-9]+)?' |
-    sed -E 's/:([0-9]+)-[0-9]+$/\t\1/; s/:/\t/' |
-    awk -F '\t' 'NF == 2 && $1 !~ /(^|\/)\.\.($|\/)/ { key = $1 FS $2; if (!seen[key]++) print }'
+    sed -E 's/:([0-9]+)-([0-9]+)$/\t\1\t\2/; s/:([0-9]+)$/\t\1\t\1/' |
+    awk -F '\t' '
+      NF == 3 && $1 !~ /(^|\/)\.\.($|\/)/ {
+        if ($3 < $2) $3 = $2
+        key = $1 FS $2 FS $3
+        if (!seen[key]++) print
+      }'
 }
 
 # Emit each Markdown finding section that cites at least one source location.

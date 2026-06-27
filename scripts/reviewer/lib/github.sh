@@ -352,7 +352,7 @@ review_inline_comments_json() {
   local num="$1"
   local review_body="$2"
   local snapshot_root="${3:-}"
-  local changed_files anchors comments seen section locations path line anchor side
+  local changed_files anchors comments seen section locations path start_line end_line anchor side has_range
 
   changed_files=$(mktemp)
   anchors=$(mktemp)
@@ -372,25 +372,48 @@ review_inline_comments_json() {
 
   while IFS= read -r -d '' section; do
     locations=$(printf '%s' "$section" | review_source_locations "$snapshot_root")
-    while IFS=$'\t' read -r path line; do
-      if [ -z "${path:-}" ] || [ -z "${line:-}" ]; then
+    while IFS=$'\t' read -r path start_line end_line; do
+      if [ -z "${path:-}" ] || [ -z "${start_line:-}" ]; then
         continue
       fi
-      anchor=$(jq -c --arg path "$path" --argjson line "$line" \
-        'select(.path == $path and .line == $line and .side == "RIGHT")' "$anchors" | head -n 1)
+      end_line="${end_line:-$start_line}"
+      anchor=""
+      has_range=0
+      if [ "$end_line" -gt "$start_line" ]; then
+        anchor=$(jq -s -c --arg path "$path" --argjson start "$start_line" --argjson end "$end_line" '
+          map(select(.path == $path and .side == "RIGHT" and .line >= $start and .line <= $end)) as $hits
+          | if (($hits | length) == ($end - $start + 1)
+                and (($hits | map(.line) | sort) == [range($start; $end + 1)]))
+            then {path: $path, start_line: $start, line: $end, side: "RIGHT", start_side: "RIGHT"}
+            else empty
+            end
+        ' "$anchors")
+        if [ -n "$anchor" ]; then
+          has_range=1
+        fi
+      fi
       if [ -z "$anchor" ]; then
-        anchor=$(jq -c --arg path "$path" --argjson line "$line" \
+        anchor=$(jq -c --arg path "$path" --argjson line "$start_line" \
+          'select(.path == $path and .line == $line and .side == "RIGHT")' "$anchors" | head -n 1)
+      fi
+      if [ -z "$anchor" ]; then
+        anchor=$(jq -c --arg path "$path" --argjson line "$start_line" \
           'select(.path == $path and .line == $line)' "$anchors" | head -n 1)
       fi
       [ -n "$anchor" ] || continue
 
       side=$(printf '%s' "$anchor" | jq -r '.side')
-      if grep -Fqx -- "$path"$'\t'"$line"$'\t'"$side" "$seen"; then
+      if grep -Fqx -- "$path"$'\t'"$start_line"$'\t'"$end_line"$'\t'"$side" "$seen"; then
         break
       fi
-      printf '%s\t%s\t%s\n' "$path" "$line" "$side" >>"$seen"
-      jq -n --arg path "$path" --argjson line "$line" --arg side "$side" --arg body "$section" \
-        '{path: $path, line: $line, side: $side, body: $body}' >>"$comments"
+      printf '%s\t%s\t%s\t%s\n' "$path" "$start_line" "$end_line" "$side" >>"$seen"
+      if [ "$has_range" -eq 1 ]; then
+        jq -n --arg path "$path" --argjson start_line "$start_line" --argjson line "$end_line" --arg side "$side" --arg body "$section" \
+          '{path: $path, start_line: $start_line, start_side: $side, line: $line, side: $side, body: $body}' >>"$comments"
+      else
+        jq -n --arg path "$path" --argjson line "$start_line" --arg side "$side" --arg body "$section" \
+          '{path: $path, line: $line, side: $side, body: $body}' >>"$comments"
+      fi
       break
     done <<<"$locations"
   done < <(printf '%s' "$review_body" | review_markdown_finding_sections)

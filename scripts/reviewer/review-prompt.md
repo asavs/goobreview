@@ -13,12 +13,14 @@ meaningful approve/request-changes judgment.
 Write the review body first in GitHub-flavored markdown. Your final
 non-empty line must be exactly one of those GitHub review events.
 For each concrete finding with an identifiable location, use a short, distinctive
-`##` Markdown heading and cite the precise source location as `path/to/file.ext:123`.
+`##` Markdown heading and cite the precise source location as `path/to/file.ext:123`,
+or `path/to/file.ext:123-125` when the smallest correct replacement spans a
+range.
 GoobReview verifies cited diff locations and turns verified findings into
 native inline GitHub review comments, and it derives each thread's handle from
 your heading, so name the finding well. When a finding has an obvious minimal
-replacement for the cited changed line, include one GitHub suggestion block in
-that finding section:
+replacement for the cited changed line or range, include one GitHub suggestion
+block in that finding section:
 
 ```suggestion
 replacement code

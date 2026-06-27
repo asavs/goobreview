@@ -140,13 +140,13 @@ REQUEST_CHANGES'
     'The generated file dist/app.js:9 is not a second finding.' \
     '../outside.py:3 must not be accepted as a repository path.' |
     review_source_locations)
-  assert_eq "source-location parser finds unique path and line pairs" $'src/auth.py\t42\ndist/app.js\t9' "$locations"
+  assert_eq "source-location parser finds unique path and line ranges" $'src/auth.py\t42\t42\nsrc/auth.py\t42\t45\ndist/app.js\t9\t9' "$locations"
 
   file_url_locations=$(printf '%s\n' \
     "[Player.tsx:530](file:///tmp/test-snap/client/src/Player.tsx#L530-L535)" |
     review_source_locations "/tmp/test-snap")
-  assert_contains "source-location parser extracts repo-relative path from file-url link" \
-    $'client/src/Player.tsx\t530' <(printf '%s\n' "$file_url_locations")
+  assert_eq "source-location parser extracts repo-relative range from file-url link" \
+    $'client/src/Player.tsx\t530\t535' "$file_url_locations"
 
   sections=$(printf '%s\n' \
     '## Summary' \
@@ -450,10 +450,11 @@ test_inline_review_comments_follow_diff_anchors() {
 \`src/app.py:42\` is read from a ref that does not schedule a render.
 
 ### [P1] Suggest direct replacement
-\`src/app.py:43\` should schedule a render immediately.
+\`src/app.py:42-43\` should schedule a render immediately.
 
 \`\`\`suggestion
 setState(new)
+render()
 \`\`\`
 
 ### [P2] Malformed suggestion stays out of native inline comments
@@ -471,17 +472,23 @@ setState(other)
 ### [P2] Context-only line
 \`src/app.py:40\` is not itself changed.
 
+### [P2] Incomplete range
+\`src/app.py:43-99\` starts on the diff but extends outside it.
+
 ### [P2] Missing line
 \`src/app.py:99\` does not exist."
   comments=$(review_inline_comments_json 17 "$body")
 
-  assert_eq "inline-comment parser emits verified anchors including context lines" "4" "$(printf '%s\n' "$comments" | jq 'length')"
+  assert_eq "inline-comment parser emits verified anchors including context lines" "5" "$(printf '%s\n' "$comments" | jq 'length')"
   assert_eq "inline-comment parser prefers added side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[0].side')"
   assert_eq "inline-comment parser preserves finding body" "### [P1] Render stays stale" "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
   assert_contains "inline-comment parser preserves valid suggestion fence" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 43) | .body')
+  assert_eq "inline-comment parser emits multi-line suggestion start_line" "42" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Suggest direct replacement")) | .start_line')"
+  assert_eq "inline-comment parser emits multi-line suggestion start_side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Suggest direct replacement")) | .start_side')"
   assert_not_contains "inline-comment parser omits malformed suggestion fence from native comments" "Malformed suggestion" <(printf '%s\n' "$comments" | jq -r '.[].body')
   assert_eq "inline-comment parser anchors deleted lines on the left" "LEFT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 10) | .side')"
   assert_eq "inline-comment parser anchors context lines on the right" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 40) | .side')"
+  assert_eq "inline-comment parser falls back to single-line anchor for incomplete ranges" "null" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Incomplete range")) | .start_line')"
 }
 
 test_review_thread_resolution_helpers() {
@@ -2241,7 +2248,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=301
+EXPECTED_ASSERTIONS=304
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
