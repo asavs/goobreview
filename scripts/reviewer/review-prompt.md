@@ -10,6 +10,10 @@ Use REQUEST_CHANGES only for concrete issues that should block merge.
 Use COMMENT when the review is informational or you cannot make a
 meaningful approve/request-changes judgment.
 
+Scope findings to lines this PR introduced (marked `+` in the diff).
+Pre-existing lines (unmarked context in the diff) are out of scope
+unless this PR's changes directly cause or expose the issue.
+
 Write the review body first in GitHub-flavored markdown. Your final
 non-empty line must be exactly one of those GitHub review events.
 For each concrete finding with an identifiable location, use a short, distinctive
