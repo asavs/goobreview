@@ -2135,6 +2135,7 @@ This PR changes the auth path.
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
   h1_promoted_json='[{"path":"deploy/nginx/mog.conf","line":43,"side":"RIGHT","body":"# Alias redirect loop\n`deploy/nginx/mog.conf:43` alias causes a loop."}]'
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture text.
   h1_filtered=$(printf '%s\n' \
     '# Alias redirect loop' \
     '`deploy/nginx/mog.conf:43` alias causes a loop.' |
