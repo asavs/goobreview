@@ -48,13 +48,32 @@ review_body_before_verdict() {
 # merely discovers path:line references that can later be verified against the
 # pull request diff and promoted to native GitHub review comments.
 #
-# Output is one unique path<TAB>line pair per line. A range such as
-# src/app.ts:42-45 resolves to its first line because a later validation step
-# decides whether a single-line or multi-line GitHub anchor is possible.
+# Output is one unique path<TAB>start-line<TAB>end-line tuple per line. Single
+# line citations repeat the same line in both numeric fields so callers can
+# treat every location uniformly.
 review_source_locations() {
-  grep -oE '[[:alnum:]_.][[:alnum:]_.+/-]*\.[[:alnum:]_+-]+:[0-9]+(-[0-9]+)?' |
-    sed -E 's/:([0-9]+)-[0-9]+$/\t\1/; s/:/\t/' |
-    awk -F '\t' 'NF == 2 && $1 !~ /(^|\/)\.\.($|\/)/ { key = $1 FS $2; if (!seen[key]++) print }'
+  local snapshot_root="${1:-}"
+  {
+    if [ -n "$snapshot_root" ]; then
+      local escaped_root
+      escaped_root=$(printf '%s' "$snapshot_root" | sed 's/[\\&|]/\\&/g')
+      sed -E \
+        -e "s|\[[^]]*\]\(file://${escaped_root}/([^)#]*)#L([0-9]+)-L?([0-9]+)[^)]*\)|\1:\2-\3|g" \
+        -e "s|\[[^]]*\]\(file://${escaped_root}/([^)#]*)#L([0-9]+)[^)]*\)|\1:\2|g" \
+        -e "s|\(file://${escaped_root}/([^)#]*)#L([0-9]+)-L?([0-9]+)[^)]*\)|\1:\2-\3|g" \
+        -e "s|\(file://${escaped_root}/([^)#]*)#L([0-9]+)[^)]*\)|\1:\2|g"
+    else
+      cat
+    fi
+  } |
+    grep -oE '[[:alnum:]_.][[:alnum:]_.+/-]*\.[[:alnum:]_+-]+:[0-9]+(-[0-9]+)?' |
+    sed -E 's/:([0-9]+)-([0-9]+)$/\t\1\t\2/; s/:([0-9]+)$/\t\1\t\1/' |
+    awk -F '\t' '
+      NF == 3 && $1 !~ /(^|\/)\.\.($|\/)/ {
+        if ($3 < $2) $3 = $2
+        key = $1 FS $2 FS $3
+        if (!seen[key]++) print
+      }'
 }
 
 # Emit each Markdown finding section that cites at least one source location.
@@ -63,12 +82,30 @@ review_source_locations() {
 # against GitHub's diff before it treats a section as an inline comment.
 review_markdown_finding_sections() {
   awk '
+    function suggestion_fences_balanced(text,    n, lines, i, line, in_suggestion) {
+      n = split(text, lines, /\n/)
+      in_suggestion = 0
+      for (i = 1; i <= n; i++) {
+        line = lines[i]
+        sub(/\r$/, "", line)
+        if (!in_suggestion && line ~ /^```suggestion[[:space:]]*$/) {
+          in_suggestion = 1
+          continue
+        }
+        if (in_suggestion && line ~ /^```[[:space:]]*$/) {
+          in_suggestion = 0
+        }
+      }
+      return !in_suggestion
+    }
     function emit() {
-      if (in_section && section ~ /[[:alnum:]_.][[:alnum:]_.+\/-]*\.[[:alnum:]_+-]+:[0-9]+/) {
+      if (in_section &&
+          section ~ /[[:alnum:]_.][[:alnum:]_.+\/-]*\.[[:alnum:]_+-]+:[0-9]+/ &&
+          suggestion_fences_balanced(section)) {
         printf "%s%c", section, 0
       }
     }
-    /^#{2,6}[[:space:]]+/ {
+    /^#{1,6}[[:space:]]+/ {
       emit()
       section = $0 ORS
       in_section = 1
@@ -77,6 +114,39 @@ review_markdown_finding_sections() {
     in_section { section = section $0 ORS }
     END { emit() }
   '
+}
+
+# Strip finding sections from the review body that were promoted to native
+# GitHub inline comments, so the same text does not appear twice in the posted
+# review (once anchored and once in the top-level prose).
+review_body_without_promoted_sections() {
+  local inline_json="$1"
+  local count promoted_headings_file
+
+  count=$(printf '%s' "$inline_json" | jq 'length' 2>/dev/null) || count=0
+  if [ "${count:-0}" -eq 0 ]; then
+    cat
+    return
+  fi
+
+  promoted_headings_file=$(mktemp)
+  printf '%s' "$inline_json" | jq -r '.[].body | split("\n")[0]' >"$promoted_headings_file" 2>/dev/null || true
+
+  awk -v hf="$promoted_headings_file" '
+    BEGIN {
+      while ((getline h < hf) > 0) skip[h] = 1
+      close(hf)
+      in_skip = 0
+    }
+    { sub(/\r$/, "") }
+    /^#{1,6}[[:space:]]+/ {
+      if ($0 in skip) { in_skip = 1; next }
+      in_skip = 0
+      print; next
+    }
+    !in_skip { print }
+  '
+  rm -f "$promoted_headings_file"
 }
 
 review_resolved_thread_handles() {
@@ -118,6 +188,45 @@ review_resolved_thread_handles() {
         handle = substr(token, RSTART, RLENGTH)
         sub(/-+$/, "", handle)
         if (handle != "" && !seen[handle]++) print handle
+      }
+    }
+  '
+}
+
+# Extract still-open thread replies from the review body. Returns one
+# handle<TAB>reply-body pair per line for each bullet in the "Unresolved Prior
+# Threads" section. The caller maps handles to thread IDs and posts the reply.
+review_unresolved_thread_replies() {
+  awk '
+    function heading_level(line) {
+      if (line ~ /^#{2,6}[[:space:]]+/) {
+        match(line, /^#+/)
+        return RLENGTH
+      }
+      return 0
+    }
+    {
+      sub(/\r$/, "")
+      level = heading_level($0)
+      if (level > 0) {
+        title = $0
+        sub(/^#{2,6}[[:space:]]+/, "", title)
+        lower = tolower(title)
+        in_section = (lower ~ /(^|[^a-z])unresolved([^a-z]|$)/ && lower ~ /prior/ && lower ~ /thread/)
+        section_level = level
+        next
+      }
+      if (!in_section) next
+      token = $0
+      sub(/^[[:space:]>]*([-*+][[:space:]]+|[0-9]+[.)][[:space:]]+)?/, "", token)
+      gsub(/`/, "", token)
+      sub(/^[[:space:]]+/, "", token)
+      if (match(token, /^[a-z0-9][a-z0-9-]*/)) {
+        handle = substr(token, RSTART, RLENGTH)
+        sub(/-+$/, "", handle)
+        rest = substr(token, RSTART + RLENGTH)
+        sub(/^[[:space:]]*[-—:][[:space:]]*/, "", rest)
+        if (handle != "" && !seen[handle]++) printf "%s\t%s\n", handle, rest
       }
     }
   '
