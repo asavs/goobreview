@@ -117,7 +117,7 @@ assert_file_mode() {
 }
 
 test_output_parser() {
-  local valid approve expected_body locations sections resolved_handles
+  local valid approve expected_body locations sections malformed_sections resolved_handles
 
   # shellcheck disable=SC2016
   valid='## Summary
@@ -149,11 +149,24 @@ REQUEST_CHANGES'
     '### [P1] Session can be spoofed' \
     "The query string controls the effective user at \`src/auth.py:42\`." \
     '' \
+    '```suggestion' \
+    'user = session.user' \
+    '```' \
+    '' \
     '### [P2] Unrelated note' \
     'No source location.' |
     review_markdown_finding_sections | tr '\0' '\n')
   assert_contains "finding-section parser keeps cited finding heading" "### [P1] Session can be spoofed" <(printf '%s' "$sections")
   assert_not_contains "finding-section parser skips uncited sections" "### [P2] Unrelated note" <(printf '%s' "$sections")
+  assert_contains "finding-section parser preserves valid suggestion fences" '```suggestion' <(printf '%s' "$sections")
+
+  malformed_sections=$(printf '%s\n' \
+    '### [P1] Broken suggestion fence' \
+    'The changed line at `src/auth.py:42` needs a replacement.' \
+    '```suggestion' \
+    'return session.user' |
+    review_markdown_finding_sections | tr '\0' '\n')
+  assert_not_contains "finding-section parser rejects malformed suggestion fences for inline promotion" "### [P1] Broken suggestion fence" <(printf '%s' "$malformed_sections")
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
   resolved_handles=$(printf '%s\n' \
@@ -385,7 +398,7 @@ test_post_review_uses_rest_api() {
     printf '{"id": 1}\n'
   }
 
-  inline_comments='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"This is stale."}]'
+  inline_comments='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"This is stale.\n\n```suggestion\nrender()\n```"}]'
   post_review 17 REQUEST_CHANGES "Please fix this." deadbeef "$inline_comments"
 
   assert_eq "post_review posts to pull reviews REST endpoint" "repos/example/repo/pulls/17/reviews" "$captured_path"
@@ -393,6 +406,7 @@ test_post_review_uses_rest_api() {
   assert_eq "post_review sends review body" "Please fix this." "$(printf '%s\n' "$captured_payload" | jq -r '.body')"
   assert_eq "post_review ties review to analyzed head" "deadbeef" "$(printf '%s\n' "$captured_payload" | jq -r '.commit_id')"
   assert_eq "post_review includes inline comments atomically" "src/app.py" "$(printf '%s\n' "$captured_payload" | jq -r '.comments[0].path')"
+  assert_contains "post_review preserves suggestion fences in inline comment body" '```suggestion' <(printf '%s\n' "$captured_payload" | jq -r '.comments[0].body')
 
   if post_review 17 NOPE "bad" deadbeef '[]' >/dev/null 2>&1; then
     fail "post_review rejects invalid event"
@@ -414,11 +428,24 @@ test_inline_review_comments_follow_diff_anchors() {
 
   # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by review_inline_comments_json.
   github_api_paginate_array() {
-    printf '%s\n' '{"filename":"src/app.py","patch":"@@ -10,1 +10,0 @@\n-old-only\n@@ -40,2 +40,3 @@\n context\n-old\n+new\n+another"}'
+    printf '%s\n' '{"filename":"src/app.py","patch":"@@ -10,1 +10,0 @@\n-old-only\n@@ -40,2 +40,4 @@\n context\n-old\n+new\n+another\n+third"}'
   }
 
   body="### [P1] Render stays stale
 \`src/app.py:42\` is read from a ref that does not schedule a render.
+
+### [P1] Suggest direct replacement
+\`src/app.py:43\` should schedule a render immediately.
+
+\`\`\`suggestion
+setState(new)
+\`\`\`
+
+### [P2] Malformed suggestion stays out of native inline comments
+\`src/app.py:42\` has an unclosed suggestion fence.
+
+\`\`\`suggestion
+setState(other)
 
 ### [P2] Not on this diff
 \`src/other.py:9\` is outside the changed lines.
@@ -433,9 +460,11 @@ test_inline_review_comments_follow_diff_anchors() {
 \`src/app.py:99\` does not exist."
   comments=$(review_inline_comments_json 17 "$body")
 
-  assert_eq "inline-comment parser emits only verified anchors" "2" "$(printf '%s\n' "$comments" | jq 'length')"
+  assert_eq "inline-comment parser emits only verified anchors with balanced suggestion fences" "3" "$(printf '%s\n' "$comments" | jq 'length')"
   assert_eq "inline-comment parser prefers added side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[0].side')"
   assert_eq "inline-comment parser preserves finding body" "### [P1] Render stays stale" "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
+  assert_contains "inline-comment parser preserves valid suggestion fence" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 43) | .body')
+  assert_not_contains "inline-comment parser omits malformed suggestion fence from native comments" "Malformed suggestion" <(printf '%s\n' "$comments" | jq -r '.[].body')
   assert_eq "inline-comment parser anchors deleted lines on the left" "LEFT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 10) | .side')"
 }
 
@@ -2063,6 +2092,89 @@ EOF
     "$(sha256sum "$TMP_ROOT/research-linus-tail.txt" | awk '{print $1}')"
 }
 
+test_review_body_dedup_filter() {
+  local full_body promoted_json filtered
+
+  full_body='## Summary
+This PR changes the auth path.
+
+### [P1] Render stays stale
+`src/app.py:42` is read from a ref that does not schedule a render.
+
+### [P2] Not promoted
+`src/app.py:99` has no diff anchor so it stays in the body.'
+
+  promoted_json='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"### [P1] Render stays stale\n`src/app.py:42` is read from a ref that does not schedule a render."}]'
+
+  filtered=$(printf '%s\n' "$full_body" | review_body_without_promoted_sections "$promoted_json")
+
+  assert_not_contains "dedup filter strips promoted finding section from body" "### [P1] Render stays stale" <(printf '%s\n' "$filtered")
+  assert_contains "dedup filter preserves summary section" "## Summary" <(printf '%s\n' "$filtered")
+  assert_contains "dedup filter preserves non-promoted finding in body" "### [P2] Not promoted" <(printf '%s\n' "$filtered")
+  assert_eq "dedup filter passthrough when no inline comments" \
+    "$(printf '%s\n' "$full_body")" \
+    "$(printf '%s\n' "$full_body" | review_body_without_promoted_sections '[]')"
+}
+
+test_unresolved_thread_replies_parser() {
+  local replies
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture text.
+  replies=$(printf '%s\n' \
+    '## Resolved Prior Threads' \
+    '- p2-stale-render confirmed fixed.' \
+    '' \
+    '## Unresolved Prior Threads' \
+    '- null-deref-footgun still present — guard added to wrong branch.' \
+    '- `missing-null-check`: not fixed — checked only the success path.' \
+    '- null-deref-footgun duplicate should only appear once.' \
+    '' \
+    '## New Findings' \
+    '- off-by-one is new.' |
+    review_unresolved_thread_replies)
+
+  assert_contains "unresolved reply parser extracts unresolved handle" "null-deref-footgun" <(printf '%s\n' "$replies")
+  assert_contains "unresolved reply parser extracts reply body text" "guard added to wrong branch" <(printf '%s\n' "$replies")
+  assert_contains "unresolved reply parser handles backtick-quoted handles" "missing-null-check" <(printf '%s\n' "$replies")
+  assert_not_contains "unresolved reply parser ignores resolved section" "p2-stale-render" <(printf '%s\n' "$replies")
+  assert_eq "unresolved reply parser deduplicates handles" "2" "$(printf '%s\n' "$replies" | grep -c $'\t' || printf 0)"
+}
+
+test_still_open_thread_reply_posting() {
+  local handle_map replies_file replied reply_calls_file threads
+
+  reply_calls_file="$TMP_ROOT/still-open-reply-calls"
+  replies_file="$TMP_ROOT/still-open-replies.txt"
+  : > "$reply_calls_file"
+
+  handle_map='[
+    {"handle": "null-deref-footgun", "id": "thread-1"},
+    {"handle": "stale-render", "id": "thread-2"}
+  ]'
+
+  threads='[
+    {"id": "thread-1", "isResolved": false},
+    {"id": "thread-2", "isResolved": true}
+  ]'
+
+  printf '%s\t%s\n' "null-deref-footgun" "still present — guard added to wrong branch" > "$replies_file"
+  printf '%s\t%s\n' "stale-render" "still open" >> "$replies_file"
+  printf '%s\t%s\n' "not-in-map" "unmatched handle" >> "$replies_file"
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly.
+  github_api_graphql() {
+    local thread_id
+    thread_id=$(printf '%s\n' "$2" | jq -r '.threadId')
+    printf '%s\n' "$thread_id" >> "$reply_calls_file"
+    jq -n --arg id "$thread_id" '{data: {addPullRequestReviewThreadReply: {comment: {id: ("c-" + $id)}}}}'
+  }
+
+  replied=$(github_reply_still_open_thread_handles_json "$handle_map" "$replies_file" "$threads")
+  assert_eq "still-open reply posts only to open unresolved threads" "1" "$replied"
+  assert_eq "still-open reply targets the correct thread ID" "thread-1" "$(cat "$reply_calls_file")"
+  assert_not_contains "still-open reply skips already-resolved thread" "thread-2" "$reply_calls_file"
+}
+
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
@@ -2081,6 +2193,9 @@ test_github_api_retries_and_logs
 test_post_review_uses_rest_api
 test_inline_review_comments_follow_diff_anchors
 test_review_thread_resolution_helpers
+test_review_body_dedup_filter
+test_unresolved_thread_replies_parser
+test_still_open_thread_reply_posting
 test_review_state_uses_github_reviews_only
 test_check_ci_paginates_required_check_runs
 test_check_runs_summary_reports_only_needed_plumbing
@@ -2099,7 +2214,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=280
+EXPECTED_ASSERTIONS=297
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

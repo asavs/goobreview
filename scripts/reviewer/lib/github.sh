@@ -309,6 +309,34 @@ github_resolve_review_thread_handles_json() {
   [ "$failed" -eq 0 ]
 }
 
+# Post a still-open acknowledgment reply to each unresolved thread listed in
+# the replies file (handle<TAB>body pairs). Does not resolve — the reviewer
+# flagged these as still present, so they should remain open for the author.
+github_reply_still_open_thread_handles_json() {
+  local handle_map_json="$1"
+  local replies_file="$2"
+  local current_threads_json="${3:-$handle_map_json}"
+  local handle reply_body id replied=0 failed=0
+
+  while IFS=$'\t' read -r handle reply_body; do
+    [ -n "$handle" ] || continue
+    id=$(printf '%s\n' "$handle_map_json" | jq -r --arg h "$handle" '.[] | select(.handle == $h) | .id // empty' | head -n 1)
+    [ -n "$id" ] || continue
+    if ! printf '%s\n' "$current_threads_json" | jq -e --arg id "$id" 'any(.[]; .id == $id and .isResolved == false)' >/dev/null 2>&1; then
+      continue
+    fi
+    if github_reply_to_review_thread "$id" "$reply_body"; then
+      replied=$((replied + 1))
+    else
+      printf 'failed to post still-open reply on review thread %s\n' "$id" >&2
+      failed=$((failed + 1))
+    fi
+  done < "$replies_file"
+
+  printf '%s\n' "$replied"
+  [ "$failed" -eq 0 ]
+}
+
 # Convert ordinary Markdown finding sections into native inline-review
 # comments. Only locations that GitHub's own diff exposes are emitted. This
 # makes a bad or stale citation harmless instead of sending an invalid anchor

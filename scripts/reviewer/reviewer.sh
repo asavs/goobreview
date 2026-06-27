@@ -812,13 +812,6 @@ EOF
   fi
 
   review_body=$(printf '%s' "$review" | review_body_before_verdict)
-  body=$(cat <<EOF
-$review_body
-
----
-*Drafted by \`agy\` running on $REVIEWER_RUNNER_NAME, posted by @$BOT_LOGIN. Verdict and findings are agy's; no human read this diff before posting.*
-EOF
-)
 
   if [ -z "$DRY_RUN" ]; then
     if ! current_pr_json=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE"); then
@@ -850,8 +843,19 @@ EOF
     continue
   fi
 
+  filtered_body=$(printf '%s\n' "$review_body" | review_body_without_promoted_sections "$inline_comments_json")
+  body=$(cat <<EOF
+$filtered_body
+
+---
+*Drafted by \`agy\` running on $REVIEWER_RUNNER_NAME, posted by @$BOT_LOGIN. Verdict and findings are agy's; no human read this diff before posting.*
+EOF
+)
+
   resolved_thread_handles=$(mktemp "$STATE_DIR/resolved-thread-handles.$num.XXXXXX")
+  still_open_thread_replies=$(mktemp "$STATE_DIR/still-open-replies.$num.XXXXXX")
   printf '%s\n' "$review_body" | review_resolved_thread_handles >"$resolved_thread_handles"
+  printf '%s\n' "$review_body" | review_unresolved_thread_replies >"$still_open_thread_replies"
   auto_resolve_threads=0
   if [ "$AUTO_RESOLVE_BOT_THREADS" = "1" ]; then
     auto_resolve_threads=$(github_resolvable_review_thread_ids_for_handles "$prompt_thread_handle_map_json" "$resolved_thread_handles" "$unresolved_bot_threads_json" | awk 'END { print NR + 0 }') || auto_resolve_threads=0
@@ -859,7 +863,7 @@ EOF
 
   if [ -n "$DRY_RUN" ]; then
     write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads" "$agy_err_tmp" "$review_worktree" "$ci_state"
-    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
+    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     log "Dry run: would post $event review on PR #$num@$head_sha"
     if [ "$auto_resolve_threads" -gt 0 ]; then
       log "Dry run: would auto-resolve $auto_resolve_threads explicitly selected bot review thread(s) on PR #$num@$head_sha"
@@ -878,13 +882,20 @@ EOF
       else
         log "PR #$num@$head_sha: failed to auto-resolve one or more explicitly selected bot review threads"
       fi
+      if still_open_replied=$(github_reply_still_open_thread_handles_json "$prompt_thread_handle_map_json" "$still_open_thread_replies" "$unresolved_bot_threads_json" 2>>"$LOG_FILE"); then
+        if [ "$still_open_replied" -gt 0 ]; then
+          log "Posted $still_open_replied still-open acknowledgment reply(s) on PR #$num@$head_sha"
+        fi
+      else
+        log "PR #$num@$head_sha: failed to post one or more still-open thread replies"
+      fi
     fi
     capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prompt_tmp" "$review" "$event"
-    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
+    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
   else
-    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
+    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     record_review_failure_and_log "$num" "$head_sha" "Failed to post review on PR #$num@$head_sha"
   fi
 done <<< "$PRS"
