@@ -160,6 +160,7 @@ REQUEST_CHANGES'
   assert_not_contains "finding-section parser skips uncited sections" "### [P2] Unrelated note" <(printf '%s' "$sections")
   assert_contains "finding-section parser preserves valid suggestion fences" '```suggestion' <(printf '%s' "$sections")
 
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
   malformed_sections=$(printf '%s\n' \
     '### [P1] Broken suggestion fence' \
     'The changed line at `src/auth.py:42` needs a replacement.' \
@@ -398,6 +399,7 @@ test_post_review_uses_rest_api() {
     printf '{"id": 1}\n'
   }
 
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review body.
   inline_comments='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"This is stale.\n\n```suggestion\nrender()\n```"}]'
   post_review 17 REQUEST_CHANGES "Please fix this." deadbeef "$inline_comments"
 
@@ -2095,6 +2097,7 @@ EOF
 test_review_body_dedup_filter() {
   local full_body promoted_json filtered
 
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
   full_body='## Summary
 This PR changes the auth path.
 
@@ -2104,6 +2107,7 @@ This PR changes the auth path.
 ### [P2] Not promoted
 `src/app.py:99` has no diff anchor so it stays in the body.'
 
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
   promoted_json='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"### [P1] Render stays stale\n`src/app.py:42` is read from a ref that does not schedule a render."}]'
 
   filtered=$(printf '%s\n' "$full_body" | review_body_without_promoted_sections "$promoted_json")
