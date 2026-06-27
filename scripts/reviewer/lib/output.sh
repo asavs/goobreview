@@ -143,9 +143,13 @@ artifact_secret_scan() {
     return 1
   fi
 
+  # The value must be a literal credential: reject assignments, but treat a
+  # value beginning with '$' as a variable/expression reference, not a secret
+  # (e.g. GitHub Actions `${{ secrets.GITHUB_TOKEN }}` or shell `$GH_TOKEN`),
+  # which would otherwise false-positive on every workflow-touching diff.
   pattern_file=$(mktemp)
   cat >"$pattern_file" <<'EOF'
-(^|[^A-Za-z0-9_])(GH_TOKEN|GITHUB_TOKEN|GITHUB_PAT|REVIEWER_APP_PRIVATE_KEY_PATH|GEMINI_API_KEY|GOOGLE_API_KEY|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_CLOUD_PROJECT|GCLOUD_PROJECT|CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AZURE_CLIENT_SECRET)[[:space:]]*[:=][[:space:]]*['"]?[^[:space:]'",]{3,}
+(^|[^A-Za-z0-9_])(GH_TOKEN|GITHUB_TOKEN|GITHUB_PAT|REVIEWER_APP_PRIVATE_KEY_PATH|GEMINI_API_KEY|GOOGLE_API_KEY|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_CLOUD_PROJECT|GCLOUD_PROJECT|CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AZURE_CLIENT_SECRET)[[:space:]]*[:=][[:space:]]*['"]?[^[:space:]'",$][^[:space:]'",]{2,}
 EOF
 
   if grep -Eiq -f "$pattern_file" "$file"; then
