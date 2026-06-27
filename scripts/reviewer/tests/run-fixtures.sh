@@ -167,6 +167,13 @@ REQUEST_CHANGES'
   assert_contains "finding-section parser preserves valid suggestion fences" '```suggestion' <(printf '%s' "$sections")
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  h1_sections=$(printf '%s\n' \
+    '# Alias try_files redirect loop' \
+    'The `deploy/nginx/mog.conf:43` alias block causes a redirect loop.' |
+    review_markdown_finding_sections | tr '\0' '\n')
+  assert_contains "finding-section parser accepts h1 headings" "# Alias try_files redirect loop" <(printf '%s' "$h1_sections")
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
   malformed_sections=$(printf '%s\n' \
     '### [P1] Broken suggestion fence' \
     'The changed line at `src/auth.py:42` needs a replacement.' \
@@ -2125,7 +2132,14 @@ This PR changes the auth path.
   assert_eq "dedup filter passthrough when no inline comments" \
     "$(printf '%s\n' "$full_body")" \
     "$(printf '%s\n' "$full_body" | review_body_without_promoted_sections '[]')"
-}
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  h1_promoted_json='[{"path":"deploy/nginx/mog.conf","line":43,"side":"RIGHT","body":"# Alias redirect loop\n`deploy/nginx/mog.conf:43` alias causes a loop."}]'
+  h1_filtered=$(printf '%s\n' \
+    '# Alias redirect loop' \
+    '`deploy/nginx/mog.conf:43` alias causes a loop.' |
+    review_body_without_promoted_sections "$h1_promoted_json")
+  assert_not_contains "dedup filter strips promoted h1 section from body" "Alias redirect loop" <(printf '%s\n' "$h1_filtered")
 
 test_unresolved_thread_replies_parser() {
   local replies
@@ -2225,7 +2239,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=299
+EXPECTED_ASSERTIONS=301
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

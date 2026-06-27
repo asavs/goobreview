@@ -13,7 +13,7 @@ meaningful approve/request-changes judgment.
 Write the review body first in GitHub-flavored markdown. Your final
 non-empty line must be exactly one of those GitHub review events.
 For each concrete finding with an identifiable location, use a short, distinctive
-Markdown heading and cite the precise source location as `path/to/file.ext:123`.
+`##` Markdown heading and cite the precise source location as `path/to/file.ext:123`.
 GoobReview verifies cited diff locations and turns verified findings into
 native inline GitHub review comments, and it derives each thread's handle from
 your heading, so name the finding well. When a finding has an obvious minimal

@@ -96,7 +96,7 @@ review_markdown_finding_sections() {
         printf "%s%c", section, 0
       }
     }
-    /^#{2,6}[[:space:]]+/ {
+    /^#{1,6}[[:space:]]+/ {
       emit()
       section = $0 ORS
       in_section = 1
@@ -130,7 +130,7 @@ review_body_without_promoted_sections() {
       in_skip = 0
     }
     { sub(/\r$/, "") }
-    /^#{2,6}[[:space:]]+/ {
+    /^#{1,6}[[:space:]]+/ {
       if ($0 in skip) { in_skip = 1; next }
       in_skip = 0
       print; next
