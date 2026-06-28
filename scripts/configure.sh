@@ -211,19 +211,23 @@ current_posted_personality="$(ops_env_get "$ENV_FILE" REVIEWER_POSTED_PERSONALIT
 if [ -z "$current_posted_personality" ]; then
   current_personality="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
   case "$current_personality" in
+    *angry.md) current_posted_personality="angry" ;;
     *linus.md) current_posted_personality="linus" ;;
     *) current_posted_personality="none" ;;
   esac
 fi
 case "$current_posted_personality" in
+  angry) default_idx=2 ;;
   linus) default_idx=1 ;;
   *) default_idx=0 ;;
 esac
 log "Which review style should be posted to GitHub?"
 log "  0) [$( [ "$default_idx" -eq 0 ] && printf '*' || printf ' ' )] none  - general-purpose review focus, neutral voice"
 log "  1) [$( [ "$default_idx" -eq 1 ] && printf '*' || printf ' ' )] linus - same review focus, blunt/profane when warranted"
+log "  2) [$( [ "$default_idx" -eq 2 ] && printf '*' || printf ' ' )] angry - experimental anger-prefill arm"
 pick="$(ask 'Pick posted review style by number' "$default_idx")"
 case "$pick" in
+  2) posted_personality="angry" ;;
   1) posted_personality="linus" ;;
   *) posted_personality="none" ;;
 esac
@@ -276,7 +280,7 @@ cat <<EOF
   # Tune before launch
   scripts/tune.sh             # edit active files, then optionally dry-run
   scripts/tune.sh 123         # tune against a specific PR
-  #   - edit config/personalities/control.md or config/personalities/linus.md for voice/focus
+  #   - edit config/personalities/control.md, linus.md, or angry.md for voice/focus
   #   - edit REVIEWER_INCLUDE_* in config/reviewer.env for blinding policy
   #   - re-run scripts/dry-run.sh until the artifact looks right
 
