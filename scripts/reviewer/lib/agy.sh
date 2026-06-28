@@ -95,7 +95,8 @@ run_agy_review() {
   local prompt_file="$1" err_file="$2" worktree_dir="$3" personality_file="${4:-${PERSONALITY_FILE:-}}"
   local ci_state="${5:-}"
   local head_sha="${6:-}"
-  local runtime_dir prompt
+  local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
+  local runtime_dir prompt old_prompt_personality prompt_personality_was_set=0
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
     log "Refusing to invoke agy with symlinks present in PR-head snapshot: $worktree_dir"
@@ -106,9 +107,26 @@ run_agy_review() {
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   mkdir -p "$runtime_dir"
   rm -f "$runtime_dir/AGENTS.md"
+  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
+    prompt_personality_was_set=1
+    old_prompt_personality="$PROMPT_PERSONALITY"
+  else
+    old_prompt_personality=""
+  fi
+  PROMPT_PERSONALITY="$prompt_personality"
   if ! write_agents_md "$personality_file" "$runtime_dir/AGENTS.md" "$ci_state" "$head_sha" "$worktree_dir"; then
+    if [ "$prompt_personality_was_set" -eq 1 ]; then
+      PROMPT_PERSONALITY="$old_prompt_personality"
+    else
+      unset PROMPT_PERSONALITY
+    fi
     printf 'Failed to write trusted runtime AGENTS.md; refusing agy invocation.\n' >"$err_file"
     return 1
+  fi
+  if [ "$prompt_personality_was_set" -eq 1 ]; then
+    PROMPT_PERSONALITY="$old_prompt_personality"
+  else
+    unset PROMPT_PERSONALITY
   fi
   prompt=$(cat "$prompt_file")
 

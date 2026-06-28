@@ -219,7 +219,7 @@ case "$research_consent" in
     ;;
   1)
     case "$posted_personality" in
-      none|linus)
+      none|angry)
         repo_visibility="$(repo_visibility_from_github "$repo")"
         case "$repo_visibility" in
           public)
@@ -238,7 +238,7 @@ case "$research_consent" in
         ;;
       *)
         capture_state="disabled-invalid-personality"
-        recommendation="Set REVIEWER_POSTED_PERSONALITY to none or linus."
+        recommendation="Set REVIEWER_POSTED_PERSONALITY to none or angry."
         ;;
     esac
     ;;

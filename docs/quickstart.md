@@ -44,7 +44,7 @@ scripts/configure-inner.sh \
 Add `--repo OWNER/REPO` if the App has access to multiple repos. Add
 `--installation-id ID` if you already know it; otherwise the script discovers it.
 
-The most consequential product choice is **which style gets posted**: `none` posts the neutral control reviewer, while `linus` posts the blunt Linus-style reviewer. Research consent is separate: on public repositories only, it lets live runs retain paired control/Linus prompt+response artifacts for later analysis. Consent never changes which review style is posted.
+The most consequential product choice is **which style gets posted**: `none` posts the neutral control reviewer, `angry` posts the anger-prefill reviewer, and `linus` remains available as a legacy blunt style. Research consent is separate: on public repositories only, it lets live runs retain paired control/angry prompt+response artifacts for later analysis. Consent never changes which review style is posted.
 
 The operational timing choice is captured in `config/required-checks.json`. If you choose **after CI passes**, list the exact GitHub check-run names that must succeed before `agy` is called for each ready PR head. If you choose **each ready head**, the file is written as `[]`, and live reviews run on every non-draft PR head without waiting for CI.
 

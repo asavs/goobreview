@@ -235,7 +235,7 @@ esac
 current_research_consent="$(ops_env_get "$ENV_FILE" REVIEWER_RESEARCH_CONSENT)"
 [ -n "$current_research_consent" ] || current_research_consent=0
 research_consent="$current_research_consent"
-if confirm "Allow paired control/Linus research artifact retention for public repositories?"; then
+if confirm "Allow paired control/angry research artifact retention for public repositories?"; then
   research_consent=1
 else
   research_consent=0

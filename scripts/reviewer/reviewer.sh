@@ -351,8 +351,68 @@ research_personality_file_for_arm() {
   case "$1" in
     none) printf '%s\n' "$CONFIG_DIR/personalities/control.md" ;;
     linus) printf '%s\n' "$CONFIG_DIR/personalities/linus.md" ;;
+    angry) printf '%s\n' "$CONFIG_DIR/personalities/angry.md" ;;
     *) return 1 ;;
   esac
+}
+
+write_research_review_artifact_for_arm() {
+  local output_file="$1"
+  local num="$2"
+  local head_sha="$3"
+  local arm="$4"
+  local personality_file="$5"
+  local role="$6"
+  local event="$7"
+  local prompt_file="$8"
+  local review_body="$9"
+  local ci_state="${10:-}"
+  local old_prompt_personality prompt_personality_was_set=0 status
+
+  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
+    prompt_personality_was_set=1
+    old_prompt_personality="$PROMPT_PERSONALITY"
+  else
+    old_prompt_personality=""
+  fi
+  PROMPT_PERSONALITY="$arm"
+  status=0
+  write_research_review_artifact "$output_file" "$num" "$head_sha" "$arm" "$personality_file" "$role" "$event" "$prompt_file" "$review_body" "$ci_state" || status=$?
+  if [ "$prompt_personality_was_set" -eq 1 ]; then
+    PROMPT_PERSONALITY="$old_prompt_personality"
+  else
+    unset PROMPT_PERSONALITY
+  fi
+  return "$status"
+}
+
+build_research_prompt_for_arm() {
+  local arm="$1"
+  local num="$2"
+  local output_prompt_file="$3"
+  local ci_state="$4"
+  local head_sha="$5"
+  local worktree_dir="$6"
+  local pr_metadata_json="$7"
+  local previous_bot_reviews_json="$8"
+  local prior_bot_threads_json="$9"
+  local old_prompt_personality prompt_personality_was_set=0 status
+
+  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
+    prompt_personality_was_set=1
+    old_prompt_personality="$PROMPT_PERSONALITY"
+  else
+    old_prompt_personality=""
+  fi
+  PROMPT_PERSONALITY="$arm"
+  status=0
+  build_review_prompt "$num" "$output_prompt_file" "$ci_state" "$head_sha" "$worktree_dir" "$pr_metadata_json" "$previous_bot_reviews_json" "$prior_bot_threads_json" || status=$?
+  if [ "$prompt_personality_was_set" -eq 1 ]; then
+    PROMPT_PERSONALITY="$old_prompt_personality"
+  else
+    unset PROMPT_PERSONALITY
+  fi
+  return "$status"
 }
 
 
@@ -366,9 +426,9 @@ resolve_research_capture_state() {
     return 0
   fi
   case "$POSTED_PERSONALITY" in
-    none|linus) ;;
+    none|angry) ;;
     *)
-      log "Research consent is enabled, but paired research capture requires REVIEWER_POSTED_PERSONALITY=none or linus"
+      log "Research consent is enabled, but paired research capture requires REVIEWER_POSTED_PERSONALITY=none or angry"
       return 0
       ;;
   esac
@@ -397,11 +457,12 @@ capture_research_pair() {
   local review_worktree="$4"
   local pr_metadata_json="$5"
   local bot_reviews_json="$6"
-  local posted_prompt_file="$7"
-  local posted_review="$8"
-  local posted_event="$9"
+  local prior_bot_threads_json="$7"
+  local posted_prompt_file="$8"
+  local posted_review="$9"
+  local posted_event="${10}"
   local run_id run_dir posted_arm counterfactual_arm posted_dir counterfactual_dir
-  local posted_file counterfactual_file manifest_tmp counterfactual_err
+  local posted_file counterfactual_file manifest_tmp counterfactual_err counterfactual_prompt_file
   local counterfactual_personality_file counterfactual_review counterfactual_event
   local generated_at required_checks_sha256 posted_personality_file
 
@@ -409,8 +470,8 @@ capture_research_pair() {
 
   posted_arm="$POSTED_PERSONALITY"
   case "$posted_arm" in
-    none) counterfactual_arm="linus" ;;
-    linus) counterfactual_arm="none" ;;
+    none) counterfactual_arm="angry" ;;
+    angry) counterfactual_arm="none" ;;
     *) return 0 ;;
   esac
 
@@ -425,13 +486,19 @@ capture_research_pair() {
   posted_personality_file="$PERSONALITY_FILE"
   counterfactual_personality_file="$(research_personality_file_for_arm "$counterfactual_arm")" || return 0
 
-  if ! write_research_review_artifact "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review" "$ci_state"; then
+  if ! write_research_review_artifact_for_arm "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review" "$ci_state"; then
     log "PR #$num@$head_sha: failed to write posted research artifact"
     return 0
   fi
 
   counterfactual_err=$(mktemp "$STATE_DIR/research-agy.$num.err.XXXXXX")
-  if counterfactual_review=$(run_agy_review "$posted_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha"); then
+  counterfactual_prompt_file=$(mktemp "$STATE_DIR/research-prompt.$num.XXXXXX")
+  if ! build_research_prompt_for_arm "$counterfactual_arm" "$num" "$counterfactual_prompt_file" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prior_bot_threads_json"; then
+    log "PR #$num@$head_sha: failed to build counterfactual research prompt for $counterfactual_arm"
+    rm -f "$counterfactual_err" "$counterfactual_prompt_file"
+    return 0
+  fi
+  if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
     cat "$counterfactual_err" >>"$LOG_FILE"
     if [ -z "${counterfactual_review// }" ]; then
       counterfactual_event="EMPTY_RESPONSE"
@@ -444,12 +511,12 @@ capture_research_pair() {
     counterfactual_review=$(cat "$counterfactual_err")
   fi
 
-  if ! write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$posted_prompt_file" "$counterfactual_review" "$ci_state"; then
+  if ! write_research_review_artifact_for_arm "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state"; then
     log "PR #$num@$head_sha: failed to write counterfactual research artifact"
-    rm -f "$counterfactual_err"
+    rm -f "$counterfactual_err" "$counterfactual_prompt_file"
     return 0
   fi
-  rm -f "$counterfactual_err"
+  rm -f "$counterfactual_err" "$counterfactual_prompt_file"
 
   manifest_tmp=$(mktemp "$STATE_DIR/research-manifest.XXXXXX")
   jq -n \
@@ -909,7 +976,7 @@ EOF
         log "PR #$num@$head_sha: failed to post one or more still-open thread replies"
       fi
     fi
-    capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prompt_tmp" "$review" "$event"
+    capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$unresolved_bot_threads_json" "$prompt_tmp" "$review" "$event"
     rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))

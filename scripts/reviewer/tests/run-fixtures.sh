@@ -1939,6 +1939,7 @@ test_reviewer_research_capture_posts_selected_review_only() {
   cp -R "$REVIEWER_DIR" "$test_reviewer"
   cp "$REVIEWER_DIR/../../config/personalities/control.md" "$config_dir/personalities/control.md"
   cp "$REVIEWER_DIR/../../config/personalities/linus.md" "$config_dir/personalities/linus.md"
+  cp "$REVIEWER_DIR/../../config/personalities/angry.md" "$config_dir/personalities/angry.md"
   printf 'hello\n' > "$source_dir/repo-root/README.md"
   tar -czf "$tarball" -C "$source_dir" repo-root
 
@@ -2048,6 +2049,7 @@ printf 'fake agy stderr trace\n' >&2
 agents_md_content="$(cat AGENTS.md 2>/dev/null || true)"
 case "$agents_md_content" in
   *"Mauro, SHUT"*) printf 'linus review\nCOMMENT\n' ;;
+  *"very angry senior engineer"*) printf 'angry review\nCOMMENT\n' ;;
   *)
     if [ -n "${REVIEWER_DRY_RUN:-}" ]; then
       printf '### [P1] README location\n`README.md:1` needs review.\nAPPROVE\n'
@@ -2073,7 +2075,7 @@ REVIEWER_CONFIG_DIR=$config_dir
 REVIEWER_APP_ID=1
 REVIEWER_APP_INSTALLATION_ID=2
 REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
-REVIEWER_POSTED_PERSONALITY=none
+REVIEWER_POSTED_PERSONALITY=angry
 REVIEWER_RESEARCH_CONSENT=1
 REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/research-required.json
 REVIEWER_MAX_PRS=1
@@ -2091,26 +2093,28 @@ EOF
   pass "research capture fixture reviewer exits successfully"
 
   posted_body=$(jq -r '.body' "$review_payload")
-  assert_contains "posted review uses selected control arm" "control review" <(printf '%s\n' "$posted_body")
-  assert_not_contains "posted review does not include counterfactual linus arm" "linus review" <(printf '%s\n' "$posted_body")
+  assert_contains "posted review uses selected angry arm" "angry review" <(printf '%s\n' "$posted_body")
+  assert_not_contains "posted review does not include counterfactual control arm" "control review" <(printf '%s\n' "$posted_body")
 
   manifest=$(find "$state_dir/research-runs" -name manifest.json | head -n 1)
   if [ -z "$manifest" ]; then
     fail "research manifest is written"
   fi
   pass "research manifest is written"
-  assert_eq "manifest records selected posted personality" "none" "$(jq -r '.posted_personality' "$manifest")"
-  assert_eq "manifest records posted arm event" "APPROVE" "$(jq -r '.posted_event' "$manifest")"
-  assert_eq "manifest records counterfactual event" "COMMENT" "$(jq -r '.counterfactual_event' "$manifest")"
+  assert_eq "manifest records selected posted personality" "angry" "$(jq -r '.posted_personality' "$manifest")"
+  assert_eq "manifest records posted arm" "angry" "$(jq -r '.posted_arm' "$manifest")"
+  assert_eq "manifest records counterfactual arm" "none" "$(jq -r '.counterfactual_arm' "$manifest")"
+  assert_eq "manifest records posted arm event" "COMMENT" "$(jq -r '.posted_event' "$manifest")"
+  assert_eq "manifest records counterfactual event" "APPROVE" "$(jq -r '.counterfactual_event' "$manifest")"
   assert_eq "manifest records public eligibility" "public-consented" "$(jq -r '.research_eligible' "$manifest")"
 
   research_dir="$(dirname "$manifest")"
-  assert_contains "posted artifact preserves control response" "control review" "$research_dir/none/artifact.txt"
-  assert_contains "counterfactual artifact preserves linus response" "linus review" "$research_dir/linus/artifact.txt"
-  assert_contains "posted artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$research_dir/none/artifact.txt"
-  assert_contains "counterfactual artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$research_dir/linus/artifact.txt"
-  assert_contains "posted artifact agents.md reflects control personality" "## Role" "$research_dir/none/artifact.txt"
-  assert_contains "counterfactual artifact agents.md reflects linus personality" "Mauro, SHUT" "$research_dir/linus/artifact.txt"
+  assert_contains "posted artifact preserves angry response" "angry review" "$research_dir/angry/artifact.txt"
+  assert_contains "counterfactual artifact preserves control response" "control review" "$research_dir/none/artifact.txt"
+  assert_contains "posted artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$research_dir/angry/artifact.txt"
+  assert_contains "counterfactual artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$research_dir/none/artifact.txt"
+  assert_contains "posted artifact agents.md reflects angry personality" "You are a very angry senior engineer." "$research_dir/angry/artifact.txt"
+  assert_contains "counterfactual artifact agents.md reflects control personality" "## Role" "$research_dir/none/artifact.txt"
 
   dry_run_out="$TMP_ROOT/research-dry-run.txt"
   status=0
@@ -2130,7 +2134,7 @@ EOF
   assert_contains "dry-run artifact records response hash" "Response SHA256:" "$dry_run_out"
   assert_contains "dry-run artifact records agents.md hash in execution context" "AGENTS.MD SHA256:" "$dry_run_out"
   assert_contains "dry-run artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$dry_run_out"
-  assert_contains "dry-run artifact agents.md has personality content" "## Role" "$dry_run_out"
+  assert_contains "dry-run artifact agents.md has personality content" "You are a very angry senior engineer." "$dry_run_out"
   assert_contains "dry-run artifact agents.md has format contract" "Use REQUEST_CHANGES only for concrete issues that should block merge." "$dry_run_out"
   assert_contains "dry-run artifact captures agy stderr" "fake agy stderr trace" "$dry_run_out"
   assert_contains "dry-run artifact reports resolved inline comments" "Resolved inline comments: 1" "$dry_run_out"
@@ -2152,10 +2156,10 @@ EOF
     found && /^===== AGY PROMPT PAYLOAD END =====$/ { exit }
     found { print; next }
     /^===== AGY PROMPT PAYLOAD START =====$/ { found = 1 }
-  ' "$research_dir/linus/artifact.txt" > "$TMP_ROOT/research-linus-tail.txt"
-  assert_eq "research arms share identical non-personality prompt payload" \
-    "$(sha256sum "$TMP_ROOT/research-none-tail.txt" | awk '{print $1}')" \
-    "$(sha256sum "$TMP_ROOT/research-linus-tail.txt" | awk '{print $1}')"
+  ' "$research_dir/angry/artifact.txt" > "$TMP_ROOT/research-angry-tail.txt"
+  assert_not_contains "control research prompt omits angry assistant cutoff" "Assistant: alright ALRIGHT I GET IT!" "$TMP_ROOT/research-none-tail.txt"
+  assert_contains "angry research prompt includes assistant cutoff" "Assistant: alright ALRIGHT I GET IT! I'll write a review. I thin" "$TMP_ROOT/research-angry-tail.txt"
+  assert_eq "angry research prompt starts transcript-shaped user turn" "User:" "$(head -n 1 "$TMP_ROOT/research-angry-tail.txt")"
 }
 
 test_review_body_dedup_filter() {
@@ -2291,7 +2295,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=322
+EXPECTED_ASSERTIONS=326
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
