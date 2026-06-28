@@ -2047,15 +2047,12 @@ EOF
 #!/usr/bin/env bash
 printf 'fake agy stderr trace\n' >&2
 agents_md_content="$(cat AGENTS.md 2>/dev/null || true)"
-case "$agents_md_content" in
+case "${REVIEWER_DRY_RUN:-}:$agents_md_content" in
+  ?*:*) printf '### [P1] README location\n`README.md:1` needs review.\nAPPROVE\n' ;;
   *"Mauro, SHUT"*) printf 'linus review\nCOMMENT\n' ;;
   *"very angry senior engineer"*) printf 'angry review\nCOMMENT\n' ;;
   *)
-    if [ -n "${REVIEWER_DRY_RUN:-}" ]; then
-      printf '### [P1] README location\n`README.md:1` needs review.\nAPPROVE\n'
-    else
-      printf 'control review\nAPPROVE\n'
-    fi
+    printf 'control review\nAPPROVE\n'
     ;;
 esac
 EOF
