@@ -33,6 +33,7 @@ INCLUDE_AUTHOR="${REVIEWER_INCLUDE_AUTHOR:-0}"
 INCLUDE_DESCRIPTION="${REVIEWER_INCLUDE_DESCRIPTION:-0}"
 INCLUDE_COMMIT_SUBJECTS="${REVIEWER_INCLUDE_COMMIT_SUBJECTS:-1}"
 RESEARCH_CONSENT="${REVIEWER_RESEARCH_CONSENT:-0}"
+RESEARCH_ALLOW_PRIVATE="${REVIEWER_RESEARCH_ALLOW_PRIVATE:-0}"
 REFUSE_ON_HOME_CONTEXT="${REVIEWER_REFUSE_ON_HOME_CONTEXT:-0}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
@@ -445,7 +446,11 @@ resolve_research_capture_state() {
       ;;
     *)
       RESEARCH_REPO_VISIBILITY="private"
-      log "Research consent is enabled, but paired research capture is disabled for private repositories in v1"
+      if [ "$RESEARCH_ALLOW_PRIVATE" = "1" ]; then
+        RESEARCH_CAPTURE_ENABLED=1
+      else
+        log "Research consent is enabled, but paired research capture is disabled for private repositories (set REVIEWER_RESEARCH_ALLOW_PRIVATE=1 to opt in)"
+      fi
       ;;
   esac
 }
@@ -519,6 +524,8 @@ capture_research_pair() {
   rm -f "$counterfactual_err" "$counterfactual_prompt_file"
 
   manifest_tmp=$(mktemp "$STATE_DIR/research-manifest.XXXXXX")
+  local research_eligible="public-consented"
+  [ "$RESEARCH_REPO_VISIBILITY" = "private" ] && research_eligible="private-consented"
   jq -n \
     --arg repo "$REPO" \
     --arg pr "$num" \
@@ -538,7 +545,7 @@ capture_research_pair() {
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
     --arg repo_visibility "$RESEARCH_REPO_VISIBILITY" \
-    --arg research_eligible "public-consented" \
+    --arg research_eligible "$research_eligible" \
     --argjson required_checks "$EFFECTIVE_REQUIRED_CHECKS_JSON" \
     '{
       repo: $repo,

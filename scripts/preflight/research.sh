@@ -117,6 +117,7 @@ env_file_present=0
 repo=""
 posted_personality="none"
 research_consent="0"
+allow_private="0"
 state_dir="${REVIEWER_STATE:-$HOME/.goobreview}"
 research_root=""
 latest_run=""
@@ -133,9 +134,11 @@ if [ -f "$ENV_FILE" ]; then
   repo="$(ops_env_get "$ENV_FILE" REVIEWER_REPO)"
   posted_personality="$(ops_env_get "$ENV_FILE" REVIEWER_POSTED_PERSONALITY)"
   research_consent="$(ops_env_get "$ENV_FILE" REVIEWER_RESEARCH_CONSENT)"
+  allow_private="$(ops_env_get "$ENV_FILE" REVIEWER_RESEARCH_ALLOW_PRIVATE)"
   state_from_env="$(ops_env_get "$ENV_FILE" REVIEWER_STATE)"
   [ -z "$posted_personality" ] && posted_personality="none"
   [ -z "$research_consent" ] && research_consent="0"
+  [ -z "$allow_private" ] && allow_private="0"
   [ -z "$state_from_env" ] || state_dir="$state_from_env"
 fi
 
@@ -227,8 +230,13 @@ case "$research_consent" in
             recommendation="Research capture is enabled for public live reviews. Artifacts remain local in v1."
             ;;
           private)
-            capture_state="disabled-private"
-            recommendation="Private repos do not write paired research artifacts in v1."
+            if [ "$allow_private" = "1" ]; then
+              capture_state="enabled"
+              recommendation="Research capture is enabled for this private repo via REVIEWER_RESEARCH_ALLOW_PRIVATE. Artifacts remain local in v1."
+            else
+              capture_state="disabled-private"
+              recommendation="Set REVIEWER_RESEARCH_ALLOW_PRIVATE=1 to capture paired artifacts on this private repo."
+            fi
             ;;
           *)
             capture_state="unknown-visibility"
@@ -255,6 +263,7 @@ if [ "$report" -eq 1 ]; then
   print_field "reviewer_repo" "$repo"
   print_field "posted_personality" "$posted_personality"
   print_field "research_consent" "$research_consent"
+  print_field "research_allow_private" "$allow_private"
   print_field "repo_visibility" "$repo_visibility"
   print_field "research_capture_state" "$capture_state"
   print_field "research_root" "$research_root"
@@ -273,6 +282,7 @@ research source:         local
 target repo:             ${repo:-unset}
 posted personality:      $posted_personality
 research consent:        $(bool "$research_consent")
+allow private capture:   $(bool "$allow_private")
 repo visibility:         $repo_visibility
 capture state:           $capture_state
 research root:           $research_root

@@ -1367,6 +1367,36 @@ EOF
   install_secret_scanned_artifact "$normal_src" "$normal_dst"
   assert_contains "ordinary artifact text is preserved" "GH_TOKEN and GITHUB_TOKEN are unset" "$normal_dst"
   assert_file_mode "accepted dry-run artifact is mode 0600" "600" "$normal_dst"
+
+  # Variable/expression references are not literal secrets: a workflow diff that
+  # wires `${{ secrets.GITHUB_TOKEN }}` or `$GH_TOKEN` must still be capturable.
+  local ref_src ref_dst
+  ref_src="$TMP_ROOT/ref-artifact.txt"
+  ref_dst="$TMP_ROOT/ref-artifact.out"
+  cat > "$ref_src" <<'EOF'
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
++        env:
++          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          GH_TOKEN: $GITHUB_TOKEN
+EOF
+  if ! install_secret_scanned_artifact "$ref_src" "$ref_dst"; then
+    fail "artifact with Actions/shell secret references is accepted"
+  fi
+  pass "artifact with Actions/shell secret references is accepted"
+  assert_contains "referenced-secret artifact is preserved" "secrets.GITHUB_TOKEN" "$ref_dst"
+
+  # The reference carve-out must not mask a real literal credential assignment.
+  local literal_src literal_dst
+  literal_src="$TMP_ROOT/literal-artifact.txt"
+  literal_dst="$TMP_ROOT/literal-artifact.out"
+  cat > "$literal_src" <<'EOF'
+diff --git a/deploy.sh b/deploy.sh
++GITHUB_TOKEN=ghp_realtokenmaterial123456
+EOF
+  if install_secret_scanned_artifact "$literal_src" "$literal_dst"; then
+    fail "literal credential assignment is still rejected"
+  fi
+  pass "literal credential assignment is still rejected"
 }
 
 test_state_and_output_permissions() {
@@ -1989,7 +2019,7 @@ while [ "\$#" -gt 0 ]; do
 done
 case "\$url" in
   *'/repos/example/repo')
-    printf '%s\n' '{"private":false}' > "\$body_file"
+    printf '%s\n' "{\"private\":\${FIXTURE_REPO_PRIVATE:-false}}" > "\$body_file"
     printf '200'
     ;;
   *'/repos/example/repo/pulls?state=open&per_page=100&page=1')
@@ -2160,6 +2190,42 @@ EOF
   assert_not_contains "control research prompt omits angry assistant cutoff" "Assistant: alright ALRIGHT I GET IT!" "$TMP_ROOT/research-none-tail.txt"
   assert_contains "angry research prompt includes assistant cutoff" "Assistant: alright ALRIGHT I GET IT! I'll write a review. I thin" "$TMP_ROOT/research-angry-tail.txt"
   assert_eq "angry research prompt starts transcript-shaped user turn" "User:" "$(head -n 1 "$TMP_ROOT/research-angry-tail.txt")"
+
+  # Private repos are excluded from capture unless explicitly opted in, and the
+  # manifest then records the private eligibility honestly.
+  local priv_state_off priv_state_on priv_manifest
+  priv_state_off="$TMP_ROOT/research-state-private-off"
+  priv_state_on="$TMP_ROOT/research-state-private-on"
+  mkdir -p "$priv_state_off" "$priv_state_on"
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$priv_state_off" FIXTURE_REPO_PRIVATE=true PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "private-repo capture fixture without opt-in exits successfully"
+  fi
+  pass "private-repo capture fixture without opt-in exits successfully"
+  if [ -d "$priv_state_off/research-runs" ]; then
+    fail "private repo without opt-in writes no paired research artifacts"
+  fi
+  pass "private repo without opt-in writes no paired research artifacts"
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$priv_state_on" REVIEWER_RESEARCH_ALLOW_PRIVATE=1 FIXTURE_REPO_PRIVATE=true PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "private-repo capture fixture with opt-in exits successfully"
+  fi
+  pass "private-repo capture fixture with opt-in exits successfully"
+  priv_manifest=$(find "$priv_state_on/research-runs" -name manifest.json | head -n 1)
+  if [ -z "$priv_manifest" ]; then
+    fail "private repo with opt-in writes research manifest"
+  fi
+  pass "private repo with opt-in writes research manifest"
+  assert_eq "manifest records private visibility" "private" "$(jq -r '.repo_visibility' "$priv_manifest")"
+  assert_eq "manifest records private eligibility" "private-consented" "$(jq -r '.research_eligible' "$priv_manifest")"
 }
 
 test_review_body_dedup_filter() {
@@ -2295,7 +2361,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=326
+EXPECTED_ASSERTIONS=335
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

@@ -76,6 +76,7 @@ key_path=""
 state_dir="/var/lib/goobreview/example"
 posted_personality=""
 research_consent="0"
+research_allow_private="0"
 personality_file=""
 posted_personality_valid=1
 required_checks="$CONFIG_DIR/required-checks.json"
@@ -90,11 +91,13 @@ if [ -f "$ENV_FILE" ]; then
   state_from_env="$(ops_env_get "$ENV_FILE" REVIEWER_STATE)"
   posted_personality="$(ops_env_get "$ENV_FILE" REVIEWER_POSTED_PERSONALITY)"
   research_consent="$(ops_env_get "$ENV_FILE" REVIEWER_RESEARCH_CONSENT)"
+  research_allow_private="$(ops_env_get "$ENV_FILE" REVIEWER_RESEARCH_ALLOW_PRIVATE)"
   personality_file="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
   [ -z "$state_from_env" ] || state_dir="$state_from_env"
 fi
 [ -n "$posted_personality" ] || posted_personality="none"
 [ -n "$research_consent" ] || research_consent="0"
+[ -n "$research_allow_private" ] || research_allow_private="0"
 
 if [ -f "$STATE_FILE" ] && command -v gcloud >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
   # shellcheck disable=SC1090
@@ -271,6 +274,7 @@ if [ "$report" -eq 1 ]; then
   print_field "private_key_readable" "$(bool "$key_readable")"
   print_field "posted_personality" "$posted_personality"
   print_field "research_consent" "$research_consent"
+  print_field "research_allow_private" "$research_allow_private"
   print_field "personality_file" "$personality_file"
   print_field "personality_file_present" "$(bool "$personality_ready")"
   print_field "required_checks_present" "$(bool "$required_checks_ready")"
@@ -295,6 +299,7 @@ private key present:    $(bool "$key_present")${key_path:+ ($key_path)}
 private key readable:   $(bool "$key_readable")
 posted personality:     $posted_personality
 research consent:       $(bool "$research_consent")
+allow private capture:  $(bool "$research_allow_private")
 personality valid:      $(bool "$personality_ready")${personality_file:+ ($personality_file)}
 required checks file:   $(bool "$required_checks_ready") ($required_checks)
 required checks valid:  $(bool "$required_checks_valid")${required_checks_count:+ ($required_checks_count)}
