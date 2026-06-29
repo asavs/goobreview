@@ -192,6 +192,10 @@ case "$posted_personality" in
     personality_path="$CONFIG_DIR/personalities/linus.md"
     personality_file="config/personalities/linus.md"
     ;;
+  angry)
+    personality_path="$CONFIG_DIR/personalities/angry.md"
+    personality_file="config/personalities/angry.md"
+    ;;
   *)
     posted_personality_valid=0
     personality_path=""
@@ -243,9 +247,9 @@ elif [ "$app_id_ready" != "true" ] || [ "$installation_ready" != "true" ]; then
 elif [ "$key_present" -ne 1 ] || [ "$key_readable" -ne 1 ]; then
   recommendation="Place the GitHub App private key at REVIEWER_APP_PRIVATE_KEY_PATH with mode 0600."
 elif [ "$posted_personality_valid" -ne 1 ]; then
-  recommendation="Set REVIEWER_POSTED_PERSONALITY to none or linus."
+  recommendation="Set REVIEWER_POSTED_PERSONALITY to none, linus, or angry."
 elif [ "$personality_ready" -ne 1 ]; then
-  recommendation="Select REVIEWER_POSTED_PERSONALITY=none or linus with scripts/configure.sh."
+  recommendation="Select REVIEWER_POSTED_PERSONALITY=none, linus, or angry with scripts/configure.sh."
 elif [ "$required_checks_ready" -ne 1 ]; then
   recommendation="Run scripts/configure.sh to create required-checks.json."
 elif [ "$required_checks_valid" -ne 1 ]; then
