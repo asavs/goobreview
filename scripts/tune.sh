@@ -22,6 +22,7 @@ ops_source_env "$ENV_FILE"
 ops_require_envs REVIEWER_REPO
 
 case "${REVIEWER_POSTED_PERSONALITY:-}" in
+  angry) personality_file="config/personalities/angry.md" ;;
   linus) personality_file="config/personalities/linus.md" ;;
   none|'') personality_file="${REVIEWER_PERSONALITY_FILE:-config/personalities/control.md}" ;;
   *) personality_file="${REVIEWER_PERSONALITY_FILE:-config/personalities/control.md}" ;;

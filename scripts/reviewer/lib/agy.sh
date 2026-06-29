@@ -40,9 +40,63 @@ set_agy_quota_backoff() {
   log "Antigravity quota exhausted; backing off until $(format_epoch_utc "$until")"
 }
 
+# agy loads context files from the operator's home directory regardless of
+# working directory, merging them into every review as trusted instructions
+# outside the daemon-supplied AGENTS.md and the PR-head snapshot. That is a
+# standing prompt-injection surface (security issue #106): anyone who can write
+# the reviewer account's home directory steers verdicts without touching a PR.
+# List any such files so callers can warn; removing them restores the snapshot
+# as agy's sole project context.
+#
+# The paths below are the auto-load surface confirmed by live VM testing
+# (agy 1.0.10): the global ~/.gemini/ config dir loads both GEMINI.md and
+# AGENTS.md, and the home root loads GEMINI.md. Notably ~/AGENTS.md (home root)
+# is NOT loaded, so it is deliberately excluded -- warning on a non-vector would
+# be a false positive. Re-test and extend if agy's loading behavior changes.
+home_agy_context_files() {
+  local home="${HOME:-}" candidate
+  [ -n "$home" ] || return 0
+  for candidate in \
+    "$home/.gemini/GEMINI.md" \
+    "$home/GEMINI.md" \
+    "$home/.gemini/AGENTS.md"; do
+    if [ -e "$candidate" ]; then
+      printf '%s\n' "$candidate"
+    fi
+  done
+  return 0
+}
+
+# Fail-closed gate for issue #106. When REVIEWER_REFUSE_ON_HOME_CONTEXT=1 the
+# daemon declines to review at all while home-dir context files are present,
+# rather than running agy with operator/co-tenant content merged in as trusted
+# instructions. Off by default (the warning is the baseline); intended for
+# shared or multi-tenant VMs where the home dir is not solely operator-owned.
+should_refuse_for_home_context() {
+  [ "${REFUSE_ON_HOME_CONTEXT:-0}" = "1" ] || return 1
+  [ -n "$(home_agy_context_files)" ] || return 1
+  return 0
+}
+
+warn_home_agy_context_files() {
+  local files file
+  files=$(home_agy_context_files)
+  [ -n "$files" ] || return 0
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    log "WARNING: home-directory agy context file will be auto-loaded as trusted instructions for every review: $file (security issue #106; agy context is no longer limited to the daemon AGENTS.md and PR-head snapshot -- remove it unless intentional)"
+  done <<EOF
+$files
+EOF
+  return 0
+}
+
 run_agy_review() {
-  local prompt_file="$1" err_file="$2" worktree_dir="$3"
-  local runtime_dir prompt
+  local prompt_file="$1" err_file="$2" worktree_dir="$3" personality_file="${4:-${PERSONALITY_FILE:-}}"
+  local ci_state="${5:-}"
+  local head_sha="${6:-}"
+  local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
+  local runtime_dir prompt old_prompt_personality prompt_personality_was_set=0
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
     log "Refusing to invoke agy with symlinks present in PR-head snapshot: $worktree_dir"
@@ -52,6 +106,28 @@ run_agy_review() {
 
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   mkdir -p "$runtime_dir"
+  rm -f "$runtime_dir/AGENTS.md"
+  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
+    prompt_personality_was_set=1
+    old_prompt_personality="$PROMPT_PERSONALITY"
+  else
+    old_prompt_personality=""
+  fi
+  PROMPT_PERSONALITY="$prompt_personality"
+  if ! write_agents_md "$personality_file" "$runtime_dir/AGENTS.md" "$ci_state" "$head_sha" "$worktree_dir"; then
+    if [ "$prompt_personality_was_set" -eq 1 ]; then
+      PROMPT_PERSONALITY="$old_prompt_personality"
+    else
+      unset PROMPT_PERSONALITY
+    fi
+    printf 'Failed to write trusted runtime AGENTS.md; refusing agy invocation.\n' >"$err_file"
+    return 1
+  fi
+  if [ "$prompt_personality_was_set" -eq 1 ]; then
+    PROMPT_PERSONALITY="$old_prompt_personality"
+  else
+    unset PROMPT_PERSONALITY
+  fi
   prompt=$(cat "$prompt_file")
 
   (

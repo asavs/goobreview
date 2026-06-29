@@ -34,6 +34,7 @@ INCLUDE_DESCRIPTION="${REVIEWER_INCLUDE_DESCRIPTION:-0}"
 INCLUDE_COMMIT_SUBJECTS="${REVIEWER_INCLUDE_COMMIT_SUBJECTS:-1}"
 RESEARCH_CONSENT="${REVIEWER_RESEARCH_CONSENT:-0}"
 RESEARCH_ALLOW_PRIVATE="${REVIEWER_RESEARCH_ALLOW_PRIVATE:-0}"
+REFUSE_ON_HOME_CONTEXT="${REVIEWER_REFUSE_ON_HOME_CONTEXT:-0}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 AUTO_RESOLVE_BOT_THREADS="${REVIEWER_AUTO_RESOLVE_BOT_THREADS:-0}"
@@ -98,13 +99,6 @@ fi
 
 validate_reviewer_config
 load_effective_required_checks_json >/dev/null
-if [ -z "$DRY_RUN" ] && [ -z "$RENDER_PROMPT_ONLY" ]; then
-  if [ "${REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK:-0}" = "1" ]; then
-    log "Skipping live launch validation because REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1"
-  elif ! bash "$REPO_DIR/scripts/launch-check.sh" >>"$LOG_FILE" 2>&1; then
-    fatal "live launch validation failed. Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh, inspect the artifact, then run scripts/launch-check.sh."
-  fi
-fi
 
 write_dry_run_artifact() {
   local num="$1"
@@ -116,10 +110,11 @@ write_dry_run_artifact() {
   local auto_resolve_threads="${7:-0}"
   local agy_err_file="${8:-}"
   local worktree_dir="${9:-}"
+  local ci_state="${10:-}"
   local output_file="$DRY_RUN_OUT"
   local required_checks_sha256 inline_comment_count
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
-  local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks
+  local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks agents_md_tmp agents_md_bytes agents_md_sha home_agy_context
 
   [ -n "$output_file" ] || return 0
 
@@ -140,6 +135,10 @@ write_dry_run_artifact() {
     stderr_bytes=0
     stderr_sha=
   fi
+  agents_md_tmp=$(mktemp "$STATE_DIR/dry-agents-md.XXXXXX")
+  write_agents_md "$PERSONALITY_FILE" "$agents_md_tmp" "$ci_state" "$head_sha" "$worktree_dir" || fatal "failed to render dry-run AGENTS.md artifact"
+  agents_md_bytes=$(wc -c <"$agents_md_tmp" | tr -d ' ')
+  agents_md_sha=$(sha256sum "$agents_md_tmp" | awk '{print $1}')
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then
     snapshot_files=$(find "$worktree_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
     snapshot_symlinks=$(find "$worktree_dir" -type l 2>/dev/null | wc -l | tr -d ' ')
@@ -147,6 +146,8 @@ write_dry_run_artifact() {
     snapshot_files=0
     snapshot_symlinks=0
   fi
+  home_agy_context=$(home_agy_context_files | paste -sd ',' -)
+  [ -n "$home_agy_context" ] || home_agy_context="none"
   {
     printf 'GoobReview dry run\n'
     printf 'Repository: %s\n' "$REPO"
@@ -165,6 +166,7 @@ write_dry_run_artifact() {
     printf 'Antigravity CLI path: %s\n' "$agy_path"
     printf 'Antigravity CLI version probe: %s\n' "$agy_version"
     printf 'Runtime cwd: %s\n' "$runtime_dir"
+    printf 'Home-directory agy context files (auto-loaded; security issue #106): %s\n' "$home_agy_context"
     printf 'PR-head snapshot path: %s\n' "${worktree_dir:-unavailable}"
     printf 'PR-head snapshot regular files: %s\n' "$snapshot_files"
     printf 'PR-head snapshot symlinks: %s\n' "$snapshot_symlinks"
@@ -176,9 +178,14 @@ write_dry_run_artifact() {
     if [ -n "$stderr_sha" ]; then
       printf 'Agy stderr SHA256: %s\n' "$stderr_sha"
     fi
+    printf 'AGENTS.MD bytes: %s\n' "$agents_md_bytes"
+    printf 'AGENTS.MD SHA256: %s\n' "$agents_md_sha"
     printf 'GitHub token environment removed before agy: yes\n'
     printf 'GitHub App key environment removed before agy: yes\n'
     printf '===== AGY EXECUTION CONTEXT END =====\n'
+    printf '\n===== AGY AGENTS.MD START =====\n'
+    append_bounded_file "$agents_md_tmp" "$MAX_ARTIFACT_BYTES" "dry-run agents-md artifact"
+    printf '\n===== AGY AGENTS.MD END =====\n'
     printf '\n===== AGY PROMPT PAYLOAD START =====\n'
     append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "dry-run prompt artifact"
     printf '\n===== AGY PROMPT PAYLOAD END =====\n'
@@ -219,6 +226,7 @@ write_dry_run_artifact() {
     artifact_tmp=""
   fi
   [ -z "$artifact_tmp" ] || rm -f "$artifact_tmp"
+  rm -f "$agents_md_tmp"
   required_checks_sha256=$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')
   jq -n \
     --arg repo "$REPO" \
@@ -232,6 +240,8 @@ write_dry_run_artifact() {
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
     --arg dry_run_bypass_ci "${DRY_RUN_BYPASS_CI:-}" \
+    --arg agents_md_bytes "$agents_md_bytes" \
+    --arg agents_md_sha256 "$agents_md_sha" \
     --arg prompt_bytes "$prompt_bytes" \
     --arg prompt_sha256 "$prompt_sha" \
     --arg response_bytes "$response_bytes" \
@@ -251,6 +261,8 @@ write_dry_run_artifact() {
       required_checks_file: $required_checks_file,
       required_checks_sha256: $required_checks_sha256,
       dry_run_bypass_ci: $dry_run_bypass_ci,
+      agents_md_bytes: ($agents_md_bytes | tonumber),
+      agents_md_sha256: $agents_md_sha256,
       prompt_bytes: ($prompt_bytes | tonumber),
       prompt_sha256: $prompt_sha256,
       response_bytes: ($response_bytes | tonumber),
@@ -274,11 +286,19 @@ write_research_review_artifact() {
   local event="$7"
   local prompt_file="$8"
   local review_body="$9"
-  local artifact_tmp artifact_bytes marker marker_bytes body_bytes
+  local ci_state="${10:-}"
+  local artifact_tmp artifact_bytes marker marker_bytes body_bytes agents_md_tmp agents_md_bytes agents_md_sha
 
   mkdir -p "$(dirname "$output_file")"
   chmod 700 "$(dirname "$output_file")" 2>/dev/null || true
   artifact_tmp=$(mktemp "$STATE_DIR/research-artifact.XXXXXX")
+  agents_md_tmp=$(mktemp "$STATE_DIR/research-agents-md.XXXXXX")
+  write_agents_md "$personality_file" "$agents_md_tmp" "$ci_state" "$head_sha" || {
+    rm -f "$artifact_tmp" "$agents_md_tmp"
+    return 1
+  }
+  agents_md_bytes=$(wc -c <"$agents_md_tmp" | tr -d ' ')
+  agents_md_sha=$(sha256sum "$agents_md_tmp" | awk '{print $1}')
   {
     printf 'GoobReview research artifact\n'
     printf 'Repository: %s\n' "$REPO"
@@ -289,7 +309,12 @@ write_research_review_artifact() {
     printf 'Posted personality: %s\n' "$POSTED_PERSONALITY"
     printf 'Personality file: %s\n' "$personality_file"
     printf 'Parsed review event: %s\n' "$event"
+    printf 'AGENTS.MD bytes: %s\n' "$agents_md_bytes"
+    printf 'AGENTS.MD SHA256: %s\n' "$agents_md_sha"
     printf 'Generated at: %s\n' "$(date -Is)"
+    printf '\n===== AGY AGENTS.MD START =====\n'
+    append_bounded_file "$agents_md_tmp" "$MAX_ARTIFACT_BYTES" "research agents-md artifact"
+    printf '\n===== AGY AGENTS.MD END =====\n'
     printf '\n===== AGY PROMPT PAYLOAD START =====\n'
     append_bounded_file "$prompt_file" "$MAX_ARTIFACT_BYTES" "research prompt artifact"
     printf '\n===== AGY PROMPT PAYLOAD END =====\n'
@@ -310,67 +335,87 @@ write_research_review_artifact() {
       printf '%s' "$marker" >>"$artifact_tmp.truncated"
     fi
     install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || {
-      rm -f "$artifact_tmp" "$artifact_tmp.truncated"
+      rm -f "$artifact_tmp" "$artifact_tmp.truncated" "$agents_md_tmp"
       return 1
     }
     rm -f "$artifact_tmp.truncated"
   else
     install_secret_scanned_artifact "$artifact_tmp" "$output_file" || {
-      rm -f "$artifact_tmp"
+      rm -f "$artifact_tmp" "$agents_md_tmp"
       return 1
     }
   fi
-  rm -f "$artifact_tmp"
+  rm -f "$artifact_tmp" "$agents_md_tmp"
 }
 
 research_personality_file_for_arm() {
   case "$1" in
     none) printf '%s\n' "$CONFIG_DIR/personalities/control.md" ;;
     linus) printf '%s\n' "$CONFIG_DIR/personalities/linus.md" ;;
+    angry) printf '%s\n' "$CONFIG_DIR/personalities/angry.md" ;;
     *) return 1 ;;
   esac
 }
 
-write_prompt_with_replaced_personality() {
-  local output_prompt_file="$1"
-  local personality_file="$2"
-  local source_prompt_file="$3"
-  local prompt_tail status
+write_research_review_artifact_for_arm() {
+  local output_file="$1"
+  local num="$2"
+  local head_sha="$3"
+  local arm="$4"
+  local personality_file="$5"
+  local role="$6"
+  local event="$7"
+  local prompt_file="$8"
+  local review_body="$9"
+  local ci_state="${10:-}"
+  local old_prompt_personality prompt_personality_was_set=0 status
 
-  prompt_tail=$(mktemp "$STATE_DIR/research-prompt-tail.XXXXXX")
-  if ! awk '
-    found {
-      print
-      next
-    }
-    prev == "---" && $0 == "Reviewer Contract" {
-      print prev
-      print
-      found = 1
-      next
-    }
-    {
-      prev = $0
-    }
-    END {
-      if (!found) exit 1
-    }
-  ' "$source_prompt_file" >"$prompt_tail"; then
-    rm -f "$prompt_tail"
-    return 1
+  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
+    prompt_personality_was_set=1
+    old_prompt_personality="$PROMPT_PERSONALITY"
+  else
+    old_prompt_personality=""
   fi
-
+  PROMPT_PERSONALITY="$arm"
   status=0
-  : >"$output_prompt_file"
-  cat "$personality_file" >>"$output_prompt_file" || status=1
-  printf '\n' >>"$output_prompt_file" || status=1
-  cat "$prompt_tail" >>"$output_prompt_file" || status=1
-  rm -f "$prompt_tail"
-  if [ "$status" -eq 0 ]; then
-    validate_prompt_size "$output_prompt_file" || status=1
+  write_research_review_artifact "$output_file" "$num" "$head_sha" "$arm" "$personality_file" "$role" "$event" "$prompt_file" "$review_body" "$ci_state" || status=$?
+  if [ "$prompt_personality_was_set" -eq 1 ]; then
+    PROMPT_PERSONALITY="$old_prompt_personality"
+  else
+    unset PROMPT_PERSONALITY
   fi
   return "$status"
 }
+
+build_research_prompt_for_arm() {
+  local arm="$1"
+  local num="$2"
+  local output_prompt_file="$3"
+  local ci_state="$4"
+  local head_sha="$5"
+  local worktree_dir="$6"
+  local pr_metadata_json="$7"
+  local previous_bot_reviews_json="$8"
+  local prior_bot_threads_json="$9"
+  local old_prompt_personality prompt_personality_was_set=0 status
+
+  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
+    prompt_personality_was_set=1
+    old_prompt_personality="$PROMPT_PERSONALITY"
+  else
+    old_prompt_personality=""
+  fi
+  PROMPT_PERSONALITY="$arm"
+  status=0
+  build_review_prompt "$num" "$output_prompt_file" "$ci_state" "$head_sha" "$worktree_dir" "$pr_metadata_json" "$previous_bot_reviews_json" "$prior_bot_threads_json" || status=$?
+  if [ "$prompt_personality_was_set" -eq 1 ]; then
+    PROMPT_PERSONALITY="$old_prompt_personality"
+  else
+    unset PROMPT_PERSONALITY
+  fi
+  return "$status"
+}
+
 
 resolve_research_capture_state() {
   RESEARCH_CAPTURE_ENABLED=0
@@ -382,9 +427,9 @@ resolve_research_capture_state() {
     return 0
   fi
   case "$POSTED_PERSONALITY" in
-    none|linus) ;;
+    none|angry) ;;
     *)
-      log "Research consent is enabled, but paired research capture requires REVIEWER_POSTED_PERSONALITY=none or linus"
+      log "Research consent is enabled, but paired research capture requires REVIEWER_POSTED_PERSONALITY=none or angry"
       return 0
       ;;
   esac
@@ -417,11 +462,12 @@ capture_research_pair() {
   local review_worktree="$4"
   local pr_metadata_json="$5"
   local bot_reviews_json="$6"
-  local posted_prompt_file="$7"
-  local posted_review="$8"
-  local posted_event="$9"
+  local prior_bot_threads_json="$7"
+  local posted_prompt_file="$8"
+  local posted_review="$9"
+  local posted_event="${10}"
   local run_id run_dir posted_arm counterfactual_arm posted_dir counterfactual_dir
-  local posted_file counterfactual_file manifest_tmp counterfactual_prompt counterfactual_err
+  local posted_file counterfactual_file manifest_tmp counterfactual_err counterfactual_prompt_file
   local counterfactual_personality_file counterfactual_review counterfactual_event
   local generated_at required_checks_sha256 posted_personality_file
 
@@ -429,8 +475,8 @@ capture_research_pair() {
 
   posted_arm="$POSTED_PERSONALITY"
   case "$posted_arm" in
-    none) counterfactual_arm="linus" ;;
-    linus) counterfactual_arm="none" ;;
+    none) counterfactual_arm="angry" ;;
+    angry) counterfactual_arm="none" ;;
     *) return 0 ;;
   esac
 
@@ -445,37 +491,37 @@ capture_research_pair() {
   posted_personality_file="$PERSONALITY_FILE"
   counterfactual_personality_file="$(research_personality_file_for_arm "$counterfactual_arm")" || return 0
 
-  if ! write_research_review_artifact "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review"; then
+  if ! write_research_review_artifact_for_arm "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review" "$ci_state"; then
     log "PR #$num@$head_sha: failed to write posted research artifact"
     return 0
   fi
 
-  counterfactual_prompt=$(mktemp "$STATE_DIR/research-prompt.$num.XXXXXX")
   counterfactual_err=$(mktemp "$STATE_DIR/research-agy.$num.err.XXXXXX")
-  if write_prompt_with_replaced_personality "$counterfactual_prompt" "$counterfactual_personality_file" "$posted_prompt_file"; then
-    if counterfactual_review=$(run_agy_review "$counterfactual_prompt" "$counterfactual_err" "$review_worktree"); then
-      cat "$counterfactual_err" >>"$LOG_FILE"
-      if [ -z "${counterfactual_review// }" ]; then
-        counterfactual_event="EMPTY_RESPONSE"
-      elif ! counterfactual_event=$(printf '%s' "$counterfactual_review" | review_verdict_event); then
-        counterfactual_event="INVALID"
-      fi
-    else
-      cat "$counterfactual_err" >>"$LOG_FILE"
-      counterfactual_event="AGY_FAILED"
-      counterfactual_review=$(cat "$counterfactual_err")
-    fi
-  else
-    counterfactual_event="PROMPT_FAILED"
-    counterfactual_review="Counterfactual prompt assembly failed."
-  fi
-
-  if ! write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt" "$counterfactual_review"; then
-    log "PR #$num@$head_sha: failed to write counterfactual research artifact"
-    rm -f "$counterfactual_prompt" "$counterfactual_err"
+  counterfactual_prompt_file=$(mktemp "$STATE_DIR/research-prompt.$num.XXXXXX")
+  if ! build_research_prompt_for_arm "$counterfactual_arm" "$num" "$counterfactual_prompt_file" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prior_bot_threads_json"; then
+    log "PR #$num@$head_sha: failed to build counterfactual research prompt for $counterfactual_arm"
+    rm -f "$counterfactual_err" "$counterfactual_prompt_file"
     return 0
   fi
-  rm -f "$counterfactual_prompt" "$counterfactual_err"
+  if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
+    cat "$counterfactual_err" >>"$LOG_FILE"
+    if [ -z "${counterfactual_review// }" ]; then
+      counterfactual_event="EMPTY_RESPONSE"
+    elif ! counterfactual_event=$(printf '%s' "$counterfactual_review" | review_verdict_event); then
+      counterfactual_event="INVALID"
+    fi
+  else
+    cat "$counterfactual_err" >>"$LOG_FILE"
+    counterfactual_event="AGY_FAILED"
+    counterfactual_review=$(cat "$counterfactual_err")
+  fi
+
+  if ! write_research_review_artifact_for_arm "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state"; then
+    log "PR #$num@$head_sha: failed to write counterfactual research artifact"
+    rm -f "$counterfactual_err" "$counterfactual_prompt_file"
+    return 0
+  fi
+  rm -f "$counterfactual_err" "$counterfactual_prompt_file"
 
   manifest_tmp=$(mktemp "$STATE_DIR/research-manifest.XXXXXX")
   local research_eligible="public-consented"
@@ -533,6 +579,18 @@ capture_research_pair() {
 if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$IGNORE_AGY_BACKOFF" ]; then
   if remaining=$(agy_backoff_remaining); then
     log "Antigravity quota backoff active for ${remaining}s"
+    exit 0
+  fi
+fi
+
+# agy will run this tick; flag any home-directory context files it would
+# auto-load as trusted instructions outside the daemon's prompt (issue #106).
+# With REVIEWER_REFUSE_ON_HOME_CONTEXT=1, fail closed for the whole tick rather
+# than review with that content in agy's context.
+if [ -z "$RENDER_PROMPT_ONLY" ]; then
+  warn_home_agy_context_files
+  if should_refuse_for_home_context; then
+    log "Refusing this tick: home-directory agy context files present and REVIEWER_REFUSE_ON_HOME_CONTEXT=1 (security issue #106); remove them or unset the flag"
     exit 0
   fi
 fi
@@ -763,10 +821,10 @@ EOF
   fi
 
   agy_err_tmp=$(mktemp "$STATE_DIR/agy.$num.err.XXXXXX")
-  if ! review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree"); then
+  if ! review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree" "$PERSONALITY_FILE" "$ci_state" "$head_sha"); then
     cat "$agy_err_tmp" >> "$LOG_FILE"
     if [ -n "$DRY_RUN" ]; then
-      write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")" '[]' 0 "$agy_err_tmp" "$review_worktree"
+      write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
     fi
     set_agy_quota_backoff "$agy_err_tmp" || true
     rm -f "$prompt_tmp" "$agy_err_tmp"
@@ -777,7 +835,7 @@ EOF
 
   if [ -z "${review// }" ]; then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$review")
-    write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree"
+    write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
     rm -f "$prompt_tmp" "$agy_err_tmp"
     if [ -z "$DRY_RUN" ]; then
       invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
@@ -796,7 +854,7 @@ EOF
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "INVALID_VERDICT" "$review")
-    write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree"
+    write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
     rm -f "$prompt_tmp" "$agy_err_tmp"
     verdict_line=$(printf '%s' "$review" | awk '
       {
@@ -828,13 +886,6 @@ EOF
   fi
 
   review_body=$(printf '%s' "$review" | review_body_before_verdict)
-  body=$(cat <<EOF
-$review_body
-
----
-*Drafted by \`agy\` running on $REVIEWER_RUNNER_NAME, posted by @$BOT_LOGIN. Verdict and findings are agy's; no human read this diff before posting.*
-EOF
-)
 
   if [ -z "$DRY_RUN" ]; then
     if ! current_pr_json=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE"); then
@@ -860,22 +911,52 @@ EOF
     fi
   fi
 
-  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body"); then
+  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body" "$review_worktree"); then
     rm -f "$prompt_tmp" "$agy_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to resolve inline review anchors"
     continue
   fi
+  scope_downgraded=0
+  scoped_event=$(review_event_after_scope_guard "$event" "$inline_comments_json") || {
+    rm -f "$prompt_tmp" "$agy_err_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to evaluate inline review scope"
+    continue
+  }
+  if [ "$event" = "REQUEST_CHANGES" ] && [ "$scoped_event" = "COMMENT" ]; then
+    log "PR #$num@$head_sha: downgraded REQUEST_CHANGES to COMMENT because all anchored findings target pre-existing or context lines"
+    scope_downgraded=1
+  fi
+  event="$scoped_event"
+
+  filtered_body=$(printf '%s\n' "$review_body" | review_body_without_promoted_sections "$inline_comments_json")
+  if [ "$scope_downgraded" -eq 1 ]; then
+    filtered_body=$(cat <<EOF
+$filtered_body
+
+[goobreview: posted as COMMENT because all anchored findings resolved to pre-existing or context lines, so they were not treated as blocking for this PR.]
+EOF
+)
+  fi
+  body=$(cat <<EOF
+$filtered_body
+
+---
+*Drafted by \`agy\` running on $REVIEWER_RUNNER_NAME, posted by @$BOT_LOGIN. Verdict and findings are agy's; no human read this diff before posting.*
+EOF
+)
 
   resolved_thread_handles=$(mktemp "$STATE_DIR/resolved-thread-handles.$num.XXXXXX")
+  still_open_thread_replies=$(mktemp "$STATE_DIR/still-open-replies.$num.XXXXXX")
   printf '%s\n' "$review_body" | review_resolved_thread_handles >"$resolved_thread_handles"
+  printf '%s\n' "$review_body" | review_unresolved_thread_replies >"$still_open_thread_replies"
   auto_resolve_threads=0
   if [ "$AUTO_RESOLVE_BOT_THREADS" = "1" ]; then
     auto_resolve_threads=$(github_resolvable_review_thread_ids_for_handles "$prompt_thread_handle_map_json" "$resolved_thread_handles" "$unresolved_bot_threads_json" | awk 'END { print NR + 0 }') || auto_resolve_threads=0
   fi
 
   if [ -n "$DRY_RUN" ]; then
-    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads" "$agy_err_tmp" "$review_worktree"
-    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
+    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads" "$agy_err_tmp" "$review_worktree" "$ci_state"
+    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     log "Dry run: would post $event review on PR #$num@$head_sha"
     if [ "$auto_resolve_threads" -gt 0 ]; then
       log "Dry run: would auto-resolve $auto_resolve_threads explicitly selected bot review thread(s) on PR #$num@$head_sha"
@@ -894,13 +975,20 @@ EOF
       else
         log "PR #$num@$head_sha: failed to auto-resolve one or more explicitly selected bot review threads"
       fi
+      if still_open_replied=$(github_reply_still_open_thread_handles_json "$prompt_thread_handle_map_json" "$still_open_thread_replies" "$unresolved_bot_threads_json" 2>>"$LOG_FILE"); then
+        if [ "$still_open_replied" -gt 0 ]; then
+          log "Posted $still_open_replied still-open acknowledgment reply(s) on PR #$num@$head_sha"
+        fi
+      else
+        log "PR #$num@$head_sha: failed to post one or more still-open thread replies"
+      fi
     fi
-    capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prompt_tmp" "$review" "$event"
-    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
+    capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$unresolved_bot_threads_json" "$prompt_tmp" "$review" "$event"
+    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
   else
-    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles"
+    rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     record_review_failure_and_log "$num" "$head_sha" "Failed to post review on PR #$num@$head_sha"
   fi
 done <<< "$PRS"

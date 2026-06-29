@@ -39,7 +39,7 @@ Options:
                              the App installation exposes exactly one repo.
   --installation-id ID       Use an existing App installation ID. If omitted,
                              auto-discover from --repo.
-  --posted-personality NAME  Posted review style: none or linus.
+  --posted-personality NAME  Posted review style: none, linus, or angry.
                              Default: none.
   --research-consent 0|1     Whether public-repo paired research artifacts may
                              be retained. Default: 0.
@@ -128,8 +128,8 @@ ops_copy_if_missing "$ENV_FILE" "$CONFIG_DIR/reviewer.env.example" || exit 1
 [ -n "$personality" ] || personality="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
 
 case "$posted_personality" in
-  none|linus) ;;
-  *) ops_die "Invalid --posted-personality: $posted_personality (expected none or linus)." ;;
+  none|linus|angry) ;;
+  *) ops_die "Invalid --posted-personality: $posted_personality (expected none, linus, or angry)." ;;
 esac
 case "$research_consent" in
   0|1) ;;
@@ -195,6 +195,7 @@ fi
 case "$posted_personality" in
   none) posted_personality_path="$REPO_ROOT/config/personalities/control.md" ;;
   linus) posted_personality_path="$REPO_ROOT/config/personalities/linus.md" ;;
+  angry) posted_personality_path="$REPO_ROOT/config/personalities/angry.md" ;;
 esac
 ops_require_file "$posted_personality_path" "Expected committed personality file for posted style '$posted_personality'."
 ops_env_set "$ENV_FILE" REVIEWER_POSTED_PERSONALITY "$posted_personality"

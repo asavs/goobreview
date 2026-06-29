@@ -4,9 +4,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+STATE_FILE="$REPO_ROOT/.goobreview-cloud-shell.env"
 ENV_FILE="${REVIEWER_ENV_FILE:-$REPO_ROOT/config/reviewer.env}"
 # shellcheck disable=SC1091
 . "$REPO_ROOT/scripts/lib/ops.sh"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/vm.sh"
 export OPS_LOG_PREFIX="preflight-runtime"
 
 report=0
@@ -120,6 +123,76 @@ if [ -f "$ENV_FILE" ]; then
   state_from_env="$(ops_env_get "$ENV_FILE" REVIEWER_STATE)"
   [ -z "$state_from_env" ] || state_dir="$state_from_env"
 fi
+runtime_scope="local"
+
+if [ -f "$STATE_FILE" ] && command -v gcloud >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+  vm_name="${GOOBREVIEW_VM_NAME:-goobreview-1}"
+  zone="${GOOBREVIEW_ZONE:-us-central1-a}"
+  vm_checkout="${GOOBREVIEW_VM_CHECKOUT:-/opt/goobreview/example}"
+  vm_env_path="${GOOBREVIEW_VM_ENV_PATH:-$vm_checkout/config/reviewer.env}"
+  if vm_instance_exists "$vm_name" "$zone" && vm_ssh_reachable "$vm_name" "$zone" 15; then
+    remote_report="$(vm_remote_preflight_report "$vm_name" "$zone" "$vm_checkout" "$vm_env_path" runtime 30)"
+    if [ -n "$remote_report" ]; then
+      runtime_scope="vm"
+      state_dir="$(ops_report_value state_dir "$remote_report")"
+      state_present="$(ops_report_bool_int state_dir_present "$remote_report")"
+      dry_run_count="$(ops_report_value dry_run_count "$remote_report")"
+      latest_dry_run_path="$(ops_report_value latest_dry_run "$remote_report")"
+      latest_dry_run_mtime="$(ops_report_value latest_dry_run_mtime "$remote_report")"
+      latest_launch_metadata_path="$(ops_report_value latest_launch_metadata "$remote_report")"
+      latest_launch_metadata_mtime="$(ops_report_value latest_launch_metadata_mtime "$remote_report")"
+      cron_state="$(ops_report_value cron_installed "$remote_report")"
+      log_file="$(ops_report_value log_file "$remote_report")"
+      log_mtime="$(ops_report_value log_mtime "$remote_report")"
+      cron_log="$(ops_report_value cron_log "$remote_report")"
+      cron_log_mtime="$(ops_report_value cron_log_mtime "$remote_report")"
+      sync_log="$(ops_report_value sync_log "$remote_report")"
+      sync_log_mtime="$(ops_report_value sync_log_mtime "$remote_report")"
+      recommendation="$(ops_report_value recommendation "$remote_report")"
+      if [ "$report" -eq 1 ]; then
+        print_field "runtime_scope" "$runtime_scope"
+        print_field "vm_name" "$vm_name"
+        print_field "zone" "$zone"
+        print_field "state_dir" "$state_dir"
+        print_field "state_dir_present" "$(bool "$state_present")"
+        print_field "dry_run_count" "$dry_run_count"
+        print_field "latest_dry_run" "$latest_dry_run_path"
+        print_field "latest_dry_run_mtime" "$latest_dry_run_mtime"
+        print_field "latest_launch_metadata" "$latest_launch_metadata_path"
+        print_field "latest_launch_metadata_mtime" "$latest_launch_metadata_mtime"
+        print_field "cron_installed" "$cron_state"
+        print_field "log_file" "$log_file"
+        print_field "log_mtime" "$log_mtime"
+        print_field "cron_log" "$cron_log"
+        print_field "cron_log_mtime" "$cron_log_mtime"
+        print_field "sync_log" "$sync_log"
+        print_field "sync_log_mtime" "$sync_log_mtime"
+        print_field "recommendation" "$recommendation"
+        exit 0
+      fi
+      cat <<EOF
+Runtime preflight
+-----------------
+runtime source:         VM ($vm_name/$zone)
+state dir:              $(bool "$state_present") ($state_dir)
+dry-run artifacts:      $dry_run_count
+latest dry-run:         ${latest_dry_run_path:-none}
+latest dry-run mtime:   ${latest_dry_run_mtime:-none}
+launch metadata:        ${latest_launch_metadata_path:-none}
+launch metadata mtime:  ${latest_launch_metadata_mtime:-none}
+cron installed:         $cron_state
+reviewer log mtime:     ${log_mtime:-none} ($log_file)
+cron log mtime:         ${cron_log_mtime:-none} ($cron_log)
+sync log mtime:         ${sync_log_mtime:-none} ($sync_log)
+
+Next: $recommendation
+EOF
+      exit 0
+    fi
+  fi
+fi
 
 state_present=0
 if [ -d "$state_dir" ]; then
@@ -143,7 +216,7 @@ recommendation="Run scripts/dry-run.sh and inspect the generated artifact before
 if [ "$state_present" -ne 1 ]; then
   recommendation="Run scripts/configure.sh and scripts/dry-run.sh to create runtime state."
 elif [ -z "$latest_launch_metadata_path" ]; then
-  recommendation="Run REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh and inspect the generated artifact before enabling cron."
+  recommendation="Run scripts/dry-run.sh and inspect the generated artifact before enabling cron."
 elif [ "$cron_state" = "true" ]; then
   recommendation="Scheduler appears installed; inspect logs under $state_dir."
 else
@@ -151,6 +224,7 @@ else
 fi
 
 if [ "$report" -eq 1 ]; then
+  print_field "runtime_scope" "$runtime_scope"
   print_field "state_dir" "$state_dir"
   print_field "state_dir_present" "$(bool "$state_present")"
   print_field "dry_run_count" "$dry_run_count"
@@ -172,6 +246,7 @@ fi
 cat <<EOF
 Runtime preflight
 -----------------
+runtime source:         local
 state dir:              $(bool "$state_present") ($state_dir)
 dry-run artifacts:      $dry_run_count
 latest dry-run:         ${latest_dry_run_path:-none}

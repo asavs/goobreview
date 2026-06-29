@@ -31,7 +31,7 @@ scripts/configure.sh  # auto-detects target repo + installation ID when possible
 
 The `agy` step is intentionally interactive and uses Google Sign-In. Keep cached Google auth state out of this repo and checkout.
 
-`configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, asks which review style should be posted, and asks whether public-repo research artifacts may be retained. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
+`configure.sh` is the interactive wrapper: it copies each gitignored config file from its `.example` sibling, auto-detects the target repo and installation ID when the App installation exposes exactly one repo, asks which review style should be posted, asks whether public-repo research artifacts may be retained, and asks whether each ready PR head should wait for CI. It delegates deterministic writes and validation to `scripts/configure-inner.sh`, which agents and scripts can call directly:
 
 ```bash
 scripts/configure-inner.sh \
@@ -44,7 +44,9 @@ scripts/configure-inner.sh \
 Add `--repo OWNER/REPO` if the App has access to multiple repos. Add
 `--installation-id ID` if you already know it; otherwise the script discovers it.
 
-The most consequential product choice is **which style gets posted**: `none` posts the neutral control reviewer, while `linus` posts the blunt Linus-style reviewer. Research consent is separate: on public repositories only, it lets live runs retain paired control/Linus prompt+response artifacts for later analysis. Consent never changes which review style is posted.
+The most consequential product choice is **which style gets posted**: `none` posts the neutral control reviewer, `angry` posts the anger-prefill reviewer, and `linus` remains available as a legacy blunt style. Research consent is separate: on public repositories only, it lets live runs retain paired control/angry prompt+response artifacts for later analysis. Consent never changes which review style is posted.
+
+The operational timing choice is captured in `config/required-checks.json`. If you choose **after CI passes**, list the exact GitHub check-run names that must succeed before `agy` is called for each ready PR head. If you choose **each ready head**, the file is written as `[]`, and live reviews run on every non-draft PR head without waiting for CI.
 
 The second choice is the **blinding policy** in `config/reviewer.env`: `REVIEWER_INCLUDE_AUTHOR` (default `0` — the reviewer never learns the author's username), `REVIEWER_INCLUDE_DESCRIPTION` (default `0` — the PR body is omitted), and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (default `1` — commit subjects are included as compact orientation titles). The rest of the prompt — check-run rows, workflow/package-script context, the bot's previous review, the per-file diff, the snapshot pointer — is fixed; forks edit `scripts/reviewer/lib/prompt.sh` to change the shape.
 
@@ -58,7 +60,7 @@ Still on the VM:
 scripts/dry-run.sh
 ```
 
-This runs the reviewer once against your target repo with `REVIEWER_DRY_RUN=1` so nothing is posted. It makes a fresh `agy` call and writes a dry-run artifact containing a sanitized agy execution context, the exact prompt payload, agy stderr, and the response.
+This runs the reviewer once against your target repo with `REVIEWER_DRY_RUN=1` so nothing is posted. It makes a fresh `agy` call and writes a dry-run artifact containing a sanitized agy execution context, the generated runtime `AGENTS.md`, the exact prompt payload, agy stderr, and the response.
 
 To dry-run a specific PR:
 
@@ -78,7 +80,7 @@ Dry runs can target draft PRs and previously reviewed PR heads. They also bypass
 REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
 ```
 
-This writes a sibling `.launch.json` metadata file that records the target repo, config hashes, required-check list, prompt/response/stderr hashes, and whether CI was bypassed.
+Each successful dry run writes a sibling `.launch.json` metadata file that records the target repo, config hashes, required-check list, runtime `AGENTS.md`/prompt/response/stderr hashes, and whether CI was bypassed.
 
 To preview exactly what `agy` would receive without calling it:
 
@@ -104,7 +106,7 @@ Once the dry run looks good:
 scripts/enable-cron.sh
 ```
 
-Installs a one-line crontab entry that rotates `cron.log` and runs `run-once.sh` every minute. It first runs `scripts/launch-check.sh`, which refuses to launch unless current live config matches the latest non-bypassed dry-run metadata and required checks are configured. Live reviewer ticks run the same launch validation before posting. Use `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1` or `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1` only for intentional emergency bypasses. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
+Installs a one-line crontab entry that rotates `cron.log` and runs `run-once.sh` every minute. It first runs `scripts/launch-check.sh`, which refuses to launch unless current live config is valid and a successful dry-run metadata artifact exists for the current target repo. Use `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1` only when intentionally launching without that rehearsal. The reviewer self-throttles to one PR review per tick by default (`REVIEWER_MAX_PRS=1`), so this isn't as aggressive as it sounds.
 
 Prefer systemd? See [docs/daemon-runbook.md#systemd-timer](daemon-runbook.md#systemd-timer).
 

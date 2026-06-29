@@ -28,6 +28,52 @@ maybe_edit() {
   fi
 }
 
+choose_review_trigger() {
+  local required_checks_file="$CONFIG_DIR/required-checks.json"
+  local default_idx=0 pick existing_count
+
+  if [ -f "$required_checks_file" ]; then
+    existing_count="$(jq 'length' "$required_checks_file" 2>/dev/null || printf '')"
+    if [ "$existing_count" = "0" ]; then
+      default_idx=1
+    fi
+  fi
+
+  log "When should GoobReview call the reviewer for a PR head?"
+  log "  0) [$( [ "$default_idx" -eq 0 ] && printf '*' || printf ' ' )] after CI passes - wait for listed GitHub checks before calling agy"
+  log "  1) [$( [ "$default_idx" -eq 1 ] && printf '*' || printf ' ' )] each ready head - call agy on every non-draft PR head without waiting for CI"
+  pick="$(ask 'Pick review timing by number' "$default_idx")"
+  case "$pick" in
+    1) REVIEW_TRIGGER="when-ready" ;;
+    *) REVIEW_TRIGGER="after-ci" ;;
+  esac
+}
+
+apply_review_trigger() {
+  local trigger="$1" required_checks_file="$CONFIG_DIR/required-checks.json"
+
+  case "$trigger" in
+    when-ready)
+      printf '[]\n' > "$required_checks_file"
+      log "Configured review timing: every ready PR head (required-check gate disabled)."
+      ;;
+    after-ci)
+      log "Configured review timing: after listed CI checks pass."
+      maybe_edit "$required_checks_file"
+      if jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' "$required_checks_file" >/dev/null; then
+        if [ "$(jq 'length' "$required_checks_file")" -eq 0 ]; then
+          ops_warn "required-checks.json is empty, so live reviews will run on every ready PR head until check names are added."
+        fi
+      else
+        ops_die "Invalid required-check config in $required_checks_file; expected a JSON array of nonempty strings."
+      fi
+      ;;
+    *)
+      ops_die "Unknown review trigger: $trigger"
+      ;;
+  esac
+}
+
 discover_repo_from_app() {
   local discovered repo_from_app installation_from_app
 
@@ -165,19 +211,23 @@ current_posted_personality="$(ops_env_get "$ENV_FILE" REVIEWER_POSTED_PERSONALIT
 if [ -z "$current_posted_personality" ]; then
   current_personality="$(ops_env_get "$ENV_FILE" REVIEWER_PERSONALITY_FILE)"
   case "$current_personality" in
+    *angry.md) current_posted_personality="angry" ;;
     *linus.md) current_posted_personality="linus" ;;
     *) current_posted_personality="none" ;;
   esac
 fi
 case "$current_posted_personality" in
+  angry) default_idx=2 ;;
   linus) default_idx=1 ;;
   *) default_idx=0 ;;
 esac
 log "Which review style should be posted to GitHub?"
 log "  0) [$( [ "$default_idx" -eq 0 ] && printf '*' || printf ' ' )] none  - general-purpose review focus, neutral voice"
 log "  1) [$( [ "$default_idx" -eq 1 ] && printf '*' || printf ' ' )] linus - same review focus, blunt/profane when warranted"
+log "  2) [$( [ "$default_idx" -eq 2 ] && printf '*' || printf ' ' )] angry - experimental anger-prefill arm"
 pick="$(ask 'Pick posted review style by number' "$default_idx")"
 case "$pick" in
+  2) posted_personality="angry" ;;
   1) posted_personality="linus" ;;
   *) posted_personality="none" ;;
 esac
@@ -185,11 +235,14 @@ esac
 current_research_consent="$(ops_env_get "$ENV_FILE" REVIEWER_RESEARCH_CONSENT)"
 [ -n "$current_research_consent" ] || current_research_consent=0
 research_consent="$current_research_consent"
-if confirm "Allow paired control/Linus research artifact retention for public repositories?"; then
+if confirm "Allow paired control/angry research artifact retention for public repositories?"; then
   research_consent=1
 else
   research_consent=0
 fi
+
+REVIEW_TRIGGER=""
+choose_review_trigger
 
 inner_args=(
   --env-file "$ENV_FILE"
@@ -208,11 +261,11 @@ fi
 
 bash "$INNER_SH" "${inner_args[@]}"
 
+apply_review_trigger "$REVIEW_TRIGGER"
+
 if confirm "Open reviewer.env in $EDITOR_CMD to review other settings?"; then
   "$EDITOR_CMD" "$ENV_FILE"
 fi
-
-maybe_edit "$CONFIG_DIR/required-checks.json"
 
 log "Done. Next steps:"
 cat <<EOF
@@ -227,7 +280,7 @@ cat <<EOF
   # Tune before launch
   scripts/tune.sh             # edit active files, then optionally dry-run
   scripts/tune.sh 123         # tune against a specific PR
-  #   - edit config/personalities/control.md or config/personalities/linus.md for voice/focus
+  #   - edit config/personalities/control.md, linus.md, or angry.md for voice/focus
   #   - edit REVIEWER_INCLUDE_* in config/reviewer.env for blinding policy
   #   - re-run scripts/dry-run.sh until the artifact looks right
 

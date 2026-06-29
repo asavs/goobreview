@@ -23,7 +23,7 @@ sync.log                Checkout sync log.
 app_token.json          Cached App installation token + slug (refreshed when <5 min remain).
 app-key.pem             GitHub App private key (you provide; mode 0600).
 dry-pr-<number>.txt     Dry-run artifact with full agy prompt payload and response.
-research-runs/          Consented public-repo paired control/Linus artifacts.
+research-runs/          Consented public-repo paired control/angry artifacts.
 *.txt.launch.json       Launch metadata from a dry run: repo, config hashes, required checks, and CI-bypass state.
 ```
 
@@ -62,7 +62,8 @@ For a numbered PR, the dry run writes
 `$REVIEWER_STATE/dry-pr-123.txt`. The artifact includes:
 
 - run metadata, including the parsed event, resolved inline-review comments that would be submitted, and any explicitly selected bot-owned threads that would be auto-resolved if enabled;
-- a sanitized agy execution context: command shape, model, timeout, runtime cwd, PR-head snapshot path/counts, prompt/response hashes, stderr hash, and a note that agy's injected system prompt and tool definitions are not observable from GoobReview;
+- a sanitized agy execution context: command shape, model, timeout, runtime cwd, PR-head snapshot path/counts, runtime `AGENTS.md`/prompt/response hashes, stderr hash, and a note that agy's injected system prompt and tool definitions are not observable from GoobReview;
+- the daemon-generated runtime `AGENTS.md` containing trusted reviewer instructions and GitHub API facts;
 - the exact Gemini prompt payload;
 - Gemini stderr;
 - Gemini's full response, or stderr as the response body if Gemini failed.
@@ -79,9 +80,9 @@ diffs or docs that mention environment variable names without printing values.
 Dry runs do not post reviews, do not mark PRs reviewed, can target draft
 PRs by number, and bypass the required-CI gate by default so prompt
 configuration can be tested before CI is terminal. Set
-`REVIEWER_DRY_RUN_BYPASS_CI=0` to keep production CI gating during a dry
-run. Set `REVIEWER_DRY_RUN_OUT=/path/to/file.txt` to choose a different
-artifact path.
+`REVIEWER_DRY_RUN_BYPASS_CI=0` when you specifically want a dry run to wait
+for the configured check gate. Set `REVIEWER_DRY_RUN_OUT=/path/to/file.txt`
+to choose a different artifact path.
 
 Render the exact prompt text for one PR without calling agy
 or posting a review:
@@ -124,7 +125,7 @@ For emergency/manual operation only, set
 continue from the current checkout after a sync failure. Leave it unset or
 `0` for scheduled live operation.
 
-`scripts/enable-cron.sh` runs `scripts/launch-check.sh` before installing the cron entry. Live `reviewer.sh` ticks run the same validation before posting. The launch check requires current live config files, matching dry-run launch metadata, nonempty required checks, and a dry run that used production CI gating (`REVIEWER_DRY_RUN_BYPASS_CI=0`). To bypass scheduler validation deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1`. To bypass live tick validation deliberately, set `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK=1`. Narrower launch-check bypasses are `REVIEWER_ALLOW_LAUNCH_WITH_BYPASSED_CI=1` and `REVIEWER_ALLOW_LAUNCH_WITHOUT_REQUIRED_CHECKS=1`.
+`scripts/enable-cron.sh` runs `scripts/launch-check.sh` before installing the cron entry. The launch check requires current live config files and a successful dry-run metadata artifact for the current target repo. Required checks may be nonempty, meaning "review every ready PR head after those checks pass," or `[]`, meaning "review every ready PR head without waiting for CI." To bypass scheduler validation deliberately, set `REVIEWER_ALLOW_ENABLE_CRON_WITHOUT_LAUNCH_CHECK=1`.
 
 ## Systemd Timer
 
@@ -200,12 +201,12 @@ Use one unit pair per reviewer identity (`goobreview-alice.service`/`.timer`, `g
 5. Checks whether the App has already posted a review on the same head commit (via the GitHub API); skips if so.
 6. Counts the PR against `REVIEWER_MAX_ATTEMPTS`, then applies the required-check gate.
 7. Downloads a PR-head source snapshot to `REVIEWER_RUNTIME_STATE/worktrees/<repo>/current` and neutralizes any symlinks into metadata stubs before prompt assembly or Gemini access.
-8. Builds the prompt with trusted material first: the configured posted style (`REVIEWER_POSTED_PERSONALITY=none` uses `control.md`; `linus` uses `linus.md`), a shared evidence-first reviewer contract, GitHub check-run rows with run URLs, and the GitHub review formatting rule. A single trust boundary then separates untrusted PR material: compact PR orientation (title, base branch, and head branch; author and PR body blinded by default), commit subjects, the subject of the prior bot review on the same PR (not its full body), unresolved bot-created inline review threads from GitHub's durable thread state, workflow files and package scripts from the PR-head snapshot, the snapshot mount path with a pointer at the repo's own `AGENTS.md`/`CONTRIBUTING.md`/`GUIDELINES.md` conventions, and the per-file diff with changed-file index and whole-file omission markers (lockfiles plus the repo's `.gitattributes` `linguist-generated` patterns). Composition is fixed in `scripts/reviewer/lib/prompt.sh`; posted style, research consent, blinding policy, and budgets come from `reviewer.env`.
+8. Writes trusted material to the isolated agy runtime `AGENTS.md`: the configured posted style (`REVIEWER_POSTED_PERSONALITY=none` uses `control.md`; `linus` uses `linus.md`; `angry` uses `angry.md`), a shared evidence-first reviewer contract, GitHub check-run rows with run URLs, the GitHub review formatting rule, the read-only snapshot mount path with a pointer at the repo's own `AGENTS.md`/`CONTRIBUTING.md`/`GUIDELINES.md` conventions, and the trust boundary. The `angry` arm also appends an experimental assistant interruption after the trust boundary. The snapshot directive is trusted instruction — it must sit beside the trust boundary in `AGENTS.md`, not in the prompt that boundary tells agy to treat as data, or agy stops inspecting the snapshot. The `--print` prompt then carries untrusted PR material: compact PR orientation (title, base branch, and head branch; author and PR body blinded by default), commit subjects, the subject of the prior bot review on the same PR (not its full body), unresolved bot-created inline review threads from GitHub's durable thread state, workflow files and package scripts from the PR-head snapshot, and the per-file diff with changed-file index and whole-file omission markers (lockfiles plus the repo's `.gitattributes` `linguist-generated` patterns). In the `angry` arm only, the prompt payload is framed as a transcript-shaped user turn and ends with an experimental assistant cutoff. Composition is fixed in `scripts/reviewer/lib/prompt.sh`; posted style, research consent, blinding policy, and budgets come from `reviewer.env`.
 9. Runs Gemini CLI headlessly from `REVIEWER_RUNTIME_STATE/gemini-runtime`, with the PR-head snapshot attached as read-only workspace context, PR-authored `GEMINI.md` / `.env` files excluded from automatic context, MCP servers disabled for the review invocation, and Gemini CLI's documented `GEMINI_CLI_TRUST_WORKSPACE=true` session override set for that isolated runtime directory.
 10. Parses the GitHub review event line.
 11. Re-reads the PR head and unresolved bot-created review threads, then atomically posts the GitHub review event, summary, and any verified inline comments through the GitHub REST API. There is no line-matching dedup: the reviewer is shown its open threads by handle and asked to address each one explicitly, so a re-raised finding at most produces a visible duplicate thread rather than silently swallowing a genuine new finding.
 12. If `REVIEWER_AUTO_RESOLVE_BOT_THREADS=1`, resolves unresolved GitHub review threads originally opened by this bot only when the review body explicitly lists their handle (a slug derived from the thread's heading) in a `Resolved Prior Threads` section and GitHub reports the App can resolve them. Each resolution posts a confirming reply into the thread first, so it reads as a conversation turn rather than a silent state flip.
-13. If `REVIEWER_RESEARCH_CONSENT=1` and the target repository is public, saves paired control/Linus prompt+response artifacts under `REVIEWER_STATE/research-runs/`. The posted style is still the only review posted to GitHub; the other style is counterfactual research data.
+13. If `REVIEWER_RESEARCH_CONSENT=1` and the target repository is public, saves paired control/angry prompt+response artifacts under `REVIEWER_STATE/research-runs/`. The posted style is still the only review posted to GitHub; the other style is counterfactual research data.
 
 Queued skips, attempted reviews, and posted reviews are separate counters.
 Drafts, self-authored PRs, PRs outside `REVIEWER_ONLY_PR`, and
@@ -280,8 +281,8 @@ REVIEWER_STATE=/var/lib/goobreview/example \
 
 The reviewer reads two gitignored files under `config/`, each copied from a `*.example.*` sibling. `scripts/configure.sh` writes them interactively, and the example files themselves carry the authoritative inline documentation:
 
-- **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_POSTED_PERSONALITY` (`none` or `linus`; default `none`). `REVIEWER_RESEARCH_CONSENT` defaults to `0`; when set to `1`, public live reviews retain paired control/Linus artifacts under `REVIEWER_STATE/research-runs/`. Also carries the blinding policy: `REVIEWER_INCLUDE_AUTHOR` and `REVIEWER_INCLUDE_DESCRIPTION` (default `0`), and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (default `1`).
-- **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon fetches all check-run pages for the PR head before deciding whether a required check is missing, waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "do not gate" — only for initial setup or repos without CI.
+- **`config/reviewer.env`** (from `reviewer.env.example`) — daemon environment. Required: `REVIEWER_REPO`, `REVIEWER_APP_ID`, `REVIEWER_APP_INSTALLATION_ID`, `REVIEWER_APP_PRIVATE_KEY_PATH`, `REVIEWER_STATE`, `REVIEWER_SYNC_REPO_DIR`, and `REVIEWER_POSTED_PERSONALITY` (`none`, `linus`, or `angry`; default `none`). `REVIEWER_RESEARCH_CONSENT` defaults to `0`; when set to `1`, public live reviews retain paired control/angry artifacts under `REVIEWER_STATE/research-runs/`. Also carries the blinding policy: `REVIEWER_INCLUDE_AUTHOR` and `REVIEWER_INCLUDE_DESCRIPTION` (default `0`), and `REVIEWER_INCLUDE_COMMIT_SUBJECTS` (default `1`).
+- **`config/required-checks.json`** (from `required-checks.example.json`) — exact GitHub check-run display names that gate review posting. The daemon fetches all check-run pages for the PR head before deciding whether a required check is missing, waits while required checks are missing or pending, and posts `REQUEST_CHANGES` without calling Gemini when one fails. An empty array means "review every ready PR head without waiting for CI" and is valid for repos without CI or teams that want immediate feedback.
 
 GitHub API calls are bounded by default. Shell-based REST calls use `REVIEWER_GITHUB_CONNECT_TIMEOUT` (default `10` seconds), `REVIEWER_GITHUB_MAX_TIME` (default `60` seconds), `REVIEWER_GITHUB_RETRIES` (default `2` retries for safe transient GET failures such as network errors, 5xx, 429, or rate-limit-like 403 responses), and `REVIEWER_GITHUB_RETRY_SLEEP` (default `1` second between attempts). The App-token helper (`get-installation-token.sh`) uses `REVIEWER_GITHUB_FETCH_TIMEOUT` (default `60` seconds) as its per-request `curl --max-time`. Failed GitHub API calls log the method, path, curl status, HTTP status, attempt count, and a short redacted response snippet so operators can distinguish auth/configuration errors from transient GitHub failures without leaking tokens. Check-run summaries include whether the fetched data is complete and whether the displayed rows were intentionally truncated; set `REVIEWER_CHECK_RUN_SUMMARY_LIMIT` (default `200`) to change the display limit without changing required-check gating.
 
@@ -292,13 +293,13 @@ Live posting requires real deployment config. `scripts/reviewer/reviewer.sh` ref
 Before enabling cron or another live daemon, run:
 
 ```bash
-REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh
+scripts/dry-run.sh
 scripts/launch-check.sh
 ```
 
-The first command writes the normal dry-run artifact and a sibling `.launch.json` file. The second confirms that the launch metadata still matches the current target repo and required-check config.
+The first command writes the normal dry-run artifact and a sibling `.launch.json` file with runtime `AGENTS.md`, prompt, response, and stderr hashes. The second confirms that the latest launch metadata targets the current repo and reports the selected review trigger from the current required-check config.
 
-Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim. Operators choose the posted style with `REVIEWER_POSTED_PERSONALITY=none|linus`; the legacy `REVIEWER_PERSONALITY_FILE` path remains as an escape hatch for old configs when `REVIEWER_POSTED_PERSONALITY` is unset. To try Linus in a dry run without editing config:
+Personalities are the exception to the `.example` pattern: `config/personalities/<name>.md` files are committed verbatim. Operators choose the posted style with `REVIEWER_POSTED_PERSONALITY=none|linus|angry`; the legacy `REVIEWER_PERSONALITY_FILE` path remains as an escape hatch for old configs when `REVIEWER_POSTED_PERSONALITY` is unset. To try Linus in a dry run without editing config:
 
 ```bash
 REVIEWER_POSTED_PERSONALITY=linus scripts/dry-run.sh 42
@@ -313,7 +314,6 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 - `REVIEWER_MAX_ATTEMPTS` — maximum non-skipped PRs to attempt in one tick. Defaults to `REVIEWER_MAX_PRS`. Reaching this limit logs `Reached REVIEWER_MAX_ATTEMPTS=...` and stops the tick.
 - `REVIEWER_IGNORE_AGY_BACKOFF` — set `1` to run even while an Antigravity quota backoff (`agy_backoff_until`) is active. `dry-run.sh` sets this automatically.
 - `REVIEWER_REQUIRED_CHECKS_JSON` + `REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE=1` — override the required-check gate from the environment for one-off runs; both must be set, so a stray env var cannot loosen a production gate.
-- `REVIEWER_ALLOW_LIVE_WITHOUT_LAUNCH_CHECK` — emergency bypass for the live tick launch gate. Prefer rerunning `REVIEWER_DRY_RUN_BYPASS_CI=0 scripts/dry-run.sh` and `scripts/launch-check.sh`.
 - `REVIEWER_SYNC_REMOTE`, `REVIEWER_SYNC_BRANCH`, `REVIEWER_SYNC_LOG` — which remote/branch `sync-worktree.sh` tracks (default `origin`/`main`) and where it logs.
 - `REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE` — emergency/manual override; set to `1` only when you intentionally want a scheduler tick to run from the current checkout after sync fails. Default `0` fails closed.
 - `REVIEWER_ONLY_PR` — restrict a run (including `merge-gate.sh`) to a single PR number.
@@ -331,5 +331,6 @@ Env vars (set in `reviewer.env` or inline) beyond the required set:
 - The daemon does not inspect full CI logs; it gates on the configured required-check state.
 - The daemon does not create follow-up issues automatically.
 - The daemon trusts the App private key at `REVIEWER_APP_PRIVATE_KEY_PATH` and local Gemini auth. Keep the key file at mode `0600`, owned by the user that runs cron, and keep the VM account locked down.
+- agy auto-loads context files from the reviewer account's home directory — `~/.gemini/GEMINI.md`, `~/GEMINI.md`, and `~/.gemini/AGENTS.md` (the auto-load surface confirmed by live testing on agy 1.0.10; `~/AGENTS.md` at the home root is not loaded) — into every review as trusted instructions, independent of the daemon's prompt and the PR-head snapshot. Anything placed there steers verdicts without touching a PR, so treat the home directory as part of the trust boundary. The daemon logs a `WARNING: home-directory agy context file ...` line (and records the files in the dry-run artifact's agy execution context) when any are present; remove them unless they are intentional. For shared or multi-tenant VMs where the home directory is not solely operator-owned, set `REVIEWER_REFUSE_ON_HOME_CONTEXT=1` to fail closed — the daemon then refuses to review the whole tick (logging why) while such files are present, instead of only warning. The daemon-supplied `AGENTS.md` in agy's isolated runtime dir is the only context file it should depend on.
 - The checkout must stay clean. `sync-worktree.sh` refuses to update a dirty checkout; `run-once.sh` logs that failure and exits before reviewing unless `REVIEWER_ALLOW_STALE_CHECKOUT_ON_SYNC_FAILURE=1` is set deliberately.
 - Each cron tick attempts at most `REVIEWER_MAX_ATTEMPTS` non-skipped PRs and posts at most `REVIEWER_MAX_PRS` reviews. Both default to one.

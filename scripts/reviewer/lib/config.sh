@@ -71,8 +71,12 @@ resolve_reviewer_personality_config() {
       POSTED_PERSONALITY="linus"
       PERSONALITY_FILE="$CONFIG_DIR/personalities/linus.md"
       ;;
+    angry)
+      POSTED_PERSONALITY="angry"
+      PERSONALITY_FILE="$CONFIG_DIR/personalities/angry.md"
+      ;;
     *)
-      fatal "invalid REVIEWER_POSTED_PERSONALITY: $configured_posted (expected none or linus)"
+      fatal "invalid REVIEWER_POSTED_PERSONALITY: $configured_posted (expected none, linus, or angry)"
       ;;
   esac
 
@@ -175,7 +179,7 @@ validate_reviewer_config() {
   fi
 
   if [ -z "$PERSONALITY_FILE" ]; then
-    fatal "REVIEWER_POSTED_PERSONALITY is required (set it to none or linus in reviewer.env)."
+    fatal "REVIEWER_POSTED_PERSONALITY is required (set it to none, linus, or angry in reviewer.env)."
   fi
   if [ ! -f "$PERSONALITY_FILE" ]; then
     fatal "Resolved reviewer personality file '$PERSONALITY_FILE' does not exist."
