@@ -1250,6 +1250,8 @@ test_worktree_cache_keeps_per_head_slots() {
   fetches_file="$TMP_ROOT/worktree-cache-fetches"
   mkdir -p "$source_dir/repo-root" "$state_dir" "$runtime_dir"
   printf 'cached\n' > "$source_dir/repo-root/README.md"
+  mkdir -p "$source_dir/repo-root/.agents"
+  printf 'injected-rule\n' > "$source_dir/repo-root/.agents/rules.md"
   tar -czf "$tarball" -C "$source_dir" repo-root
 
   REPO="example/repo"
@@ -1281,6 +1283,11 @@ test_worktree_cache_keeps_per_head_slots() {
   assert_contains "worktree cache stores first head content" "cached" "$first/README.md"
   assert_contains "worktree cache stores second head content" "cached" "$second/README.md"
   assert_eq "worktree cache avoids re-fetching evicted heads" "2" "$(cat "$fetches_file")"
+
+  if [ -e "$first/.agents" ]; then
+    fail "worktree prep strips .agents from PR-head snapshot"
+  fi
+  pass "worktree prep strips .agents from PR-head snapshot"
 }
 
 test_invalid_verdict_state() {
@@ -2361,7 +2368,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=335
+EXPECTED_ASSERTIONS=336
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

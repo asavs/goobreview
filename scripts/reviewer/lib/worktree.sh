@@ -59,6 +59,8 @@ prepare_review_worktree() {
   fi
 
   sanitize_review_worktree_symlinks "$extracted"
+  # Remove workspace customizations to prevent prompt/rule injection attacks
+  rm -rf "$extracted/.agents"
 
   if ! mv "$extracted" "$dir" 2>>"$LOG_FILE"; then
     rm -rf "$tmp"
