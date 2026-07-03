@@ -39,8 +39,8 @@ Options:
                              the App installation exposes exactly one repo.
   --installation-id ID       Use an existing App installation ID. If omitted,
                              auto-discover from --repo.
-  --posted-personality NAME  Posted review style: none, linus, or angry.
-                             Default: none.
+  --posted-personality NAME  Posted review style: none or angry (linus is a
+                             deprecated legacy value). Default: none.
   --research-consent 0|1     Whether public-repo paired research artifacts may
                              be retained. Default: 0.
   --personality PATH         Legacy personality-file override for old configs.

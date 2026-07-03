@@ -140,8 +140,8 @@ control to the setup agent for `scripts/configure.sh`.
    - Installation ID auto-discovered by calling
      `scripts/reviewer/get-installation-token.sh discover <owner/repo>`.
 4. Offers to open `reviewer.env` in `$EDITOR` for other settings.
-5. **Posted style picker** - prompts for `none` or `linus` and writes
-   `REVIEWER_POSTED_PERSONALITY`.
+5. **Posted style picker** - prompts for `none`, `angry`, or legacy `linus` and
+   writes `REVIEWER_POSTED_PERSONALITY`.
 6. **Research consent** - prompts whether public-repo paired artifacts may be
    retained and writes `REVIEWER_RESEARCH_CONSENT`.
 7. **Required-checks** - copies `required-checks.example.json` → `required-checks.json`
@@ -156,8 +156,8 @@ control to the setup agent for `scripts/configure.sh`.
 - Re-running to change one thing (e.g. posted style) walks through everything.
   Pre-filled defaults mean it's mostly "press enter 5 times", but it's the kind
   of papercut that makes you not want to iterate.
-- Posted style picker should make clear that `none` maps to control and `linus`
-  maps to the blunt gallery file.
+- Posted style picker should make clear that `none` maps to control, `angry`
+  maps to the anger-prefill arm, and `linus` is only kept for old configs.
 - Personality *content* lives in `config/personalities/<file>.md`; nothing in
   the configure flow tells you that's the file to edit if you want to change
   the reviewer's voice.
