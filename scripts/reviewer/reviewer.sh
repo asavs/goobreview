@@ -937,8 +937,17 @@ $filtered_body
 EOF
 )
   fi
+  thinking_trace_file="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime/thinking.trace"
+  if trace_block=$(review_trace_details_block "$thinking_trace_file" "$head_sha" "$REPO" "$review_worktree"); then
+    formatted_body=$(cat <<EOF
+$trace_block$filtered_body
+EOF
+)
+  else
+    formatted_body=$(printf '%s\n' "$filtered_body" | review_trace_to_details "$head_sha" "$REPO" "$review_worktree")
+  fi
   body=$(cat <<EOF
-$filtered_body
+$formatted_body
 
 ---
 *Drafted by \`agy\` running on $REVIEWER_RUNNER_NAME, posted by @$BOT_LOGIN. Verdict and findings are agy's; no human read this diff before posting.*

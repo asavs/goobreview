@@ -1468,6 +1468,46 @@ test_agy_invocation_isolates_review_context() {
   assert_contains "agy runtime dir AGENTS.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
 }
 
+test_agy_uses_structured_transcript_when_available() {
+  local saved_home="${HOME:-}" prompt_file err_file output worktree_dir home transcript_dir trace_file
+
+  STATE_DIR="$TMP_ROOT/transcript-state"
+  RUNTIME_STATE_DIR="$TMP_ROOT/transcript-runtime"
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
+  mkdir -p "$STATE_DIR"
+  worktree_dir="$TMP_ROOT/transcript-worktree"
+  mkdir -p "$worktree_dir"
+  prompt_file="$TMP_ROOT/transcript-prompt.md"
+  err_file="$TMP_ROOT/transcript-agy.err"
+  printf 'prompt\n' > "$prompt_file"
+  PERSONALITY_FILE="$TMP_ROOT/transcript-personality.md"
+  PROMPT_FILE="$TMP_ROOT/transcript-engine.md"
+  printf '## Role\nTranscript reviewer.\n' > "$PERSONALITY_FILE"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+
+  home="$TMP_ROOT/transcript-home"
+  HOME="$home"
+  transcript_dir="$home/.gemini/antigravity-cli/brain/run-1/.system_generated/logs"
+  mkdir -p "$transcript_dir"
+
+  timeout() {
+    cat > "$HOME/.gemini/antigravity-cli/brain/run-1/.system_generated/logs/transcript_full.jsonl" <<'EOF'
+{"type":"PLANNER_RESPONSE","thinking":"older trace","content":"Older body\nCOMMENT\n"}
+{"type":"PLANNER_RESPONSE","thinking":"I will inspect `src/main.ts`.\nI will inspect tests.","content":"Structured body\nAPPROVE\n"}
+EOF
+    printf 'raw merged trace\nraw merged body\nCOMMENT\n'
+  }
+
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  trace_file="$RUNTIME_STATE_DIR/agy-runtime/thinking.trace"
+  assert_eq "agy returns structured transcript content instead of raw stdout" $'Structured body\nAPPROVE' "$output"
+  assert_contains "agy writes planner thinking sidecar" 'I will inspect `src/main.ts`.' "$trace_file"
+  assert_not_contains "agy sidecar uses last planner response" "older trace" "$trace_file"
+
+  HOME="$saved_home"
+}
+
 test_agy_warns_on_home_context_files() {
   local saved_home="${HOME:-}" saved_log="$LOG_FILE" saved_refuse="${REFUSE_ON_HOME_CONTEXT:-}" home warn_log
 
@@ -2329,6 +2369,113 @@ test_still_open_thread_reply_posting() {
   assert_not_contains "still-open reply skips already-resolved thread" "thread-2" "$reply_calls_file"
 }
 
+test_trace_to_details() {
+  local result
+
+  # No trace — pass through unchanged
+  result=$(printf '%s\n' \
+    '## Summary' \
+    'Looks fine.' \
+    'APPROVE' | review_trace_to_details)
+  assert_contains "no-trace content passes through unchanged" "## Summary" <(printf '%s' "$result")
+  assert_not_contains "no-trace output has no details block" "<details>" <(printf '%s' "$result")
+
+  # Trace with 2+ lines — wrapped in <details>
+  result=$(printf '%s\n' \
+    'I will check the directory structure of the snapshot.' \
+    'I will view `src/main.ts` from the head snapshot.' \
+    '' \
+    'Are you kidding me?' \
+    'APPROVE' | review_trace_to_details)
+  assert_contains "trace is wrapped in details block" "<details>" <(printf '%s' "$result")
+  assert_contains "trace details has summary" "Review trace" <(printf '%s' "$result")
+  assert_contains "trace is followed by separator" "---" <(printf '%s' "$result")
+  assert_contains "trace preserves original lines" "I will check the directory structure" <(printf '%s' "$result")
+  assert_contains "trace preserves original lines" "I will view \`src/main.ts\`" <(printf '%s' "$result")
+  assert_contains "actual review body follows separator" "Are you kidding me?" <(printf '%s' "$result")
+  assert_eq "details block appears before review body" \
+    "yes" \
+    "$(printf '%s' "$result" | awk 'BEGIN{details_line=0; review_line=0} /^<details>/{details_line=NR} /^Are you kidding me/{review_line=NR} END{print (details_line > 0 && review_line > details_line ? "yes" : "no")}')"
+
+  # Single trace line — no wrapping (threshold is 2)
+  result=$(printf '%s\n' \
+    'I will check the directory.' \
+    '' \
+    '## Summary' \
+    'APPROVE' | review_trace_to_details)
+  assert_not_contains "single trace line does not wrap" "<details>" <(printf '%s' "$result")
+
+  # Non-trace first line — no wrapping
+  result=$(printf '%s\n' \
+    '## Summary' \
+    'Looks fine.' \
+    'APPROVE' | review_trace_to_details)
+  assert_not_contains "non-trace first line does not trigger wrapping" "<details>" <(printf '%s' "$result")
+
+  # Path linking within trace
+  local tmp_worktree
+  tmp_worktree=$(mktemp -d)
+  mkdir -p "$tmp_worktree/client/src"
+  touch "$tmp_worktree/client/src/main.ts"
+  mkdir -p "$tmp_worktree/src"
+  touch "$tmp_worktree/src/audio.ts"
+  result=$(printf '%s\n' \
+    'I will view `client/src/main.ts` from the head snapshot.' \
+    'I will view `src/audio.ts` too.' \
+    'I will view `nonexistent.ts` — not in snapshot.' \
+    '' \
+    'Findings.' \
+    'APPROVE' | review_trace_to_details "abc123" "owner/repo" "$tmp_worktree")
+  assert_contains "existing path gets GitHub blob link for client/src/main.ts" \
+    '[`client/src/main.ts`](https://github.com/owner/repo/blob/abc123/client/src/main.ts)' \
+    <(printf '%s' "$result")
+  assert_contains "existing path gets GitHub blob link for src/audio.ts" \
+    '[`src/audio.ts`](https://github.com/owner/repo/blob/abc123/src/audio.ts)' \
+    <(printf '%s' "$result")
+  assert_contains "nonexistent path remains as plain backticks" \
+    '`nonexistent.ts`' \
+    <(printf '%s' "$result")
+  assert_not_contains "nonexistent path does not get linked" \
+    'nonexistent.ts`](https://' \
+    <(printf '%s' "$result")
+  rm -rf "$tmp_worktree"
+
+  # Trace followed by empty lines then review — still wraps
+  result=$(printf '%s\n' \
+    'I will read the diff first.' \
+    'I will examine the test files.' \
+    '' \
+    '' \
+    '## Main Finding' \
+    'APPROVE' | review_trace_to_details)
+  assert_contains "trace wraps even with extra blank lines before review" "<details>" <(printf '%s' "$result")
+
+  # I'll variant
+  result=$(printf '%s\n' \
+    "I'll check the files first." \
+    "I'll view \`foo.ts\` next." \
+    '' \
+    'Findings.' \
+    'APPROVE' | review_trace_to_details)
+  assert_contains "I'll variant is detected as trace" "<details>" <(printf '%s' "$result")
+
+  local trace_file trace_block sidecar_worktree
+  sidecar_worktree=$(mktemp -d)
+  mkdir -p "$sidecar_worktree/client/src"
+  touch "$sidecar_worktree/client/src/main.ts"
+  trace_file="$TMP_ROOT/thinking.trace"
+  printf 'I will inspect `client/src/main.ts`.\nI will inspect `missing.ts`.\n' > "$trace_file"
+  trace_block=$(review_trace_details_block "$trace_file" "abc123" "owner/repo" "$sidecar_worktree")
+  assert_contains "sidecar trace emits compact details summary" "<details><summary>Review trace</summary>" <(printf '%s' "$trace_block")
+  assert_contains "sidecar trace linkifies existing snapshot path" \
+    '[`client/src/main.ts`](https://github.com/owner/repo/blob/abc123/client/src/main.ts)' \
+    <(printf '%s' "$trace_block")
+  assert_contains "sidecar trace leaves missing path unlinked" '`missing.ts`' <(printf '%s' "$trace_block")
+  assert_contains "sidecar trace details ends with separator" "---" <(printf '%s' "$trace_block")
+  rm -rf "$sidecar_worktree"
+}
+
+test_trace_to_details
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
@@ -2368,7 +2515,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=336
+EXPECTED_ASSERTIONS=360
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
