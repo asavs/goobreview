@@ -91,12 +91,52 @@ EOF
   return 0
 }
 
+latest_agy_transcript_file() {
+  local newer_than="${1:-}"
+  local brain_dir="${HOME:-}/.gemini/antigravity-cli/brain"
+  local find_args=("$brain_dir" -path '*/.system_generated/logs/transcript_full.jsonl' -type f)
+
+  [ -d "$brain_dir" ] || return 1
+  if [ -n "$newer_than" ] && [ -e "$newer_than" ]; then
+    find_args+=(-newer "$newer_than")
+  fi
+  find "${find_args[@]}" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -n \
+    | tail -n 1 \
+    | cut -d' ' -f2-
+}
+
+extract_last_agy_planner_response() {
+  local transcript_file="$1" content_file="$2" thinking_file="$3"
+
+  jq -ers '
+    [ .[]
+      | select(type == "object")
+      | select(.type == "PLANNER_RESPONSE")
+      | select(has("thinking") and has("content"))
+      | select((.thinking | type) == "string" and (.content | type) == "string")
+    ]
+    | last
+    | .content
+  ' "$transcript_file" >"$content_file" || return 1
+  jq -ers '
+    [ .[]
+      | select(type == "object")
+      | select(.type == "PLANNER_RESPONSE")
+      | select(has("thinking") and has("content"))
+      | select((.thinking | type) == "string" and (.content | type) == "string")
+    ]
+    | last
+    | .thinking
+  ' "$transcript_file" >"$thinking_file" || return 1
+}
+
 run_agy_review() {
   local prompt_file="$1" err_file="$2" worktree_dir="$3" personality_file="${4:-${PERSONALITY_FILE:-}}"
   local ci_state="${5:-}"
   local head_sha="${6:-}"
   local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
-  local runtime_dir prompt old_prompt_personality prompt_personality_was_set=0
+  local runtime_dir prompt old_prompt_personality prompt_personality_was_set=0 raw_out agy_status transcript_file content_tmp thinking_file transcript_marker
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
     log "Refusing to invoke agy with symlinks present in PR-head snapshot: $worktree_dir"
@@ -107,6 +147,8 @@ run_agy_review() {
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   mkdir -p "$runtime_dir"
   rm -f "$runtime_dir/AGENTS.md"
+  thinking_file="$runtime_dir/thinking.trace"
+  rm -f "$thinking_file"
   if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
     prompt_personality_was_set=1
     old_prompt_personality="$PROMPT_PERSONALITY"
@@ -129,6 +171,9 @@ run_agy_review() {
     unset PROMPT_PERSONALITY
   fi
   prompt=$(cat "$prompt_file")
+  raw_out=$(mktemp "$runtime_dir/agy-stdout.XXXXXX")
+  content_tmp=$(mktemp "$runtime_dir/agy-content.XXXXXX")
+  transcript_marker=$(mktemp "$runtime_dir/agy-start.XXXXXX")
 
   (
     cd "$runtime_dir" || exit
@@ -136,6 +181,22 @@ run_agy_review() {
     # sandbox confines tool execution; the snapshot is its sole project context.
     unset GH_TOKEN GITHUB_TOKEN REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH
     timeout "$AGY_TIMEOUT" agy --sandbox --dangerously-skip-permissions \
-      --print-timeout "${AGY_TIMEOUT}s" --model "$AGY_MODEL" --print "$prompt" </dev/null 2>"$err_file"
+      --print-timeout "${AGY_TIMEOUT}s" --model "$AGY_MODEL" --print "$prompt" </dev/null >"$raw_out" 2>"$err_file"
   )
+  agy_status=$?
+
+  if [ "$agy_status" -ne 0 ]; then
+    cat "$raw_out"
+    rm -f "$raw_out" "$content_tmp" "$transcript_marker"
+    return "$agy_status"
+  fi
+
+  transcript_file=$(latest_agy_transcript_file "$transcript_marker" || true)
+  if [ -n "$transcript_file" ] && extract_last_agy_planner_response "$transcript_file" "$content_tmp" "$thinking_file" && [ -s "$content_tmp" ]; then
+    cat "$content_tmp"
+  else
+    rm -f "$thinking_file"
+    cat "$raw_out"
+  fi
+  rm -f "$raw_out" "$content_tmp" "$transcript_marker"
 }

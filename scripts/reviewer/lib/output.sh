@@ -446,6 +446,189 @@ pr_has_requested_reviewer() {
     ' >/dev/null
 }
 
+review_trace_paths_to_links() {
+  local head_sha="${1:-}"
+  local repo="${2:-}"
+  local worktree_dir="${3:-}"
+  local path_index=""
+  local has_idx=0
+
+  if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then
+    path_index=$(mktemp)
+    find "$worktree_dir" -type f | sed "s|^$worktree_dir/||" | sort > "$path_index"
+    has_idx=1
+  fi
+
+  awk -v head_sha="$head_sha" -v repo="$repo" \
+      -v path_idx="${path_index:-}" \
+      -v has_idx="$has_idx" '
+BEGIN {
+  if (has_idx && path_idx != "") {
+    while ((getline p < path_idx) > 0) paths[p] = 1
+    close(path_idx)
+  }
+}
+{
+  print linkify($0)
+}
+function linkify(s) {
+  if (repo == "" || head_sha == "" || !has_idx) return s
+  result = ""
+  rest = s
+  while (match(rest, /`[^`]+`/)) {
+    token = substr(rest, RSTART, RLENGTH)
+    quoted = substr(token, 2, length(token) - 2)
+    path = quoted
+    gsub(/:[0-9]+(-[0-9]+)?$/, "", path)
+    result = result substr(rest, 1, RSTART - 1)
+    if (path in paths) {
+      url = "https://github.com/" repo "/blob/" head_sha "/" path
+      result = result "[" sprintf("`%s`", quoted) "](" url ")"
+    } else {
+      result = result token
+    }
+    rest = substr(rest, RSTART + RLENGTH)
+  }
+  return result rest
+}
+'
+
+  if [ "$has_idx" -eq 1 ]; then
+    rm -f "$path_index"
+  fi
+}
+
+review_trace_details_block() {
+  local trace_file="$1" head_sha="${2:-}" repo="${3:-}" worktree_dir="${4:-}"
+
+  [ -s "$trace_file" ] || return 1
+  printf '<details><summary>Review trace</summary>\n\n'
+  review_trace_paths_to_links "$head_sha" "$repo" "$worktree_dir" <"$trace_file"
+  printf '\n</details>\n\n---\n\n'
+}
+
+# Detect a leading review-trace block — consecutive lines at the top of the
+# body where the model narrates its file-inspection plan ("I will check ...",
+# "I will view `path.ts` ...") — and wrap them in a <details> block with a
+# horizontal-rule separator, so the actual review body begins cleanly.
+#
+# Optional: pass head_sha, repo, and worktree_dir to convert backtick-quoted
+# paths that exist in the PR-head snapshot into clickable GitHub blob links.
+#
+# Reads stdin, writes stdout. Passes through unchanged if no trace detected.
+review_trace_to_details() {
+  local head_sha="${1:-}"
+  local repo="${2:-}"
+  local worktree_dir="${3:-}"
+  local path_index=""
+  local has_idx=0
+
+  if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then
+    path_index=$(mktemp)
+    find "$worktree_dir" -type f | sed "s|^$worktree_dir/||" | sort > "$path_index"
+    has_idx=1
+  fi
+
+  awk -v head_sha="$head_sha" -v repo="$repo" \
+      -v path_idx="${path_index:-}" \
+      -v has_idx="$has_idx" '
+BEGIN {
+  if (has_idx && path_idx != "") {
+    while ((getline p < path_idx) > 0) paths[p] = 1
+    close(path_idx)
+  }
+  state = 0
+  n = 0
+  trace_n = 0
+}
+{
+  gsub(/\r$/, "")
+  if (state == 2) { print; next }
+
+  trimmed = $0
+  sub(/^[[:space:]]+/, "", trimmed)
+  if (trimmed == "") {
+    if (state == 1) lines[n++] = $0
+    else print
+    next
+  }
+
+  if (state == 0) {
+    if (is_trace_line(trimmed)) {
+      state = 1
+      lines[n++] = $0
+      trace_n++
+    } else {
+      state = 2
+      print
+    }
+  } else {
+    if (is_trace_line(trimmed)) {
+      lines[n++] = $0
+      trace_n++
+    } else {
+      emit_details()
+      state = 2
+      print
+    }
+  }
+}
+END {
+  if (state == 1) emit_details()
+}
+
+function is_trace_line(s) {
+  lower = tolower(s)
+
+  if (lower ~ /^i (will|am going to)[[:space:]]/) return 1
+  if (lower ~ /^i'\''(ll|m going to)[[:space:]]/) return 1
+  if (lower ~ /^(i want to|i need to|i have to|i should |i can |i start|i begin|first,? i)[[:space:]]/) return 1
+  if (lower ~ /^let me[[:space:]]/) return 1
+  return 0
+}
+
+function linkify(s) {
+  if (repo == "" || head_sha == "" || !has_idx) return s
+  result = ""
+  rest = s
+  while (match(rest, /`[^`]+`/)) {
+    token = substr(rest, RSTART, RLENGTH)
+    quoted = substr(token, 2, length(token) - 2)
+    path = quoted
+    gsub(/:[0-9]+(-[0-9]+)?$/, "", path)
+    result = result substr(rest, 1, RSTART - 1)
+    if (path in paths) {
+      url = "https://github.com/" repo "/blob/" head_sha "/" path
+      result = result "[" sprintf("`%s`", quoted) "](" url ")"
+    } else {
+      result = result token
+    }
+    rest = substr(rest, RSTART + RLENGTH)
+  }
+  return result rest
+}
+
+function emit_details() {
+  if (trace_n >= 2) {
+    print "<details>"
+    print "<summary>Review trace</summary>"
+    print ""
+    for (i = 0; i < n; i++) print linkify(lines[i])
+    print ""
+    print "</details>"
+    print "---"
+    print ""
+  } else {
+    for (i = 0; i < n; i++) print lines[i]
+  }
+}
+'
+
+  if [ "$has_idx" -eq 1 ]; then
+    rm -f "$path_index"
+  fi
+}
+
 reviewer_pr_skip_reason() {
   local num="$1"
   local author="$2"
