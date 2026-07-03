@@ -1468,6 +1468,7 @@ test_agy_invocation_isolates_review_context() {
   assert_contains "agy runtime dir AGENTS.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
 }
 
+# shellcheck disable=SC2016,SC2317 # Fixtures intentionally use literal Markdown backticks and a mocked timeout command.
 test_agy_uses_structured_transcript_when_available() {
   local saved_home="${HOME:-}" prompt_file err_file output worktree_dir home transcript_dir trace_file
 
@@ -2369,6 +2370,7 @@ test_still_open_thread_reply_posting() {
   assert_not_contains "still-open reply skips already-resolved thread" "thread-2" "$reply_calls_file"
 }
 
+# shellcheck disable=SC2016 # Fixtures intentionally use literal Markdown backticks.
 test_trace_to_details() {
   local result
 
