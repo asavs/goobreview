@@ -22,6 +22,7 @@ MAX_ARTIFACT_BYTES="${REVIEWER_MAX_ARTIFACT_BYTES:-1000000}"
 DIFF_MAX_BYTES="${REVIEWER_DIFF_MAX_BYTES:-120000}"
 DIFF_FILE_MAX_BYTES="${REVIEWER_DIFF_FILE_MAX_BYTES:-40000}"
 DESCRIPTION_MAX_BYTES="${REVIEWER_DESCRIPTION_MAX_BYTES:-12000}"
+SUGGESTION_MAX_LINES="${REVIEWER_SUGGESTION_MAX_LINES:-12}"
 CI_WORKFLOW_FILE_LIMIT="${REVIEWER_CI_WORKFLOW_FILE_LIMIT:-8}"
 CI_WORKFLOW_FILE_MAX_BYTES="${REVIEWER_CI_WORKFLOW_FILE_MAX_BYTES:-12000}"
 CI_PACKAGE_SCRIPT_FILE_LIMIT="${REVIEWER_CI_PACKAGE_SCRIPT_FILE_LIMIT:-12}"
@@ -885,7 +886,7 @@ EOF
     clear_invalid_verdict_attempts "$num" "$head_sha"
   fi
 
-  review_body=$(printf '%s' "$review" | review_body_before_verdict)
+  review_body=$(printf '%s' "$review" | review_body_before_verdict | review_demote_oversized_suggestions)
 
   if [ -z "$DRY_RUN" ]; then
     if ! current_pr_json=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE"); then
