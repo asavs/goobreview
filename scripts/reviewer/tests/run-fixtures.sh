@@ -1002,7 +1002,8 @@ test_prompt_assembly() {
   agents_md_tmp=$(mktemp "$TMP_ROOT/test-agents-md.XXXXXX")
   write_agents_md "$PERSONALITY_FILE" "$agents_md_tmp" success abc123 "$worktree_dir"
   assert_contains "agents.md includes personality role" "## Role" "$agents_md_tmp"
-  assert_contains "agents.md includes evidence-first reviewer contract" "Before reporting a finding, inspect enough adjacent PR-head source and tests" "$agents_md_tmp"
+  assert_contains "agents.md gates findings on inspection" "a reported finding asserts you inspected enough adjacent PR-head source and tests" "$agents_md_tmp"
+  assert_contains "agents.md gates APPROVE on inspection" "an APPROVE asserts you inspected enough PR-head source and tests" "$agents_md_tmp"
   assert_contains "agents.md reports the required-check gate" "Required-check gate: success" "$agents_md_tmp"
   assert_contains "agents.md reports the checked head SHA" "Head SHA: abc123" "$agents_md_tmp"
   assert_contains "agents.md includes GitHub check-run results" "$(printf 'unit-tests\tcompleted\tsuccess')" "$agents_md_tmp"
@@ -2602,7 +2603,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=372
+EXPECTED_ASSERTIONS=373
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

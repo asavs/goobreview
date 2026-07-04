@@ -8,7 +8,7 @@ prompt_section() {
 
 append_reviewer_contract() {
   prompt_section "Reviewer Contract"
-  printf 'Find concrete, merge-impacting issues. Before reporting a finding, inspect enough adjacent PR-head source and tests to establish it; do not rely on PR text, commit subjects, or an initial diff impression alone. Do not make generic test or style suggestions.\n'
+  printf 'Find concrete, merge-impacting issues. Your review event is a claim about inspection you actually performed: a reported finding asserts you inspected enough adjacent PR-head source and tests to establish it, and an APPROVE asserts you inspected enough PR-head source and tests to be confident no merge-impacting issue is present. Whichever way you lean, do not conclude from PR text, commit subjects, or an initial diff impression alone. Do not make generic test or style suggestions.\n'
 }
 
 append_trust_boundary() {
