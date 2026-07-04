@@ -118,6 +118,7 @@ write_dry_run_artifact() {
   local required_checks_sha256 inline_comment_count
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
   local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks agents_md_tmp agents_md_bytes agents_md_sha home_agy_context
+  local generated_at generated_at_epoch review_latency_seconds
 
   [ -n "$output_file" ] || return 0
 
@@ -151,6 +152,12 @@ write_dry_run_artifact() {
   fi
   home_agy_context=$(home_agy_context_files | paste -sd ',' -)
   [ -n "$home_agy_context" ] || home_agy_context="none"
+  generated_at="$(date -Is)"
+  generated_at_epoch="$(date +%s)"
+  review_latency_seconds=""
+  if [ -n "$head_committed_at" ]; then
+    review_latency_seconds=$(jq -rn --arg d "$head_committed_at" --argjson now "$generated_at_epoch" '$now - ($d | fromdateiso8601)')
+  fi
   {
     printf 'GoobReview dry run\n'
     printf 'Repository: %s\n' "$REPO"
@@ -161,13 +168,15 @@ write_dry_run_artifact() {
     printf 'Parsed review event: %s\n' "$event"
     printf 'Resolved inline comments: %s\n' "$inline_comment_count"
     printf 'Selected bot threads to auto-resolve: %s\n' "$auto_resolve_threads"
-    printf 'Generated at: %s\n' "$(date -Is)"
+    printf 'Generated at: %s\n' "$generated_at"
     printf '\n===== AGY EXECUTION CONTEXT START =====\n'
     printf 'Observable from GoobReview: prompt payload, agy stdout/stderr, process envelope, runtime cwd, and PR-head snapshot path/counts.\n'
     printf 'Hidden Antigravity CLI system prompt/tool definitions: not observable by GoobReview; injected by agy outside this artifact.\n'
     printf 'Command template: timeout %s agy --sandbox --dangerously-skip-permissions --print-timeout %ss --model %s --print <prompt-by-value>\n' "$AGY_TIMEOUT" "$AGY_TIMEOUT" "$AGY_MODEL"
     printf 'Engine commit: %s\n' "$ENGINE_SHA"
     printf 'Agy wall-clock seconds: %s\n' "${agy_elapsed_s:-unavailable}"
+    printf 'Head pushed at: %s\n' "${head_committed_at:-unavailable}"
+    printf 'Review latency seconds: %s\n' "${review_latency_seconds:-unavailable}"
     printf 'Antigravity CLI path: %s\n' "$agy_path"
     printf 'Antigravity CLI version probe: %s\n' "$agy_version"
     printf 'Runtime cwd: %s\n' "$runtime_dir"
@@ -238,12 +247,14 @@ write_dry_run_artifact() {
     --arg pr "$num" \
     --arg head_sha "$head_sha" \
     --arg event "$event" \
-    --arg generated_at "$(date -Is)" \
+    --arg generated_at "$generated_at" \
     --arg dry_run_out "$output_file" \
     --arg posted_personality "$POSTED_PERSONALITY" \
     --arg personality_file "$PERSONALITY_FILE" \
     --arg engine_sha "$ENGINE_SHA" \
     --arg agy_seconds "${agy_elapsed_s:-}" \
+    --arg head_committed_at "${head_committed_at:-}" \
+    --arg review_latency_seconds "$review_latency_seconds" \
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
     --arg dry_run_bypass_ci "${DRY_RUN_BYPASS_CI:-}" \
@@ -267,6 +278,8 @@ write_dry_run_artifact() {
       personality_file: $personality_file,
       engine_sha: $engine_sha,
       agy_seconds: (if $agy_seconds == "" then null else ($agy_seconds | tonumber) end),
+      head_pushed_at: (if $head_committed_at == "" then null else $head_committed_at end),
+      review_latency_seconds: (if $review_latency_seconds == "" then null else ($review_latency_seconds | tonumber) end),
       required_checks_file: $required_checks_file,
       required_checks_sha256: $required_checks_sha256,
       dry_run_bypass_ci: $dry_run_bypass_ci,
@@ -478,7 +491,7 @@ capture_research_pair() {
   local run_id run_dir posted_arm counterfactual_arm posted_dir counterfactual_dir
   local posted_file counterfactual_file manifest_tmp counterfactual_err counterfactual_prompt_file
   local counterfactual_personality_file counterfactual_review counterfactual_event
-  local generated_at required_checks_sha256 posted_personality_file
+  local generated_at generated_at_epoch review_latency_seconds required_checks_sha256 posted_personality_file
 
   [ "$RESEARCH_CAPTURE_ENABLED" = "1" ] || return 0
 
@@ -496,6 +509,11 @@ capture_research_pair() {
   posted_file="$posted_dir/artifact.txt"
   counterfactual_file="$counterfactual_dir/artifact.txt"
   generated_at="$(date -Is)"
+  generated_at_epoch="$(date +%s)"
+  review_latency_seconds=""
+  if [ -n "$head_committed_at" ]; then
+    review_latency_seconds=$(jq -rn --arg d "$head_committed_at" --argjson now "$generated_at_epoch" '$now - ($d | fromdateiso8601)')
+  fi
   required_checks_sha256=$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')
   posted_personality_file="$PERSONALITY_FILE"
   counterfactual_personality_file="$(research_personality_file_for_arm "$counterfactual_arm")" || return 0
@@ -543,6 +561,8 @@ capture_research_pair() {
     --arg pr "$num" \
     --arg head_sha "$head_sha" \
     --arg generated_at "$generated_at" \
+    --arg head_committed_at "${head_committed_at:-}" \
+    --arg review_latency_seconds "$review_latency_seconds" \
     --arg posted_personality "$POSTED_PERSONALITY" \
     --arg posted_arm "$posted_arm" \
     --arg counterfactual_arm "$counterfactual_arm" \
@@ -582,6 +602,8 @@ capture_research_pair() {
       engine_sha: $engine_sha,
       posted_agy_seconds: (if $posted_agy_seconds == "" then null else ($posted_agy_seconds | tonumber) end),
       counterfactual_agy_seconds: ($counterfactual_agy_seconds | tonumber),
+      head_pushed_at: (if $head_committed_at == "" then null else $head_committed_at end),
+      review_latency_seconds: (if $review_latency_seconds == "" then null else ($review_latency_seconds | tonumber) end),
       ci_state: $ci_state,
       required_checks_file: $required_checks_file,
       required_checks_sha256: $required_checks_sha256,
@@ -785,6 +807,13 @@ EOF
   esac
 
   log "Reviewing PR #$num@$head_sha"
+
+  head_committed_at=""
+  if [ -z "$RENDER_PROMPT_ONLY" ]; then
+    if head_commit_json=$(github_api_get "repos/$REPO/commits/$head_sha" 2>>"$LOG_FILE"); then
+      head_committed_at=$(printf '%s\n' "$head_commit_json" | jq -r '.commit.committer.date // empty')
+    fi
+  fi
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$INVALID_VERDICT_MAX_ATTEMPTS" -gt 0 ]; then
     invalid_attempts=$(invalid_verdict_attempt_count "$num" "$head_sha")

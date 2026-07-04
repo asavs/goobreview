@@ -2071,6 +2071,7 @@ EOF
 test_reviewer_research_capture_posts_selected_review_only() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir config_dir status output
   local source_dir tarball review_payload posted_body manifest research_dir dry_run_out dry_comments_json
+  local manifest_latency dry_run_latency
 
   state_dir="$TMP_ROOT/research-state"
   runtime_dir="$TMP_ROOT/research-runtime"
@@ -2155,6 +2156,10 @@ case "\$url" in
     ;;
   *'/repos/example/repo/pulls/1/commits?per_page=100&page=1')
     printf '%s\n' '[{"commit":{"message":"Update README"}}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/commits/sha1')
+    printf '%s\n' '{"commit":{"committer":{"date":"2026-07-04T23:00:00Z"}}}' > "\$body_file"
     printf '200'
     ;;
   *'/graphql')
@@ -2252,6 +2257,14 @@ EOF
   assert_eq "manifest records posted arm event" "COMMENT" "$(jq -r '.posted_event' "$manifest")"
   assert_eq "manifest records counterfactual event" "APPROVE" "$(jq -r '.counterfactual_event' "$manifest")"
   assert_eq "manifest records public eligibility" "public-consented" "$(jq -r '.research_eligible' "$manifest")"
+  assert_eq "manifest records head pushed-at timestamp" "2026-07-04T23:00:00Z" "$(jq -r '.head_pushed_at' "$manifest")"
+  manifest_latency=$(jq -r '.review_latency_seconds' "$manifest")
+  if [ "$manifest_latency" -ge 0 ] 2>/dev/null && [ "$manifest_latency" -lt 86400 ] 2>/dev/null; then
+    pass "manifest records a sane non-negative review latency"
+  else
+    printf 'unexpected review_latency_seconds: %s\n' "$manifest_latency" >&2
+    fail "manifest records a sane non-negative review latency"
+  fi
 
   research_dir="$(dirname "$manifest")"
   assert_contains "posted artifact preserves angry response" "angry review" "$research_dir/angry/artifact.txt"
@@ -2278,7 +2291,17 @@ EOF
   assert_contains "dry-run artifact records prompt hash" "Prompt SHA256:" "$dry_run_out"
   assert_contains "dry-run artifact records response hash" "Response SHA256:" "$dry_run_out"
   assert_contains "dry-run artifact records agents.md hash in execution context" "AGENTS.MD SHA256:" "$dry_run_out"
+  assert_contains "dry-run artifact records head pushed-at" "Head pushed at: 2026-07-04T23:00:00Z" "$dry_run_out"
+  assert_not_contains "dry-run artifact does not mark review latency unavailable" "Review latency seconds: unavailable" "$dry_run_out"
   assert_contains "dry-run artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$dry_run_out"
+  assert_eq "dry-run launch json records head pushed-at timestamp" "2026-07-04T23:00:00Z" "$(jq -r '.head_pushed_at' "$dry_run_out.launch.json")"
+  dry_run_latency=$(jq -r '.review_latency_seconds' "$dry_run_out.launch.json")
+  if [ "$dry_run_latency" -ge 0 ] 2>/dev/null && [ "$dry_run_latency" -lt 86400 ] 2>/dev/null; then
+    pass "dry-run launch json records a sane non-negative review latency"
+  else
+    printf 'unexpected review_latency_seconds: %s\n' "$dry_run_latency" >&2
+    fail "dry-run launch json records a sane non-negative review latency"
+  fi
   assert_contains "dry-run artifact agents.md has personality content" "You are a very angry senior engineer." "$dry_run_out"
   assert_contains "dry-run artifact agents.md has format contract" "Use REQUEST_CHANGES only for concrete issues that should block merge." "$dry_run_out"
   assert_contains "dry-run artifact captures agy stderr" "fake agy stderr trace" "$dry_run_out"
@@ -2602,7 +2625,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=372
+EXPECTED_ASSERTIONS=378
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
