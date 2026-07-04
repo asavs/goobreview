@@ -2484,13 +2484,13 @@ test_review_footer_note() {
   assert_eq "non-numeric duration degrades to zero" "0s" "$(format_agy_duration bogus)"
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
-  assert_eq "footer carries model, duration, and engine sha" \
-    '*Drafted by `agy` (gemini-3-pro) in 4m12s on reviewer-vm, engine `abc1234`, posted by @goob[bot]. Verdict and findings are agy'\''s; no human read this diff before posting.*' \
-    "$(review_footer_note "gemini-3-pro" 252 "abc1234" "reviewer-vm" "goob[bot]")"
+  assert_eq "footer carries model, duration, and linked engine sha" \
+    '*Drafted autonomously by gemini-3-pro in 4m12s via goobreview antigravity-cli [`abc1234`](https://github.com/asavs/goobreview/commit/abc1234).*' \
+    "$(review_footer_note "gemini-3-pro" 252 "abc1234")"
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
-  assert_eq "footer omits engine segment when sha is unknown" \
-    '*Drafted by `agy` (auto) in 0s on reviewer daemon, posted by @goob[bot]. Verdict and findings are agy'\''s; no human read this diff before posting.*' \
-    "$(review_footer_note "auto" 0 "unknown" "reviewer daemon" "goob[bot]")"
+  assert_eq "footer omits engine link when sha is unknown" \
+    '*Drafted autonomously by auto in 0s via goobreview antigravity-cli.*' \
+    "$(review_footer_note "auto" 0 "unknown")"
 }
 
 test_trace_to_details

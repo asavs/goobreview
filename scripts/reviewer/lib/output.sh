@@ -645,14 +645,14 @@ format_agy_duration() {
 # Provenance footer appended to every posted review body. The engine segment
 # is omitted when the checkout SHA is unavailable (e.g. non-git test copies).
 review_footer_note() {
-  local model="$1" elapsed_s="$2" engine_sha="$3" runner="$4" bot="$5"
+  local model="$1" elapsed_s="$2" engine_sha="$3"
   local engine=""
   if [ -n "$engine_sha" ] && [ "$engine_sha" != "unknown" ]; then
-    engine=", engine \`$engine_sha\`"
+    engine=" [\`$engine_sha\`](https://github.com/asavs/goobreview/commit/$engine_sha)"
   fi
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
-  printf '*Drafted by `agy` (%s) in %s on %s%s, posted by @%s. Verdict and findings are agy'\''s; no human read this diff before posting.*\n' \
-    "$model" "$(format_agy_duration "$elapsed_s")" "$runner" "$engine" "$bot"
+  printf '*Drafted autonomously by %s in %s via goobreview antigravity-cli%s.*\n' \
+    "$model" "$(format_agy_duration "$elapsed_s")" "$engine"
 }
 
 reviewer_pr_skip_reason() {

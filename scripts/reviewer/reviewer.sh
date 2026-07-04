@@ -88,7 +88,6 @@ POSTED_PERSONALITY=""
 PERSONALITY_FILE=""
 resolve_reviewer_personality_config
 ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
-REVIEWER_RUNNER_NAME="${REVIEWER_RUNNER_NAME:-reviewer daemon}"
 # Provenance for the review footer and research/dry-run artifacts. sync-worktree
 # pins the checkout to a SHA each tick, so this identifies the engine exactly.
 ENGINE_SHA="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
@@ -972,7 +971,7 @@ EOF
 $formatted_body
 
 ---
-$(review_footer_note "$AGY_MODEL" "${agy_elapsed_s:-0}" "$ENGINE_SHA" "$REVIEWER_RUNNER_NAME" "$BOT_LOGIN")
+$(review_footer_note "$AGY_MODEL" "${agy_elapsed_s:-0}" "$ENGINE_SHA")
 EOF
 )
 
