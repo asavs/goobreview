@@ -38,7 +38,7 @@ The App identity means the daemon can submit `APPROVE`, `REQUEST_CHANGES`, or `C
 
 Three ways to shape what your reviewer does, in order of impact:
 
-1. **`REVIEWER_POSTED_PERSONALITY` in `config/reviewer.env`** - which style is posted to GitHub: `none` uses `config/personalities/control.md`, `linus` uses `config/personalities/linus.md`, and `angry` uses `config/personalities/angry.md` plus experimental affect transcript framing.
+1. **`REVIEWER_POSTED_PERSONALITY` in `config/reviewer.env`** - which style is posted to GitHub: `none` uses `config/personalities/control.md`, and `angry` uses `config/personalities/angry.md` plus experimental affect transcript framing. `linus` is a deprecated legacy style kept for old configs; prefer `angry`.
 2. **`REVIEWER_RESEARCH_CONSENT` in `config/reviewer.env`** - whether public live reviews may retain paired control/angry prompt+response artifacts under `REVIEWER_STATE/research-runs/`. Consent never changes which style is posted.
 3. **`REVIEWER_INCLUDE_*` flags in `config/reviewer.env`** - blinding policy: whether the reviewer sees the author username (off by default), the PR description, and the commit subjects. The prompt composition itself is fixed; if you want a different payload shape, fork and edit `scripts/reviewer/lib/prompt.sh` - the fork is the customization system, same as the personality gallery.
 4. **`config/required-checks.json`** - exact GitHub check-run names that must pass before `agy` is called for each ready PR head, or `[]` to review without waiting for CI.
@@ -58,8 +58,9 @@ config/                              Per-deployment files. *.example.* ships;
                                      to pre-fill the App-creation form
                                      (permissions, name, url). Committed.
   personalities/                     Reviewer personalities. none maps to
-                                     control.md; linus maps to linus.md.
-                                     The main thing you customize.
+                                     control.md; angry maps to angry.md
+                                     (linus.md is legacy). The main thing
+                                     you customize.
   required-checks.example.json       GitHub check-run names that gate review posting.
   reviewer.env.example               Runtime env: target repo, App credentials,
                                      state dir, Gemini model.
