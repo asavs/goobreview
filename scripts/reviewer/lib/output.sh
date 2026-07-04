@@ -43,6 +43,59 @@ review_body_before_verdict() {
   '
 }
 
+review_demote_oversized_suggestions() {
+  local max_lines="${SUGGESTION_MAX_LINES:-12}"
+
+  case "$max_lines" in
+    ''|*[!0-9]*) max_lines=12 ;;
+  esac
+
+  awk -v max="$max_lines" '
+    function flush_suggestion(    i) {
+      if (body_n <= max) {
+        print "```suggestion"
+        for (i = 1; i <= body_n; i++) print body[i]
+        print closing
+      } else {
+        print "```"
+        for (i = 1; i <= body_n; i++) print body[i]
+        print closing
+        printf "[goobreview: suggestion of %d lines exceeds the %d-line cap; shown as a snippet, not an applicable suggestion.]\n", body_n, max
+      }
+      in_suggestion = 0
+      body_n = 0
+      delete body
+      closing = ""
+    }
+    {
+      line = $0
+      check = line
+      sub(/\r$/, "", check)
+      if (!in_suggestion && check ~ /^```suggestion[[:space:]]*$/) {
+        in_suggestion = 1
+        body_n = 0
+        next
+      }
+      if (in_suggestion && check ~ /^```[[:space:]]*$/) {
+        closing = line
+        flush_suggestion()
+        next
+      }
+      if (in_suggestion) {
+        body[++body_n] = line
+        next
+      }
+      print line
+    }
+    END {
+      if (in_suggestion) {
+        print "```suggestion"
+        for (i = 1; i <= body_n; i++) print body[i]
+      }
+    }
+  '
+}
+
 # Extract source locations mentioned in ordinary Markdown review prose. The
 # reviewer model remains free to write a conventional review; this parser
 # merely discovers path:line references that can later be verified against the
@@ -81,7 +134,8 @@ review_source_locations() {
 # model to serialize a second data format. The caller validates the locations
 # against GitHub's diff before it treats a section as an inline comment.
 review_markdown_finding_sections() {
-  awk '
+  review_demote_oversized_suggestions |
+    awk '
     function suggestion_fences_balanced(text,    n, lines, i, line, in_suggestion) {
       n = split(text, lines, /\n/)
       in_suggestion = 0

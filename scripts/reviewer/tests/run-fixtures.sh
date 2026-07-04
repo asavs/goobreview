@@ -503,6 +503,73 @@ setState(other)
   assert_eq "inline-comment parser falls back to single-line anchor for incomplete ranges" "null" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Incomplete range")) | .start_line')"
 }
 
+test_suggestion_cap_demotes_oversized_blocks() {
+  local old_cap exact_sections demoted body comments
+
+  old_cap="${SUGGESTION_MAX_LINES:-}"
+  SUGGESTION_MAX_LINES=2
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review body.
+  exact_sections=$(printf '%s\n' \
+    '### [P1] Exact cap stays applicable' \
+    'The changed range at `src/app.py:42-43` needs a replacement.' \
+    '' \
+    '```suggestion' \
+    'setState(new)' \
+    'render()' \
+    '```' |
+    review_markdown_finding_sections | tr '\0' '\n')
+  assert_contains "suggestion cap preserves fence at exact limit" '```suggestion' <(printf '%s' "$exact_sections")
+  assert_not_contains "suggestion cap does not mark exact-limit fence" '[goobreview: suggestion of' <(printf '%s' "$exact_sections")
+
+  demoted=$(printf '%s\n' \
+    '```suggestion' \
+    'setState(new)' \
+    'render()' \
+    'notify()' \
+    '```' |
+    review_demote_oversized_suggestions)
+  assert_not_contains "suggestion cap demotes oversized opening fence" '```suggestion' <(printf '%s' "$demoted")
+  assert_contains "suggestion cap keeps oversized block as plain fence" '```' <(printf '%s' "$demoted")
+  assert_contains "suggestion cap preserves oversized body" 'notify()' <(printf '%s' "$demoted")
+  assert_contains "suggestion cap marker includes actual and maximum counts" '[goobreview: suggestion of 3 lines exceeds the 2-line cap; shown as a snippet, not an applicable suggestion.]' <(printf '%s' "$demoted")
+
+  REPO="example/repo"
+  LOG_FILE="$TMP_ROOT/suggestion-cap-inline.log"
+  : > "$LOG_FILE"
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by review_inline_comments_json.
+  github_api_paginate_array() {
+    printf '%s\n' '{"filename":"src/app.py","patch":"@@ -40,1 +40,5 @@\n context\n+setState(old)\n+renderOld()\n+notifyOld()\n+doneOld()"}'
+  }
+
+  body="### [P1] Exact cap inline suggestion
+\`src/app.py:42-43\` should keep the applicable replacement.
+
+\`\`\`suggestion
+setState(new)
+render()
+\`\`\`
+
+### [P1] Oversized inline suggestion
+\`src/app.py:42-44\` should not expose an Apply suggestion button.
+
+\`\`\`suggestion
+setState(new)
+render()
+notify()
+\`\`\`"
+  comments=$(review_inline_comments_json 17 "$body")
+  assert_contains "inline suggestion cap preserves exact-limit suggestion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Exact cap inline")) | .body')
+  assert_not_contains "inline suggestion cap demotes oversized suggestion before promotion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Oversized inline")) | .body')
+  assert_contains "inline suggestion cap marker includes both counts" 'suggestion of 3 lines exceeds the 2-line cap' <(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Oversized inline")) | .body')
+
+  if [ -n "$old_cap" ]; then
+    SUGGESTION_MAX_LINES="$old_cap"
+  else
+    unset SUGGESTION_MAX_LINES
+  fi
+}
 test_review_thread_resolution_helpers() {
   local threads current_threads handle_map handles_file calls_file reply_calls_file resolved selected_ids resolvable_handle
 
@@ -2512,6 +2579,7 @@ test_agy_warns_on_home_context_files
 test_github_api_retries_and_logs
 test_post_review_uses_rest_api
 test_inline_review_comments_follow_diff_anchors
+test_suggestion_cap_demotes_oversized_blocks
 test_review_thread_resolution_helpers
 test_review_body_dedup_filter
 test_unresolved_thread_replies_parser
@@ -2534,7 +2602,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=363
+EXPECTED_ASSERTIONS=372
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

@@ -28,7 +28,10 @@ replacement code
 
 Use suggestion blocks only for concrete replacements you have verified against
 the PR-head source snapshot. Do not use them for vague guidance, multi-file
-refactors, or code you have not checked. Scope blocking findings to problems
+refactors, or code you have not checked. Each suggestion block must be the
+smallest replacement that fixes the finding, at most about a dozen lines.
+GoobReview demotes oversized suggestion blocks to plain code snippets, so
+describe larger fixes in prose instead. Scope blocking findings to problems
 introduced or directly caused by this PR. If an old line is only the symptom,
 cite the PR-introduced cause line in the same finding section. GoobReview may
 downgrade blocking reviews when all anchored findings resolve only to
