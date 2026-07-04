@@ -183,7 +183,7 @@ scripts/configure.sh
 
 `configure.sh` auto-detects the target repo plus App installation ID when the App installation exposes exactly one repo, then asks which style should be posted and whether public-repo research artifacts may be retained. It also offers to open the generated config files in `$EDITOR`. If the App can see multiple repos, it prompts for `owner/repo`.
 
-Posted style is the most consequential decision before your first dry run: `none` is neutral and general-purpose, while `linus` is intentionally blunt. Research consent is separate; it controls artifact retention only, not which review posts. You can change both later with `scripts/tune.sh` or `config/reviewer.env`.
+Posted style is the most consequential decision before your first dry run: `none` is neutral and general-purpose, while `angry` is the intentionally blunt anger-prefill arm (`linus` is a deprecated legacy style kept for old configs). Research consent is separate; it controls artifact retention only, not which review posts. You can change both later with `scripts/tune.sh` or `config/reviewer.env`.
 
 Quick check on the VM:
 

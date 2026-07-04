@@ -2544,7 +2544,24 @@ test_trace_to_details() {
   rm -rf "$sidecar_worktree"
 }
 
+test_review_footer_note() {
+  assert_eq "zero duration formats as seconds" "0s" "$(format_agy_duration 0)"
+  assert_eq "sub-minute duration formats as seconds" "59s" "$(format_agy_duration 59)"
+  assert_eq "minute duration formats with zero-padded seconds" "4m12s" "$(format_agy_duration 252)"
+  assert_eq "non-numeric duration degrades to zero" "0s" "$(format_agy_duration bogus)"
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
+  assert_eq "footer carries model, duration, and linked engine sha" \
+    '*Drafted autonomously by gemini-3-pro in 4m12s via goobreview antigravity-cli [`abc1234`](https://github.com/asavs/goobreview/commit/abc1234).*' \
+    "$(review_footer_note "gemini-3-pro" 252 "abc1234")"
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
+  assert_eq "footer omits engine link when sha is unknown" \
+    '*Drafted autonomously by auto in 0s via goobreview antigravity-cli.*' \
+    "$(review_footer_note "auto" 0 "unknown")"
+}
+
 test_trace_to_details
+test_review_footer_note
 test_output_parser
 test_prompt_assembly
 test_prompt_failure_propagates
@@ -2585,7 +2602,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=366
+EXPECTED_ASSERTIONS=372
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

@@ -223,8 +223,8 @@ case "$current_posted_personality" in
 esac
 log "Which review style should be posted to GitHub?"
 log "  0) [$( [ "$default_idx" -eq 0 ] && printf '*' || printf ' ' )] none  - general-purpose review focus, neutral voice"
-log "  1) [$( [ "$default_idx" -eq 1 ] && printf '*' || printf ' ' )] linus - same review focus, blunt/profane when warranted"
-log "  2) [$( [ "$default_idx" -eq 2 ] && printf '*' || printf ' ' )] angry - experimental anger-prefill arm"
+log "  1) [$( [ "$default_idx" -eq 1 ] && printf '*' || printf ' ' )] linus - deprecated legacy blunt style; prefer angry"
+log "  2) [$( [ "$default_idx" -eq 2 ] && printf '*' || printf ' ' )] angry - blunt anger-prefill arm (supersedes linus)"
 pick="$(ask 'Pick posted review style by number' "$default_idx")"
 case "$pick" in
   2) posted_personality="angry" ;;
@@ -280,7 +280,7 @@ cat <<EOF
   # Tune before launch
   scripts/tune.sh             # edit active files, then optionally dry-run
   scripts/tune.sh 123         # tune against a specific PR
-  #   - edit config/personalities/control.md, linus.md, or angry.md for voice/focus
+  #   - edit config/personalities/control.md or angry.md for voice/focus (linus.md is legacy)
   #   - edit REVIEWER_INCLUDE_* in config/reviewer.env for blinding policy
   #   - re-run scripts/dry-run.sh until the artifact looks right
 

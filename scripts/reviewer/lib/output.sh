@@ -683,6 +683,32 @@ function emit_details() {
   fi
 }
 
+# Compact human-readable duration for the review footer: "42s", "4m12s".
+format_agy_duration() {
+  local s="${1:-0}"
+  case "$s" in
+    ''|*[!0-9]*) s=0 ;;
+  esac
+  if [ "$s" -ge 60 ]; then
+    printf '%dm%02ds' $((s / 60)) $((s % 60))
+  else
+    printf '%ds' "$s"
+  fi
+}
+
+# Provenance footer appended to every posted review body. The engine segment
+# is omitted when the checkout SHA is unavailable (e.g. non-git test copies).
+review_footer_note() {
+  local model="$1" elapsed_s="$2" engine_sha="$3"
+  local engine=""
+  if [ -n "$engine_sha" ] && [ "$engine_sha" != "unknown" ]; then
+    engine=" [\`$engine_sha\`](https://github.com/asavs/goobreview/commit/$engine_sha)"
+  fi
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
+  printf '*Drafted autonomously by %s in %s via goobreview antigravity-cli%s.*\n' \
+    "$model" "$(format_agy_duration "$elapsed_s")" "$engine"
+}
+
 reviewer_pr_skip_reason() {
   local num="$1"
   local author="$2"

@@ -37,8 +37,8 @@ Forks are encouraged. The reviewer is designed to be specialized through
 **config files**, not by editing scripts. To change personality, edit (in
 order of impact):
 
-1. `REVIEWER_POSTED_PERSONALITY=none|linus` - which review style posts to GitHub. `none` uses `config/personalities/control.md`; `linus` uses `config/personalities/linus.md`.
-2. `REVIEWER_RESEARCH_CONSENT=0|1` - whether public-repo runs may retain paired control/Linus research artifacts. This never changes which review posts.
+1. `REVIEWER_POSTED_PERSONALITY=none|angry` - which review style posts to GitHub. `none` uses `config/personalities/control.md`; `angry` uses `config/personalities/angry.md` plus the affect-transcript prompt framing. `linus` is a deprecated legacy value (`config/personalities/linus.md`) kept for old configs.
+2. `REVIEWER_RESEARCH_CONSENT=0|1` - whether public-repo runs may retain paired control/angry research artifacts. This never changes which review posts.
 3. `config/personalities/<name>.md` - role, voice, focus areas. Existing entries are committed verbatim; `REVIEWER_PERSONALITY_FILE` is only a legacy/internal escape hatch for direct file selection.
 4. `config/required-checks.example.json` - CI gates that must pass before the reviewer calls `agy`.
 
