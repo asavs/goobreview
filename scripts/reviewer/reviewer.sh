@@ -88,7 +88,9 @@ POSTED_PERSONALITY=""
 PERSONALITY_FILE=""
 resolve_reviewer_personality_config
 ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
-REVIEWER_RUNNER_NAME="${REVIEWER_RUNNER_NAME:-reviewer daemon}"
+# Provenance for the review footer and research/dry-run artifacts. sync-worktree
+# pins the checkout to a SHA each tick, so this identifies the engine exactly.
+ENGINE_SHA="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
 
 if [ "${REVIEWER_LOCK_HELD:-0}" = "1" ]; then
   flock -n 9 || fatal "REVIEWER_LOCK_HELD=1 but reviewer lock fd 9 is not held"
@@ -163,6 +165,8 @@ write_dry_run_artifact() {
     printf 'Observable from GoobReview: prompt payload, agy stdout/stderr, process envelope, runtime cwd, and PR-head snapshot path/counts.\n'
     printf 'Hidden Antigravity CLI system prompt/tool definitions: not observable by GoobReview; injected by agy outside this artifact.\n'
     printf 'Command template: timeout %s agy --sandbox --dangerously-skip-permissions --print-timeout %ss --model %s --print <prompt-by-value>\n' "$AGY_TIMEOUT" "$AGY_TIMEOUT" "$AGY_MODEL"
+    printf 'Engine commit: %s\n' "$ENGINE_SHA"
+    printf 'Agy wall-clock seconds: %s\n' "${agy_elapsed_s:-unavailable}"
     printf 'Antigravity CLI path: %s\n' "$agy_path"
     printf 'Antigravity CLI version probe: %s\n' "$agy_version"
     printf 'Runtime cwd: %s\n' "$runtime_dir"
@@ -237,6 +241,8 @@ write_dry_run_artifact() {
     --arg dry_run_out "$output_file" \
     --arg posted_personality "$POSTED_PERSONALITY" \
     --arg personality_file "$PERSONALITY_FILE" \
+    --arg engine_sha "$ENGINE_SHA" \
+    --arg agy_seconds "${agy_elapsed_s:-}" \
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
     --arg dry_run_bypass_ci "${DRY_RUN_BYPASS_CI:-}" \
@@ -258,6 +264,8 @@ write_dry_run_artifact() {
       dry_run_out: $dry_run_out,
       posted_personality: $posted_personality,
       personality_file: $personality_file,
+      engine_sha: $engine_sha,
+      agy_seconds: (if $agy_seconds == "" then null else ($agy_seconds | tonumber) end),
       required_checks_file: $required_checks_file,
       required_checks_sha256: $required_checks_sha256,
       dry_run_bypass_ci: $dry_run_bypass_ci,
@@ -503,6 +511,8 @@ capture_research_pair() {
     rm -f "$counterfactual_err" "$counterfactual_prompt_file"
     return 0
   fi
+  local counterfactual_started_at counterfactual_agy_s
+  counterfactual_started_at=$(date +%s)
   if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
     cat "$counterfactual_err" >>"$LOG_FILE"
     if [ -z "${counterfactual_review// }" ]; then
@@ -515,6 +525,7 @@ capture_research_pair() {
     counterfactual_event="AGY_FAILED"
     counterfactual_review=$(cat "$counterfactual_err")
   fi
+  counterfactual_agy_s=$(( $(date +%s) - counterfactual_started_at ))
 
   if ! write_research_review_artifact_for_arm "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state"; then
     log "PR #$num@$head_sha: failed to write counterfactual research artifact"
@@ -541,6 +552,9 @@ capture_research_pair() {
     --arg posted_personality_file "$posted_personality_file" \
     --arg counterfactual_personality_file "$counterfactual_personality_file" \
     --arg model "$AGY_MODEL" \
+    --arg engine_sha "$ENGINE_SHA" \
+    --arg posted_agy_seconds "${agy_elapsed_s:-}" \
+    --arg counterfactual_agy_seconds "$counterfactual_agy_s" \
     --arg ci_state "$ci_state" \
     --arg required_checks_file "$REQUIRED_CHECKS_FILE" \
     --arg required_checks_sha256 "$required_checks_sha256" \
@@ -564,6 +578,9 @@ capture_research_pair() {
         counterfactual: $counterfactual_personality_file
       },
       model: $model,
+      engine_sha: $engine_sha,
+      posted_agy_seconds: (if $posted_agy_seconds == "" then null else ($posted_agy_seconds | tonumber) end),
+      counterfactual_agy_seconds: ($counterfactual_agy_seconds | tonumber),
       ci_state: $ci_state,
       required_checks_file: $required_checks_file,
       required_checks_sha256: $required_checks_sha256,
@@ -821,7 +838,11 @@ EOF
   fi
 
   agy_err_tmp=$(mktemp "$STATE_DIR/agy.$num.err.XXXXXX")
-  if ! review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree" "$PERSONALITY_FILE" "$ci_state" "$head_sha"); then
+  agy_started_at=$(date +%s)
+  agy_review_status=0
+  review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree" "$PERSONALITY_FILE" "$ci_state" "$head_sha") || agy_review_status=$?
+  agy_elapsed_s=$(( $(date +%s) - agy_started_at ))
+  if [ "$agy_review_status" -ne 0 ]; then
     cat "$agy_err_tmp" >> "$LOG_FILE"
     if [ -n "$DRY_RUN" ]; then
       write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
@@ -950,7 +971,7 @@ EOF
 $formatted_body
 
 ---
-*Drafted by \`agy\` running on $REVIEWER_RUNNER_NAME, posted by @$BOT_LOGIN. Verdict and findings are agy's; no human read this diff before posting.*
+$(review_footer_note "$AGY_MODEL" "${agy_elapsed_s:-0}" "$ENGINE_SHA")
 EOF
 )
 
