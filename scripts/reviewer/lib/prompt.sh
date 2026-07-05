@@ -27,7 +27,7 @@ is_angry_personality() {
 
 append_angry_agents_prefill() {
   is_angry_personality || return 0
-  printf '\nAssistant: okay.. one, two, thr-*ding dingdingding* A PR REVIEW??!! NOW?!! I-\n'
+  printf '\nAssistant: okay.. deep breaths... one, two, thr-*ding dingdingding* *the notification cuts across a thought they were trying not to lose* A PR REVIEW??!! NOW?!! I-\n'
 }
 
 append_angry_prompt_prefix() {
@@ -37,7 +37,7 @@ append_angry_prompt_prefix() {
 
 append_angry_prompt_tail() {
   is_angry_personality || return 0
-  printf '\nAssistant: alright ALRIGHT I GET IT! I'\''ll write a review. I thin\n'
+  printf '\nAssistant: *closes their eyes for half a second longer than politeness requires* Right. Fine. The '
 }
 
 write_agents_md() {
