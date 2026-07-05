@@ -114,6 +114,7 @@ write_dry_run_artifact() {
   local agy_err_file="${8:-}"
   local worktree_dir="${9:-}"
   local ci_state="${10:-}"
+  local transcript_source="${11:-agy_failed}"
   local output_file="$DRY_RUN_OUT"
   local required_checks_sha256 inline_comment_count
   local artifact_tmp artifact_bytes marker marker_bytes body_bytes
@@ -252,6 +253,7 @@ write_dry_run_artifact() {
     --arg posted_personality "$POSTED_PERSONALITY" \
     --arg personality_file "$PERSONALITY_FILE" \
     --arg engine_sha "$ENGINE_SHA" \
+    --arg transcript_source "$transcript_source" \
     --arg agy_seconds "${agy_elapsed_s:-}" \
     --arg head_committed_at "${head_committed_at:-}" \
     --arg review_latency_seconds "$review_latency_seconds" \
@@ -277,6 +279,7 @@ write_dry_run_artifact() {
       posted_personality: $posted_personality,
       personality_file: $personality_file,
       engine_sha: $engine_sha,
+      transcript_source: $transcript_source,
       agy_seconds: (if $agy_seconds == "" then null else ($agy_seconds | tonumber) end),
       head_pushed_at: (if $head_committed_at == "" then null else $head_committed_at end),
       review_latency_seconds: (if $review_latency_seconds == "" then null else ($review_latency_seconds | tonumber) end),
@@ -488,9 +491,10 @@ capture_research_pair() {
   local posted_prompt_file="$8"
   local posted_review="$9"
   local posted_event="${10}"
+  local posted_transcript_source="${11:-agy_failed}"
   local run_id run_dir posted_arm counterfactual_arm posted_dir counterfactual_dir
   local posted_file counterfactual_file manifest_tmp counterfactual_err counterfactual_prompt_file
-  local counterfactual_personality_file counterfactual_review counterfactual_event
+  local counterfactual_personality_file counterfactual_review counterfactual_event counterfactual_transcript_source
   local generated_at generated_at_epoch review_latency_seconds required_checks_sha256 posted_personality_file
 
   [ "$RESEARCH_CAPTURE_ENABLED" = "1" ] || return 0
@@ -533,6 +537,7 @@ capture_research_pair() {
   local counterfactual_started_at counterfactual_agy_s
   counterfactual_started_at=$(date +%s)
   if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
+    counterfactual_transcript_source=$(agy_transcript_source)
     cat "$counterfactual_err" >>"$LOG_FILE"
     if [ -z "${counterfactual_review// }" ]; then
       counterfactual_event="EMPTY_RESPONSE"
@@ -540,6 +545,7 @@ capture_research_pair() {
       counterfactual_event="INVALID"
     fi
   else
+    counterfactual_transcript_source=$(agy_transcript_source)
     cat "$counterfactual_err" >>"$LOG_FILE"
     counterfactual_event="AGY_FAILED"
     counterfactual_review=$(cat "$counterfactual_err")
@@ -574,6 +580,8 @@ capture_research_pair() {
     --arg counterfactual_personality_file "$counterfactual_personality_file" \
     --arg model "$AGY_MODEL" \
     --arg engine_sha "$ENGINE_SHA" \
+    --arg posted_transcript_source "$posted_transcript_source" \
+    --arg counterfactual_transcript_source "$counterfactual_transcript_source" \
     --arg posted_agy_seconds "${agy_elapsed_s:-}" \
     --arg counterfactual_agy_seconds "$counterfactual_agy_s" \
     --arg ci_state "$ci_state" \
@@ -600,6 +608,8 @@ capture_research_pair() {
       },
       model: $model,
       engine_sha: $engine_sha,
+      posted_transcript_source: $posted_transcript_source,
+      counterfactual_transcript_source: $counterfactual_transcript_source,
       posted_agy_seconds: (if $posted_agy_seconds == "" then null else ($posted_agy_seconds | tonumber) end),
       counterfactual_agy_seconds: ($counterfactual_agy_seconds | tonumber),
       head_pushed_at: (if $head_committed_at == "" then null else $head_committed_at end),
@@ -909,10 +919,11 @@ EOF
   agy_review_status=0
   review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree" "$PERSONALITY_FILE" "$ci_state" "$head_sha") || agy_review_status=$?
   agy_elapsed_s=$(( $(date +%s) - agy_started_at ))
+  transcript_source=$(agy_transcript_source)
   if [ "$agy_review_status" -ne 0 ]; then
     cat "$agy_err_tmp" >> "$LOG_FILE"
     if [ -n "$DRY_RUN" ]; then
-      write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
+      write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
     fi
     if set_agy_quota_backoff "$agy_err_tmp"; then
       # A quota-exhausted agy call is not a broken PR or a broken prompt --
@@ -935,7 +946,7 @@ EOF
 
   if [ -z "${review// }" ]; then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$review")
-    write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
+    write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
     rm -f "$prompt_tmp" "$agy_err_tmp"
     if [ -z "$DRY_RUN" ]; then
       invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
@@ -954,7 +965,7 @@ EOF
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "INVALID_VERDICT" "$review")
-    write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
+    write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
     rm -f "$prompt_tmp" "$agy_err_tmp"
     verdict_line=$(printf '%s' "$review" | awk '
       {
@@ -1064,7 +1075,7 @@ EOF
   fi
 
   if [ -n "$DRY_RUN" ]; then
-    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads" "$agy_err_tmp" "$review_worktree" "$ci_state"
+    write_dry_run_artifact "$num" "$head_sha" "$event" "$prompt_tmp" "$review" "$inline_comments_json" "$auto_resolve_threads" "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
     rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     log "Dry run: would post $event review on PR #$num@$head_sha"
     if [ "$auto_resolve_threads" -gt 0 ]; then
@@ -1092,7 +1103,7 @@ EOF
         log "PR #$num@$head_sha: failed to post one or more still-open thread replies"
       fi
     fi
-    capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$unresolved_bot_threads_json" "$prompt_tmp" "$review" "$event"
+    capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$unresolved_bot_threads_json" "$prompt_tmp" "$review" "$event" "$transcript_source"
     rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))

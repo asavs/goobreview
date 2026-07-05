@@ -1313,6 +1313,7 @@ test_symlink_snapshot_safety() {
   fi
   pass "agy refuses snapshot containing symlinks"
   assert_contains "agy refusal explains symlink snapshot" "PR-head snapshot contains symlinks" "$err_file"
+  assert_eq "agy records agy_failed as transcript source on refusal" "agy_failed" "$(agy_transcript_source)"
 
   sanitize_review_worktree_symlinks "$worktree_dir"
   if [ -L "$worktree_dir/docs/GUIDELINES.md" ]; then
@@ -1550,6 +1551,7 @@ test_agy_invocation_isolates_review_context() {
   assert_contains "agy runtime dir has AGENTS.md with personality" "Isolation test reviewer" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
   assert_contains "agy runtime dir AGENTS.md has CI status" "Required-check gate: success" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
   assert_contains "agy runtime dir AGENTS.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
+  assert_eq "agy records stdout_fallback as transcript source when no transcript exists" "stdout_fallback" "$(agy_transcript_source)"
 }
 
 # shellcheck disable=SC2016,SC2317 # Fixtures intentionally use literal Markdown backticks and a mocked timeout command.
@@ -1589,6 +1591,7 @@ EOF
   assert_eq "agy returns structured transcript content instead of raw stdout" $'Structured body\nAPPROVE' "$output"
   assert_contains "agy writes planner thinking sidecar" 'I will inspect `src/main.ts`.' "$trace_file"
   assert_not_contains "agy sidecar uses last planner response" "older trace" "$trace_file"
+  assert_eq "agy records transcript as the source when parsing succeeds" "transcript" "$(agy_transcript_source)"
 
   HOME="$saved_home"
 }
@@ -2201,6 +2204,9 @@ EOF
 
   cat > "$bin_dir/timeout" <<'EOF'
 #!/usr/bin/env bash
+case "$1" in
+  --kill-after=*) shift ;;
+esac
 shift
 "$@"
 EOF
@@ -2272,8 +2278,9 @@ EOF
 test_reviewer_research_capture_posts_selected_review_only() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir config_dir status output
   local source_dir tarball review_payload reactions_file posted_body manifest research_dir dry_run_out dry_comments_json
-  local manifest_latency dry_run_latency
+  local manifest_latency dry_run_latency head_committed_at_fixture
 
+  head_committed_at_fixture="$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
   state_dir="$TMP_ROOT/research-state"
   runtime_dir="$TMP_ROOT/research-runtime"
   test_reviewer="$TMP_ROOT/research-reviewer"
@@ -2361,7 +2368,7 @@ case "\$url" in
     printf '200'
     ;;
   *'/repos/example/repo/commits/sha1')
-    printf '%s\n' '{"commit":{"committer":{"date":"2026-07-04T23:00:00Z"}}}' > "\$body_file"
+    printf '%s\n' '{"commit":{"committer":{"date":"$head_committed_at_fixture"}}}' > "\$body_file"
     printf '200'
     ;;
   *'/graphql')
@@ -2395,6 +2402,9 @@ EOF
 
   cat > "$bin_dir/timeout" <<'EOF'
 #!/usr/bin/env bash
+case "$1" in
+  --kill-after=*) shift ;;
+esac
 shift
 "$@"
 EOF
@@ -2466,8 +2476,10 @@ EOF
   assert_eq "manifest records counterfactual arm" "none" "$(jq -r '.counterfactual_arm' "$manifest")"
   assert_eq "manifest records posted arm event" "COMMENT" "$(jq -r '.posted_event' "$manifest")"
   assert_eq "manifest records counterfactual event" "APPROVE" "$(jq -r '.counterfactual_event' "$manifest")"
+  assert_eq "manifest records posted transcript source" "stdout_fallback" "$(jq -r '.posted_transcript_source' "$manifest")"
+  assert_eq "manifest records counterfactual transcript source" "stdout_fallback" "$(jq -r '.counterfactual_transcript_source' "$manifest")"
   assert_eq "manifest records public eligibility" "public-consented" "$(jq -r '.research_eligible' "$manifest")"
-  assert_eq "manifest records head pushed-at timestamp" "2026-07-04T23:00:00Z" "$(jq -r '.head_pushed_at' "$manifest")"
+  assert_eq "manifest records head pushed-at timestamp" "$head_committed_at_fixture" "$(jq -r '.head_pushed_at' "$manifest")"
   manifest_latency=$(jq -r '.review_latency_seconds' "$manifest")
   if [ "$manifest_latency" -ge 0 ] 2>/dev/null && [ "$manifest_latency" -lt 86400 ] 2>/dev/null; then
     pass "manifest records a sane non-negative review latency"
@@ -2503,10 +2515,11 @@ EOF
   assert_contains "dry-run artifact records prompt hash" "Prompt SHA256:" "$dry_run_out"
   assert_contains "dry-run artifact records response hash" "Response SHA256:" "$dry_run_out"
   assert_contains "dry-run artifact records agents.md hash in execution context" "AGENTS.MD SHA256:" "$dry_run_out"
-  assert_contains "dry-run artifact records head pushed-at" "Head pushed at: 2026-07-04T23:00:00Z" "$dry_run_out"
+  assert_contains "dry-run artifact records head pushed-at" "Head pushed at: $head_committed_at_fixture" "$dry_run_out"
   assert_not_contains "dry-run artifact does not mark review latency unavailable" "Review latency seconds: unavailable" "$dry_run_out"
   assert_contains "dry-run artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$dry_run_out"
-  assert_eq "dry-run launch json records head pushed-at timestamp" "2026-07-04T23:00:00Z" "$(jq -r '.head_pushed_at' "$dry_run_out.launch.json")"
+  assert_eq "dry-run launch json records head pushed-at timestamp" "$head_committed_at_fixture" "$(jq -r '.head_pushed_at' "$dry_run_out.launch.json")"
+  assert_eq "dry-run launch json records transcript source" "stdout_fallback" "$(jq -r '.transcript_source' "$dry_run_out.launch.json")"
   dry_run_latency=$(jq -r '.review_latency_seconds' "$dry_run_out.launch.json")
   if [ "$dry_run_latency" -ge 0 ] 2>/dev/null && [ "$dry_run_latency" -lt 86400 ] 2>/dev/null; then
     pass "dry-run launch json records a sane non-negative review latency"
@@ -2813,6 +2826,7 @@ test_state_and_output_permissions
 test_pr_queue_skip_reasons
 test_reviewer_re_requested_review_bypasses_reviewed_sha_skip
 test_agy_invocation_isolates_review_context
+test_agy_uses_structured_transcript_when_available
 test_agy_warns_on_home_context_files
 test_github_api_retries_and_logs
 test_post_review_uses_rest_api
@@ -2841,7 +2855,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=391
+EXPECTED_ASSERTIONS=400
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

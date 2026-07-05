@@ -136,7 +136,14 @@ run_agy_review() {
   local ci_state="${5:-}"
   local head_sha="${6:-}"
   local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
-  local runtime_dir prompt old_prompt_personality prompt_personality_was_set=0 raw_out agy_status transcript_file content_tmp thinking_file transcript_marker
+  local runtime_dir prompt old_prompt_personality prompt_personality_was_set=0 raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file
+
+  # Cleared unconditionally, before the runtime dir necessarily exists, so a
+  # refusal/failure below never leaves a stale source from a prior invocation
+  # for the caller to misread.
+  runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
+  transcript_source_file="$runtime_dir/transcript_source"
+  rm -f "$transcript_source_file"
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
     log "Refusing to invoke agy with symlinks present in PR-head snapshot: $worktree_dir"
@@ -144,7 +151,6 @@ run_agy_review() {
     return 1
   fi
 
-  runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   mkdir -p "$runtime_dir"
   rm -f "$runtime_dir/AGENTS.md"
   thinking_file="$runtime_dir/thinking.trace"
@@ -193,10 +199,28 @@ run_agy_review() {
 
   transcript_file=$(latest_agy_transcript_file "$transcript_marker" || true)
   if [ -n "$transcript_file" ] && extract_last_agy_planner_response "$transcript_file" "$content_tmp" "$thinking_file" && [ -s "$content_tmp" ]; then
+    printf 'transcript\n' >"$transcript_source_file"
     cat "$content_tmp"
   else
     rm -f "$thinking_file"
+    printf 'stdout_fallback\n' >"$transcript_source_file"
     cat "$raw_out"
   fi
   rm -f "$raw_out" "$content_tmp" "$transcript_marker"
+}
+
+# Reads back what the immediately preceding run_agy_review call recorded:
+# "transcript" (parsed agy's structured transcript), "stdout_fallback" (transcript
+# missing/unparseable, used raw agy --print output), or "agy_failed" (the call
+# never reached a source decision -- refused, or agy itself exited non-zero).
+# Must be called before any subsequent run_agy_review call reuses the same
+# runtime dir and overwrites the file.
+agy_transcript_source() {
+  local file
+  file="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime/transcript_source"
+  if [ -s "$file" ]; then
+    tr -d '\n' <"$file"
+  else
+    printf 'agy_failed'
+  fi
 }
