@@ -173,7 +173,7 @@ write_dry_run_artifact() {
     printf '\n===== AGY EXECUTION CONTEXT START =====\n'
     printf 'Observable from GoobReview: prompt payload, agy stdout/stderr, process envelope, runtime cwd, and PR-head snapshot path/counts.\n'
     printf 'Hidden Antigravity CLI system prompt/tool definitions: not observable by GoobReview; injected by agy outside this artifact.\n'
-    printf 'Command template: timeout %s agy --sandbox --dangerously-skip-permissions --print-timeout %ss --model %s --print <prompt-by-value>\n' "$AGY_TIMEOUT" "$AGY_TIMEOUT" "$AGY_MODEL"
+    printf 'Command template: timeout --kill-after=30 %s agy --sandbox --dangerously-skip-permissions --print-timeout %ss --model %s --print <prompt-by-value>\n' "$AGY_TIMEOUT" "$AGY_TIMEOUT" "$AGY_MODEL"
     printf 'Engine commit: %s\n' "$ENGINE_SHA"
     printf 'Agy wall-clock seconds: %s\n' "${agy_elapsed_s:-unavailable}"
     printf 'Head pushed at: %s\n' "${head_committed_at:-unavailable}"

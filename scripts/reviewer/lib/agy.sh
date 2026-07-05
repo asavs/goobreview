@@ -186,7 +186,12 @@ run_agy_review() {
     # Keep the GitHub App identity out of the agent subprocess.  agy's native
     # sandbox confines tool execution; the snapshot is its sole project context.
     unset GH_TOKEN GITHUB_TOKEN REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH
-    timeout "$AGY_TIMEOUT" agy --sandbox --dangerously-skip-permissions \
+    # Close the daemon's flock fd (reviewer.sh fd 9) so no subprocess agy spawns
+    # can inherit the lock: an orphaned agy tool-call child (e.g. npm ci) that
+    # outlives agy would otherwise hold the lock and deadlock every subsequent
+    # tick until killed by hand (issue #143). A no-op when fd 9 is not open.
+    exec 9>&-
+    timeout --kill-after=30 "$AGY_TIMEOUT" agy --sandbox --dangerously-skip-permissions \
       --print-timeout "${AGY_TIMEOUT}s" --model "$AGY_MODEL" --print "$prompt" </dev/null >"$raw_out" 2>"$err_file"
   )
   agy_status=$?

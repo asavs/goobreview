@@ -1554,6 +1554,43 @@ test_agy_invocation_isolates_review_context() {
   assert_eq "agy records stdout_fallback as transcript source when no transcript exists" "stdout_fallback" "$(agy_transcript_source)"
 }
 
+# Issue #143: the daemon's flock fd (reviewer.sh fd 9) must never reach agy.
+# An agy tool-call child (e.g. npm ci) that outlives agy would otherwise
+# inherit the lock and deadlock every subsequent tick until killed by hand.
+# shellcheck disable=SC2317 # Mocked timeout command is invoked indirectly.
+test_agy_invocation_closes_lock_fd() {
+  local prompt_file err_file output worktree_dir
+
+  STATE_DIR="$TMP_ROOT/lockfd-state"
+  RUNTIME_STATE_DIR="$TMP_ROOT/lockfd-runtime"
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
+  mkdir -p "$STATE_DIR"
+  worktree_dir="$TMP_ROOT/lockfd-worktree"
+  mkdir -p "$worktree_dir"
+  prompt_file="$TMP_ROOT/lockfd-prompt.md"
+  err_file="$TMP_ROOT/lockfd-agy.err"
+  printf 'APPROVE\n' > "$prompt_file"
+  PERSONALITY_FILE="$TMP_ROOT/lockfd-personality.md"
+  PROMPT_FILE="$TMP_ROOT/lockfd-engine.md"
+  printf '## Role\nLock fd test reviewer.\n' > "$PERSONALITY_FILE"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+
+  timeout() {
+    if { : >&9; } 2>/dev/null; then
+      printf 'lock_fd=open\n'
+    else
+      printf 'lock_fd=closed\n'
+    fi
+  }
+
+  output=$(
+    exec 9>"$TMP_ROOT/lockfd-lock"
+    run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123
+  )
+  assert_contains "agy invocation closes the inherited reviewer lock fd" "lock_fd=closed" <(printf '%s\n' "$output")
+}
+
 # shellcheck disable=SC2016,SC2317 # Fixtures intentionally use literal Markdown backticks and a mocked timeout command.
 test_agy_uses_structured_transcript_when_available() {
   local saved_home="${HOME:-}" prompt_file err_file output worktree_dir home transcript_dir trace_file
@@ -2826,6 +2863,7 @@ test_state_and_output_permissions
 test_pr_queue_skip_reasons
 test_reviewer_re_requested_review_bypasses_reviewed_sha_skip
 test_agy_invocation_isolates_review_context
+test_agy_invocation_closes_lock_fd
 test_agy_uses_structured_transcript_when_available
 test_agy_warns_on_home_context_files
 test_github_api_retries_and_logs
@@ -2855,7 +2893,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=400
+EXPECTED_ASSERTIONS=401
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
