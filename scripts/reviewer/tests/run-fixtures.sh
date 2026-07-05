@@ -2079,6 +2079,179 @@ EOF
   assert_contains "second PR failure is recorded" "PR #2@sha2: failed to read CI check-runs; reached failure cap (1/1), skipping until the PR head changes" "$state_dir/log.txt"
 }
 
+test_reviewer_agy_quota_failure_reacts_and_skips_failure_cap() {
+  local state_dir runtime_dir test_reviewer env_file key_file bin_dir status output
+  local source_dir tarball reactions_file failure_count_file
+
+  state_dir="$TMP_ROOT/quota-state"
+  runtime_dir="$TMP_ROOT/quota-runtime"
+  test_reviewer="$TMP_ROOT/quota-reviewer"
+  bin_dir="$TMP_ROOT/quota-bin"
+  source_dir="$TMP_ROOT/quota-source"
+  tarball="$TMP_ROOT/quota.tar.gz"
+  reactions_file="$TMP_ROOT/quota-reactions"
+  failure_count_file="$state_dir/review-failure-1-sha1.count"
+  mkdir -p "$state_dir" "$runtime_dir" "$bin_dir" "$source_dir/repo-root"
+  cp -R "$REVIEWER_DIR" "$test_reviewer"
+  printf 'hello\n' > "$source_dir/repo-root/README.md"
+  tar -czf "$tarball" -C "$source_dir" repo-root
+
+  cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  token) printf 'test-token\n' ;;
+  slug)  printf 'goobreview\n' ;;
+  *)     exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/get-installation-token.sh"
+
+  cat > "$test_reviewer/check-ci.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'success\n'
+EOF
+  chmod +x "$test_reviewer/check-ci.sh"
+
+  cat > "$bin_dir/curl" <<EOF
+#!/usr/bin/env bash
+body_file=""
+data_file=""
+method="GET"
+url="\${*: -1}"
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    -o)
+      body_file="\$2"
+      shift 2
+      ;;
+    -d|--data|--data-binary)
+      data_file="\$2"
+      shift 2
+      ;;
+    -X)
+      method="\$2"
+      shift 2
+      ;;
+    -D|-w|-H)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+case "\$url" in
+  *'/repos/example/repo/pulls?state=open&per_page=100&page=1')
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1","ref":"feature"},"base":{"ref":"main"},"title":"Quota PR","body":"Please review","changed_files":1}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/reviews?per_page=100&page=1')
+    printf '%s\n' '[]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/files?per_page=100&page=1')
+    printf '%s\n' '[{"filename":"README.md","status":"modified","additions":1,"deletions":0,"patch":"@@ -1,0 +1,1 @@\n+hello"}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/commits?per_page=100&page=1')
+    printf '%s\n' '[{"commit":{"message":"Update README"}}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/commits/sha1')
+    printf '%s\n' '{"commit":{"committer":{"date":"2026-07-04T23:00:00Z"}}}' > "\$body_file"
+    printf '200'
+    ;;
+  *'/graphql')
+    printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/tarball/sha1')
+    cat "$tarball" > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/issues/1/reactions')
+    printf '%s\n' "\$data_file" >> "$reactions_file"
+    printf '%s\n' '{"id":1,"content":"confused"}' > "\$body_file"
+    printf '201'
+    ;;
+  *)
+    printf 'unexpected curl URL: %s\n' "\$url" >&2
+    printf '000'
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  cat > "$bin_dir/timeout" <<'EOF'
+#!/usr/bin/env bash
+shift
+"$@"
+EOF
+  chmod +x "$bin_dir/timeout"
+
+  cat > "$bin_dir/agy" <<'EOF'
+#!/usr/bin/env bash
+printf 'upstream error: 429 rate limit exceeded, retry later\n' >&2
+exit 1
+EOF
+  chmod +x "$bin_dir/agy"
+
+  key_file="$TMP_ROOT/quota-key.pem"
+  printf 'key\n' > "$key_file"
+  chmod 600 "$key_file"
+
+  printf '## Role\nReview.\n' > "$TMP_ROOT/quota-personality.md"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/quota-engine.md"
+  printf '[]\n' > "$TMP_ROOT/quota-required.json"
+
+  env_file="$TMP_ROOT/quota.env"
+  cat > "$env_file" <<EOF
+REVIEWER_REPO=example/repo
+REVIEWER_STATE=$state_dir
+REVIEWER_RUNTIME_STATE=$runtime_dir
+REVIEWER_APP_ID=1
+REVIEWER_APP_INSTALLATION_ID=2
+REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/quota-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/quota-engine.md
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/quota-required.json
+REVIEWER_MAX_PRS=1
+REVIEWER_MAX_ATTEMPTS=1
+REVIEWER_FAILURE_MAX_ATTEMPTS=1
+REVIEWER_IGNORE_AGY_BACKOFF=1
+EOF
+
+  # Two ticks in a row, both hitting the quota-exhausted agy stub. With
+  # REVIEWER_FAILURE_MAX_ATTEMPTS=1, a non-quota failure would trip the
+  # failure cap and permanently skip this PR after the first tick; quota
+  # failures must not consume that budget, so the PR stays eligible.
+  : > "$reactions_file"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "quota fixture first tick exits successfully"
+  fi
+  pass "quota fixture first tick exits successfully"
+  assert_contains "first quota failure posts confused reaction" '"content":"confused"' "$reactions_file"
+  assert_contains "first quota failure is exempted from the failure cap" "PR #1@sha1: agy quota exhausted; not counted toward the failure cap, will retry once backoff clears" "$state_dir/log.txt"
+  assert_eq "no failure-attempt file recorded after first quota failure" "0" "$( [ -f "$failure_count_file" ] && cat "$failure_count_file" || printf 0)"
+
+  : > "$reactions_file"
+  status=0
+  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "quota fixture second tick exits successfully"
+  fi
+  pass "quota fixture second tick exits successfully"
+  assert_contains "second quota failure posts confused reaction again" '"content":"confused"' "$reactions_file"
+  assert_not_contains "repeated quota failures never trip the failure cap" "review failures reached REVIEWER_FAILURE_MAX_ATTEMPTS" "$state_dir/log.txt"
+  assert_eq "no failure-attempt file recorded after second quota failure" "0" "$( [ -f "$failure_count_file" ] && cat "$failure_count_file" || printf 0)"
+}
+
 test_reviewer_research_capture_posts_selected_review_only() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir config_dir status output
   local source_dir tarball review_payload reactions_file posted_body manifest research_dir dry_run_out dry_comments_json
@@ -2640,6 +2813,7 @@ test_log_rotation
 test_run_once_sync_failure_fails_closed
 test_reviewer_attempt_budget_stops_repeated_expensive_failures
 test_reviewer_failure_cap_skips_poisoned_pr
+test_reviewer_agy_quota_failure_reacts_and_skips_failure_cap
 test_reviewer_research_capture_posts_selected_review_only
 
 # Assertion-count tripwire. Each assert_* and bare pass increments pass_count,
@@ -2647,7 +2821,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=383
+EXPECTED_ASSERTIONS=391
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
