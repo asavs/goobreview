@@ -507,3 +507,67 @@ post_review() {
     | {event: $event, body: $body, commit_id: $commit_id} + if ($post_comments | length) > 0 then {comments: $post_comments} else {} end')
   github_api_post_json "repos/$REPO/pulls/$num/reviews" "$payload" >/dev/null
 }
+
+# The daemon's own per-head-SHA status surface: a "goobreview" check run that
+# is in_progress while a review is being drafted and concludes with the review
+# outcome. Requires the App's checks:write permission; installations that have
+# not granted it get a logged skip (callers treat these as best-effort).
+
+review_check_run_conclusion_for_event() {
+  case "$1" in
+    APPROVE) printf 'success\n' ;;
+    REQUEST_CHANGES) printf 'failure\n' ;;
+    COMMENT) printf 'neutral\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+github_create_review_check_run() {
+  local head_sha="$1"
+  local payload response id
+
+  payload=$(jq -n \
+    --arg head_sha "$head_sha" \
+    --arg started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{
+      name: "goobreview",
+      head_sha: $head_sha,
+      status: "in_progress",
+      started_at: $started_at,
+      details_url: "https://github.com/asavs/goobreview",
+      output: {
+        title: "Review in progress",
+        summary: "GoobReview is drafting a review for this head SHA."
+      }
+    }')
+  response=$(github_api_post_json "repos/$REPO/check-runs" "$payload") || return 1
+  id=$(printf '%s\n' "$response" | jq -r '.id // empty')
+  [ -n "$id" ] || return 1
+  printf '%s\n' "$id"
+}
+
+github_conclude_review_check_run() {
+  local id="$1"
+  local conclusion="$2"
+  local title="$3"
+  local summary="$4"
+  local payload
+
+  case "$conclusion" in
+    success|failure|neutral) ;;
+    *) return 1 ;;
+  esac
+
+  payload=$(jq -n \
+    --arg conclusion "$conclusion" \
+    --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg title "$title" \
+    --arg summary "$summary" \
+    '{
+      status: "completed",
+      conclusion: $conclusion,
+      completed_at: $completed_at,
+      output: {title: $title, summary: $summary}
+    }')
+  github_api_patch_json "repos/$REPO/check-runs/$id" "$payload" >/dev/null
+}
