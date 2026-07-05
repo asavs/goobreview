@@ -697,6 +697,22 @@ post_review_started_reaction() {
   fi
 }
 
+# Post a "confused" reaction to signal the daemon hit an Antigravity rate
+# limit while working this PR -- distinct from "eyes" (in progress), this
+# means "stuck." Reactions are idempotent per user+emoji, so re-posting on
+# every backoff-triggering retry is a silent no-op rather than a pile of
+# duplicates. Best-effort: a failed POST is logged and never blocks the
+# retry. Callers must only invoke this on a live tick.
+post_agy_backoff_reaction() {
+  local num="$1"
+
+  if github_api_post_json "repos/$REPO/issues/$num/reactions" '{"content":"confused"}' >/dev/null 2>>"$LOG_FILE"; then
+    log "Signaled Antigravity rate limit with confused reaction on PR #$num"
+  else
+    log "Failed to add rate-limit reaction on PR #$num (continuing)"
+  fi
+}
+
 while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
   [ -n "${num:-}" ] || continue
   pr_metadata_json=""
@@ -898,9 +914,21 @@ EOF
     if [ -n "$DRY_RUN" ]; then
       write_dry_run_artifact "$num" "$head_sha" "AGY_FAILED" "$prompt_tmp" "$(cat "$agy_err_tmp")" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state"
     fi
-    set_agy_quota_backoff "$agy_err_tmp" || true
+    if set_agy_quota_backoff "$agy_err_tmp"; then
+      # A quota-exhausted agy call is not a broken PR or a broken prompt --
+      # it is expected to succeed once the backoff clears, so it must not
+      # spend the same failure-attempt budget as a genuine agy error. Left
+      # uncapped, a rate limit that outlasts a few backoff cycles would hit
+      # REVIEWER_FAILURE_MAX_ATTEMPTS and the daemon would silently abandon
+      # that head SHA forever -- no review posted, no further retries until
+      # the author happens to push again, at which point the review would
+      # cover both the missed push and the new one at once.
+      [ -n "$DRY_RUN" ] || post_agy_backoff_reaction "$num"
+      log "PR #$num@$head_sha: agy quota exhausted; not counted toward the failure cap, will retry once backoff clears"
+    else
+      record_review_failure_and_log "$num" "$head_sha" "agy failed for PR #$num@$head_sha"
+    fi
     rm -f "$prompt_tmp" "$agy_err_tmp"
-    record_review_failure_and_log "$num" "$head_sha" "agy failed for PR #$num@$head_sha"
     continue
   fi
   cat "$agy_err_tmp" >> "$LOG_FILE"
