@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Fixture globals are intentionally consumed by sourced reviewer libraries.
-# shellcheck disable=SC2034
+# Mock functions (curl/timeout/github_api_*) shadow each other across tests and
+# are only invoked indirectly by the code under test, so reachability lints
+# (SC2317, and its SC2329 successor in newer ShellCheck) misfire file-wide.
+# shellcheck disable=SC2034,SC2317,SC2329
 set -euo pipefail
 
 if ! command -v flock >/dev/null 2>&1; then
