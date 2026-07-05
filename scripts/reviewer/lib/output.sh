@@ -129,13 +129,37 @@ review_source_locations() {
       }'
 }
 
-# Emit each Markdown finding section that cites at least one source location.
+review_explicit_source_locations() {
+  local snapshot_root="${1:-}"
+
+  awk '
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (line ~ /^[[:space:]]*[Ll]ocation:[[:space:]]*/) {
+        sub(/^[[:space:]]*[Ll]ocation:[[:space:]]*/, "", line)
+        print line
+      }
+    }
+  ' | review_source_locations "$snapshot_root"
+}
+
+# Emit each Markdown finding section that declares at least one Location line.
 # NUL separators preserve the review's original newlines without asking the
 # model to serialize a second data format. The caller validates the locations
 # against GitHub's diff before it treats a section as an inline comment.
 review_markdown_finding_sections() {
   review_demote_oversized_suggestions |
     awk '
+    function has_location_line(text,    n, lines, i, line) {
+      n = split(text, lines, /\n/)
+      for (i = 1; i <= n; i++) {
+        line = lines[i]
+        sub(/\r$/, "", line)
+        if (line ~ /^[[:space:]]*[Ll]ocation:[[:space:]]*[^[:space:]]/) return 1
+      }
+      return 0
+    }
     function suggestion_fences_balanced(text,    n, lines, i, line, in_suggestion) {
       n = split(text, lines, /\n/)
       in_suggestion = 0
@@ -154,7 +178,7 @@ review_markdown_finding_sections() {
     }
     function emit() {
       if (in_section &&
-          section ~ /[[:alnum:]_.][[:alnum:]_.+\/-]*\.[[:alnum:]_+-]+:[0-9]+/ &&
+          has_location_line(section) &&
           suggestion_fences_balanced(section)) {
         printf "%s%c", section, 0
       }

@@ -305,7 +305,7 @@ Personalities are the exception to the `.example` pattern: `config/personalities
 REVIEWER_POSTED_PERSONALITY=angry scripts/dry-run.sh 42
 ```
 
-The engine prompt at `scripts/reviewer/review-prompt.md` only defines the parsed output contract (first line `APPROVE`/`REQUEST_CHANGES`/`COMMENT`, rest is the review body) — edit it only to change that contract; everything voice-related belongs in a personality file.
+The engine prompt at `scripts/reviewer/review-prompt.md` only defines the parsed output contract: markdown review body, named finding headings, `Location: path:line[-line]` lines for inlineable findings, optional small GitHub suggestion blocks, prior-thread handle sections, and a final non-empty `APPROVE`/`REQUEST_CHANGES`/`COMMENT` line. Edit it only to change that contract; everything voice-related belongs in a personality file.
 
 ### Optional Runtime Switches
 

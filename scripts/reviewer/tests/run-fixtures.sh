@@ -124,10 +124,11 @@ test_output_parser() {
 This helper lets callers spoof users.
 
 ## Blocking Findings
-### [P1] User spoofing
-**File:** `src/auth.py:42`
-**What can break:** Anyone can select a different user by query string.
-**Suggested fix:** Use the authenticated session user instead.
+### User spoofing
+Location: src/auth.py:42
+
+Impact: Anyone can select a different user by query string.
+Fix: Use the authenticated session user instead.
 REQUEST_CHANGES'
   expected_body=$(printf '%s' "$valid" | sed '$d')
 
@@ -152,35 +153,38 @@ REQUEST_CHANGES'
     '## Summary' \
     'No blocking findings.' \
     '' \
-    '### [P1] Session can be spoofed' \
-    "The query string controls the effective user at \`src/auth.py:42\`." \
+    '### Session can be spoofed' \
+    'Location: src/auth.py:42' \
+    "The query string controls the effective user." \
     '' \
     '```suggestion' \
     'user = session.user' \
     '```' \
     '' \
-    '### [P2] Unrelated note' \
+    '### Unrelated note' \
     'No source location.' |
     review_markdown_finding_sections | tr '\0' '\n')
-  assert_contains "finding-section parser keeps cited finding heading" "### [P1] Session can be spoofed" <(printf '%s' "$sections")
-  assert_not_contains "finding-section parser skips uncited sections" "### [P2] Unrelated note" <(printf '%s' "$sections")
+  assert_contains "finding-section parser keeps explicit-location finding heading" "### Session can be spoofed" <(printf '%s' "$sections")
+  assert_not_contains "finding-section parser skips sections without Location" "### Unrelated note" <(printf '%s' "$sections")
   assert_contains "finding-section parser preserves valid suggestion fences" '```suggestion' <(printf '%s' "$sections")
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
   h1_sections=$(printf '%s\n' \
     '# Alias try_files redirect loop' \
-    'The `deploy/nginx/mog.conf:43` alias block causes a redirect loop.' |
+    'Location: deploy/nginx/mog.conf:43' \
+    'The alias block causes a redirect loop.' |
     review_markdown_finding_sections | tr '\0' '\n')
   assert_contains "finding-section parser accepts h1 headings" "# Alias try_files redirect loop" <(printf '%s' "$h1_sections")
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
   malformed_sections=$(printf '%s\n' \
-    '### [P1] Broken suggestion fence' \
-    'The changed line at `src/auth.py:42` needs a replacement.' \
+    '### Broken suggestion fence' \
+    'Location: src/auth.py:42' \
+    'The changed line needs a replacement.' \
     '```suggestion' \
     'return session.user' |
     review_markdown_finding_sections | tr '\0' '\n')
-  assert_not_contains "finding-section parser rejects malformed suggestion fences for inline promotion" "### [P1] Broken suggestion fence" <(printf '%s' "$malformed_sections")
+  assert_not_contains "finding-section parser rejects malformed suggestion fences for inline promotion" "### Broken suggestion fence" <(printf '%s' "$malformed_sections")
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
   resolved_handles=$(printf '%s\n' \
@@ -447,52 +451,61 @@ test_inline_review_comments_follow_diff_anchors() {
     printf '%s\n' '{"filename":"src/app.py","patch":"@@ -10,1 +10,0 @@\n-old-only\n@@ -40,3 +40,5 @@\n context\n-old\n+new\n+another\n+third\n context-after"}'
   }
 
-  body="### [P1] Render stays stale
-\`src/app.py:42\` is read from a ref that does not schedule a render.
+  body="### Render stays stale
+Location: src/app.py:42
+The line is read from a ref that does not schedule a render.
 
-### [P1] Suggest direct replacement
-\`src/app.py:42-43\` should schedule a render immediately.
+### Suggest direct replacement
+Location: src/app.py:42-43
+This should schedule a render immediately.
 
 \`\`\`suggestion
 setState(new)
 render()
 \`\`\`
 
-### [P2] Malformed suggestion stays out of native inline comments
-\`src/app.py:42\` has an unclosed suggestion fence.
+### Malformed suggestion stays out of native inline comments
+Location: src/app.py:42
+This has an unclosed suggestion fence.
 
 \`\`\`suggestion
 setState(other)
 
-### [P2] Not on this diff
-\`src/other.py:9\` is outside the changed lines.
+### Not on this diff
+Location: src/other.py:9
+This is outside the changed lines.
 
-### [P2] Deleted line
-\`src/app.py:10\` was removed without a replacement.
+### Deleted line
+Location: src/app.py:10
+This was removed without a replacement.
 
-### [P2] Context-only line
-\`src/app.py:40\` is not itself changed.
+### Context-only line
+Location: src/app.py:40
+This line is not itself changed.
 
-### [P1] Old symptom has new cause
-\`src/app.py:44\` fails only because \`src/app.py:42\` now passes the new value.
+### Old symptom has new cause
+Location: src/app.py:41
+The old symptom at \`src/app.py:44\` fails only because this line now passes the new value.
 
-### [P2] Incomplete range
-\`src/app.py:43-99\` starts on the diff but extends outside it.
+### Incomplete range
+Location: src/app.py:43-99
+This starts on the diff but extends outside it.
 
-### [P2] Missing line
-\`src/app.py:99\` does not exist."
+### Missing line
+Location: src/app.py:99
+This does not exist."
   comments=$(review_inline_comments_json 17 "$body")
 
   assert_eq "inline-comment parser emits verified anchors including context lines" "6" "$(printf '%s\n' "$comments" | jq 'length')"
   assert_eq "inline-comment parser prefers added side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[0].side')"
-  assert_eq "inline-comment parser preserves finding body" "### [P1] Render stays stale" "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
+  assert_eq "inline-comment parser preserves named finding body" "### Render stays stale" "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
   assert_contains "inline-comment parser preserves valid suggestion fence" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 43) | .body')
   assert_eq "inline-comment parser emits multi-line suggestion start_line" "42" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Suggest direct replacement")) | .start_line')"
   assert_eq "inline-comment parser emits multi-line suggestion start_side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Suggest direct replacement")) | .start_side')"
   assert_eq "inline-comment parser marks introduced findings as PR-scoped" "true" "$(printf '%s\n' "$comments" | jq -r '.[0]._goobreview_finding_introduced')"
   assert_eq "inline-comment parser marks context-only findings as out of scope" "false" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Context-only line")) | ._goobreview_finding_introduced')"
   assert_eq "inline-comment parser keeps old-symptom new-cause findings PR-scoped" "true" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Old symptom has new cause")) | ._goobreview_finding_introduced')"
-  assert_eq "inline-comment parser records old-symptom anchor separately" "false" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Old symptom has new cause")) | ._goobreview_anchor_introduced')"
+  assert_eq "inline-comment parser records old-symptom cause as introduced" "true" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Old symptom has new cause")) | ._goobreview_anchor_introduced')"
   assert_eq "inline-comment parser counts PR-scoped findings" "4" "$(printf '%s\n' "$comments" | review_inline_comments_pr_scoped_count)"
   assert_eq "scope guard preserves request changes with any PR-scoped finding" "REQUEST_CHANGES" "$(review_event_after_scope_guard REQUEST_CHANGES "$comments")"
   assert_eq "scope guard downgrades all out-of-scope blocking findings" "COMMENT" "$(review_event_after_scope_guard REQUEST_CHANGES '[{"_goobreview_finding_introduced":false}]')"
@@ -511,8 +524,9 @@ test_suggestion_cap_demotes_oversized_blocks() {
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review body.
   exact_sections=$(printf '%s\n' \
-    '### [P1] Exact cap stays applicable' \
-    'The changed range at `src/app.py:42-43` needs a replacement.' \
+    '### Exact cap stays applicable' \
+    'Location: src/app.py:42-43' \
+    'The changed range needs a replacement.' \
     '' \
     '```suggestion' \
     'setState(new)' \
@@ -543,16 +557,18 @@ test_suggestion_cap_demotes_oversized_blocks() {
     printf '%s\n' '{"filename":"src/app.py","patch":"@@ -40,1 +40,5 @@\n context\n+setState(old)\n+renderOld()\n+notifyOld()\n+doneOld()"}'
   }
 
-  body="### [P1] Exact cap inline suggestion
-\`src/app.py:42-43\` should keep the applicable replacement.
+  body="### Exact cap inline suggestion
+Location: src/app.py:42-43
+This should keep the applicable replacement.
 
 \`\`\`suggestion
 setState(new)
 render()
 \`\`\`
 
-### [P1] Oversized inline suggestion
-\`src/app.py:42-44\` should not expose an Apply suggestion button.
+### Oversized inline suggestion
+Location: src/app.py:42-44
+This should not expose an Apply suggestion button.
 
 \`\`\`suggestion
 setState(new)
@@ -893,7 +909,7 @@ test_prompt_assembly() {
     printf '%s\n' 'Use REQUEST_CHANGES only for concrete issues that should block merge.'
     printf '%s\n' 'Use COMMENT when the review is informational.'
     printf '%s\n' 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.'
-    printf '%s\n' "Use a short Markdown heading and cite the precise source location as \`path/to/file.ext:123\`."
+    printf '%s\n' "Use a named Markdown heading and a Location: path/to/file.ext:123 line."
   } > "$PROMPT_FILE"
   INCLUDE_AUTHOR=0
   INCLUDE_DESCRIPTION=0
@@ -950,7 +966,7 @@ test_prompt_assembly() {
         "nodes": [
           {
             "author": {"login": "goobreview[bot]"},
-            "body": "### [P1] Auth fallback handling\n`client/src/auth.py:42` is already tracked.",
+            "body": "### Auth fallback handling\nLocation: client/src/auth.py:42\nThis is already tracked.",
             "url": "https://github.com/example/repo/pull/999#discussion_r1"
           },
           {
@@ -1063,8 +1079,8 @@ test_prompt_assembly() {
   assert_not_contains "prompt omits prior bot review timestamp" "Submitted at:" "$prompt_file"
   assert_not_contains "prompt excludes current-head bot review" "Current-head review must not be included." "$prompt_file"
   assert_contains "prompt includes unresolved bot inline-thread state" "Unresolved bot thread count: 1" "$prompt_file"
-  assert_contains "prompt includes unresolved thread slug handle and location" "- p1-auth-fallback-handling client/src/auth.py:42" "$prompt_file"
-  assert_contains "prompt includes unresolved thread subject" "Subject: [P1] Auth fallback handling" "$prompt_file"
+  assert_contains "prompt includes unresolved thread slug handle and location" "- auth-fallback-handling client/src/auth.py:42" "$prompt_file"
+  assert_contains "prompt includes unresolved thread subject" "Subject: Auth fallback handling" "$prompt_file"
   assert_not_contains "prompt avoids verbose unresolved-thread framing" "remain durable PR state" "$prompt_file"
 
   PREVIOUS_REVIEW_MAX_BYTES=8
@@ -2389,7 +2405,7 @@ EOF
 printf 'fake agy stderr trace\n' >&2
 agents_md_content="$(cat AGENTS.md 2>/dev/null || true)"
 if [ -n "${REVIEWER_DRY_RUN:-}" ]; then
-  printf '### [P1] README location\n`README.md:1` needs review.\nAPPROVE\n'
+  printf '### README location\nLocation: README.md:1\nThis needs review.\nAPPROVE\n'
   exit 0
 fi
 case "$agents_md_content" in
@@ -2569,30 +2585,33 @@ test_review_body_dedup_filter() {
   full_body='## Summary
 This PR changes the auth path.
 
-### [P1] Render stays stale
-`src/app.py:42` is read from a ref that does not schedule a render.
+### Render stays stale
+Location: src/app.py:42
+This is read from a ref that does not schedule a render.
 
-### [P2] Not promoted
-`src/app.py:99` has no diff anchor so it stays in the body.'
+### Not promoted
+Location: src/app.py:99
+This has no diff anchor so it stays in the body.'
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
-  promoted_json='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"### [P1] Render stays stale\n`src/app.py:42` is read from a ref that does not schedule a render."}]'
+  promoted_json='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"### Render stays stale\nLocation: src/app.py:42\nThis is read from a ref that does not schedule a render."}]'
 
   filtered=$(printf '%s\n' "$full_body" | review_body_without_promoted_sections "$promoted_json")
 
-  assert_not_contains "dedup filter strips promoted finding section from body" "### [P1] Render stays stale" <(printf '%s\n' "$filtered")
+  assert_not_contains "dedup filter strips promoted finding section from body" "### Render stays stale" <(printf '%s\n' "$filtered")
   assert_contains "dedup filter preserves summary section" "## Summary" <(printf '%s\n' "$filtered")
-  assert_contains "dedup filter preserves non-promoted finding in body" "### [P2] Not promoted" <(printf '%s\n' "$filtered")
+  assert_contains "dedup filter preserves non-promoted finding in body" "### Not promoted" <(printf '%s\n' "$filtered")
   assert_eq "dedup filter passthrough when no inline comments" \
     "$(printf '%s\n' "$full_body")" \
     "$(printf '%s\n' "$full_body" | review_body_without_promoted_sections '[]')"
 
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
-  h1_promoted_json='[{"path":"deploy/nginx/mog.conf","line":43,"side":"RIGHT","body":"# Alias redirect loop\n`deploy/nginx/mog.conf:43` alias causes a loop."}]'
+  h1_promoted_json='[{"path":"deploy/nginx/mog.conf","line":43,"side":"RIGHT","body":"# Alias redirect loop\nLocation: deploy/nginx/mog.conf:43\nThis alias causes a loop."}]'
   # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture text.
   h1_filtered=$(printf '%s\n' \
     '# Alias redirect loop' \
-    '`deploy/nginx/mog.conf:43` alias causes a loop.' |
+    'Location: deploy/nginx/mog.conf:43' \
+    'This alias causes a loop.' |
     review_body_without_promoted_sections "$h1_promoted_json")
   assert_not_contains "dedup filter strips promoted h1 section from body" "Alias redirect loop" <(printf '%s\n' "$h1_filtered")
 }

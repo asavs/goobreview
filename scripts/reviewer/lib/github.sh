@@ -371,7 +371,7 @@ review_inline_comments_json() {
   fi
 
   while IFS= read -r -d '' section; do
-    locations=$(printf '%s' "$section" | review_source_locations "$snapshot_root")
+    locations=$(printf '%s' "$section" | review_explicit_source_locations "$snapshot_root")
     chosen_anchor=""
     chosen_side=""
     chosen_start=""
