@@ -681,6 +681,22 @@ record_review_failure_and_log() {
   fi
 }
 
+# Post an "eyes" reaction to signal the daemon has started working this PR, so a
+# PR author can tell "not reached yet" from "in progress". Reactions are silent
+# (no watcher notifications) and idempotent per user+emoji, so re-posting on a
+# new tick is a natural no-op. Best-effort: a failed POST is logged and never
+# blocks a review. Callers must only invoke this on a live tick -- never in
+# dry-run or prompt-only mode, which must never touch GitHub.
+post_review_started_reaction() {
+  local num="$1"
+
+  if github_api_post_json "repos/$REPO/issues/$num/reactions" '{"content":"eyes"}' >/dev/null 2>>"$LOG_FILE"; then
+    log "Signaled review start with eyes reaction on PR #$num"
+  else
+    log "Failed to add review-started reaction on PR #$num (continuing)"
+  fi
+}
+
 while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
   [ -n "${num:-}" ] || continue
   pr_metadata_json=""
@@ -790,6 +806,7 @@ EOF
           review_actions=$((review_actions + 1))
           continue
         fi
+        post_review_started_reaction "$num"
         if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body" "$head_sha" '[]'; then
           clear_review_failure_attempts "$num" "$head_sha"
           log "Posted REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
@@ -807,6 +824,10 @@ EOF
   esac
 
   log "Reviewing PR #$num@$head_sha"
+
+  if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
+    post_review_started_reaction "$num"
+  fi
 
   head_committed_at=""
   if [ -z "$RENDER_PROMPT_ONLY" ]; then

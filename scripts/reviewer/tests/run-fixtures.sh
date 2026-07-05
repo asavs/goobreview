@@ -1669,7 +1669,7 @@ test_pr_queue_skip_reasons() {
 }
 
 test_reviewer_re_requested_review_bypasses_reviewed_sha_skip() {
-  local state_dir runtime_dir test_reviewer env_file key_file bin_dir ci_count posts_file status output
+  local state_dir runtime_dir test_reviewer env_file key_file bin_dir ci_count posts_file reactions_file status output
 
   state_dir="$TMP_ROOT/re-request-state"
   runtime_dir="$TMP_ROOT/re-request-runtime"
@@ -1677,9 +1677,11 @@ test_reviewer_re_requested_review_bypasses_reviewed_sha_skip() {
   bin_dir="$TMP_ROOT/re-request-bin"
   ci_count="$TMP_ROOT/re-request-ci-count"
   posts_file="$TMP_ROOT/re-request-posts"
+  reactions_file="$TMP_ROOT/re-request-reactions"
   mkdir -p "$state_dir" "$runtime_dir" "$bin_dir"
   cp -R "$REVIEWER_DIR" "$test_reviewer"
   : > "$posts_file"
+  : > "$reactions_file"
 
   cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -1740,6 +1742,11 @@ case "$method $url" in
     printf '%s\n' '{"total_count":1,"check_runs":[{"name":"ci","status":"completed","conclusion":"failure"}]}' > "$body_file"
     printf '200'
     ;;
+  *'POST '*'repos/example/repo/issues/1/reactions')
+    printf 'reaction\n' >> "$REACTIONS_FILE"
+    printf '%s\n' '{"id":1,"content":"eyes"}' > "$body_file"
+    printf '201'
+    ;;
   *'POST '*'repos/example/repo/pulls/1/reviews')
     printf 'post\n' >> "$POSTS_FILE"
     printf '%s\n' '{"id":1}' > "$body_file"
@@ -1791,22 +1798,24 @@ EOF
 
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
-  output=$(set -a; . "$env_file"; set +a; POSTS_FILE="$posts_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  output=$(set -a; . "$env_file"; set +a; POSTS_FILE="$posts_file" REACTIONS_FILE="$reactions_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
     fail "reviewed SHA without re-request fixture exits successfully"
   fi
   pass "reviewed SHA without re-request fixture exits successfully"
   assert_not_contains "reviewed SHA without re-request does not post" "post" "$posts_file"
+  assert_not_contains "skipped PR gets no review-started reaction" "reaction" "$reactions_file"
   assert_contains "reviewed SHA without re-request logs skip" "PR #1@sha1 already reviewed by goobreview[bot], skipping" "$state_dir/log.txt"
 
   : > "$posts_file"
+  : > "$reactions_file"
   : > "$state_dir/log.txt"
   rm -f "$ci_count"
 
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
-  output=$(set -a; . "$env_file"; set +a; REQUEST_REVIEWER=1 POSTS_FILE="$posts_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  output=$(set -a; . "$env_file"; set +a; REQUEST_REVIEWER=1 POSTS_FILE="$posts_file" REACTIONS_FILE="$reactions_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
     fail "reviewed SHA with re-request fixture exits successfully"
@@ -1814,6 +1823,7 @@ EOF
   pass "reviewed SHA with re-request fixture exits successfully"
   assert_eq "re-requested review reaches CI gate" "1" "$(cat "$ci_count")"
   assert_contains "re-requested review posts despite reviewed SHA" "post" "$posts_file"
+  assert_contains "CI-failure fast path still signals review start" "reaction" "$reactions_file"
   assert_contains "re-requested review logs bypass" "PR #1@sha1 already reviewed by goobreview[bot], but review was re-requested; reviewing again" "$state_dir/log.txt"
 }
 
@@ -2071,7 +2081,7 @@ EOF
 
 test_reviewer_research_capture_posts_selected_review_only() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir config_dir status output
-  local source_dir tarball review_payload posted_body manifest research_dir dry_run_out dry_comments_json
+  local source_dir tarball review_payload reactions_file posted_body manifest research_dir dry_run_out dry_comments_json
   local manifest_latency dry_run_latency
 
   state_dir="$TMP_ROOT/research-state"
@@ -2082,6 +2092,7 @@ test_reviewer_research_capture_posts_selected_review_only() {
   source_dir="$TMP_ROOT/research-source"
   tarball="$TMP_ROOT/research.tar.gz"
   review_payload="$TMP_ROOT/research-review-payload.json"
+  reactions_file="$TMP_ROOT/research-reactions"
   mkdir -p "$state_dir" "$runtime_dir" "$bin_dir" "$config_dir/personalities" "$source_dir/repo-root"
   cp -R "$REVIEWER_DIR" "$test_reviewer"
   cp "$REVIEWER_DIR/../../config/personalities/control.md" "$config_dir/personalities/control.md"
@@ -2171,6 +2182,11 @@ case "\$url" in
     cat "$tarball" > "\$body_file"
     printf '200'
     ;;
+  *'/repos/example/repo/issues/1/reactions')
+    printf '%s\n' "\$data_file" >> "$reactions_file"
+    printf '%s\n' '{"id":1,"content":"eyes"}' > "\$body_file"
+    printf '201'
+    ;;
   *'/repos/example/repo/pulls/1/reviews')
     if [ -n "\$data_file" ]; then
       printf '%s\n' "\$data_file" > "$review_payload"
@@ -2233,6 +2249,7 @@ REVIEWER_MAX_PRS=1
 REVIEWER_MAX_ATTEMPTS=1
 EOF
 
+  : > "$reactions_file"
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
   output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
@@ -2242,6 +2259,8 @@ EOF
     fail "research capture fixture reviewer exits successfully"
   fi
   pass "research capture fixture reviewer exits successfully"
+
+  assert_contains "live tick posts review-started eyes reaction" '"content":"eyes"' "$reactions_file"
 
   posted_body=$(jq -r '.body' "$review_payload")
   assert_contains "posted review uses selected angry arm" "angry review" <(printf '%s\n' "$posted_body")
@@ -2276,6 +2295,7 @@ EOF
   assert_contains "counterfactual artifact agents.md reflects control personality" "## Role" "$research_dir/none/artifact.txt"
 
   dry_run_out="$TMP_ROOT/research-dry-run.txt"
+  : > "$reactions_file"
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
   output=$(set -a; . "$env_file"; set +a; REVIEWER_DRY_RUN=1 REVIEWER_DRY_RUN_OUT="$dry_run_out" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
@@ -2284,6 +2304,7 @@ EOF
     fail "dry-run inline-comment fixture reviewer exits successfully"
   fi
   pass "dry-run inline-comment fixture reviewer exits successfully"
+  assert_not_contains "dry-run posts no review-started reaction" "content" "$reactions_file"
   assert_contains "dry-run artifact records agy execution context" "===== AGY EXECUTION CONTEXT START =====" "$dry_run_out"
   assert_contains "dry-run artifact explains hidden agy layer" "Hidden Antigravity CLI system prompt/tool definitions: not observable by GoobReview" "$dry_run_out"
   assert_contains "dry-run artifact records agy command template" "agy --sandbox --dangerously-skip-permissions" "$dry_run_out"
@@ -2626,7 +2647,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=379
+EXPECTED_ASSERTIONS=383
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
