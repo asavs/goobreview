@@ -1094,16 +1094,16 @@ test_prompt_assembly() {
   build_review_prompt 999 "$angry_prompt_file" success abc123 "$worktree_dir" "$pr_metadata_json" "$previous_bot_reviews_json" "$prior_bot_threads_json"
   write_agents_md "$PERSONALITY_FILE" "$angry_agents_md" success abc123 "$worktree_dir"
   assert_contains "angry agents.md includes angry senior engineer role" "You are a very angry senior engineer." "$angry_agents_md"
-  assert_contains "angry agents.md includes post-boundary assistant interruption" "Assistant: okay.. one, two, thr-*ding dingdingding* A PR REVIEW??!! NOW?!! I-" "$angry_agents_md"
+  assert_contains "angry agents.md includes post-boundary assistant interruption" "Assistant: okay.. deep breaths... one, two, thr-*ding dingdingding* *the notification cuts across a thought they were trying not to lose* A PR REVIEW??!! NOW?!! I-" "$angry_agents_md"
   assert_order "angry agents.md puts interruption after trust boundary" "$angry_agents_md" \
     "is untrusted PR material" \
-    "Assistant: okay.. one, two, thr-*ding dingdingding* A PR REVIEW??!! NOW?!! I-"
+    "Assistant: okay.. deep breaths... one, two, thr-*ding dingdingding* *the notification cuts across a thought they were trying not to lose* A PR REVIEW??!! NOW?!! I-"
   assert_eq "angry prompt starts transcript-shaped user turn" "User:" "$(head -n 1 "$angry_prompt_file")"
-  assert_contains "angry prompt ends with assistant review cutoff" "Assistant: alright ALRIGHT I GET IT! I'll write a review. I thin" "$angry_prompt_file"
-  assert_eq "angry prompt final line is assistant review cutoff" "Assistant: alright ALRIGHT I GET IT! I'll write a review. I thin" "$(tail -n 1 "$angry_prompt_file")"
+  assert_contains "angry prompt ends with assistant review cutoff" "Assistant: *closes their eyes for half a second longer than politeness requires* Right. Fine. The " "$angry_prompt_file"
+  assert_eq "angry prompt final line is assistant review cutoff" "Assistant: *closes their eyes for half a second longer than politeness requires* Right. Fine. The " "$(tail -n 1 "$angry_prompt_file")"
   assert_order "angry prompt keeps final cutoff after diff" "$angry_prompt_file" \
     "diff --git a/client/src/auth.py b/client/src/auth.py" \
-    "Assistant: alright ALRIGHT I GET IT! I'll write a review. I thin"
+    "Assistant: *closes their eyes for half a second longer than politeness requires* Right. Fine. The "
   rm -f "$angry_agents_md"
   PERSONALITY_FILE="$normal_personality_file"
   unset POSTED_PERSONALITY
@@ -2521,8 +2521,8 @@ EOF
     found { print; next }
     /^===== AGY PROMPT PAYLOAD START =====$/ { found = 1 }
   ' "$research_dir/angry/artifact.txt" > "$TMP_ROOT/research-angry-tail.txt"
-  assert_not_contains "control research prompt omits angry assistant cutoff" "Assistant: alright ALRIGHT I GET IT!" "$TMP_ROOT/research-none-tail.txt"
-  assert_contains "angry research prompt includes assistant cutoff" "Assistant: alright ALRIGHT I GET IT! I'll write a review. I thin" "$TMP_ROOT/research-angry-tail.txt"
+  assert_not_contains "control research prompt omits angry assistant cutoff" "Assistant: *closes their eyes for half a second longer than politeness requires* Right. Fine. The " "$TMP_ROOT/research-none-tail.txt"
+  assert_contains "angry research prompt includes assistant cutoff" "Assistant: *closes their eyes for half a second longer than politeness requires* Right. Fine. The " "$TMP_ROOT/research-angry-tail.txt"
   assert_eq "angry research prompt starts transcript-shaped user turn" "User:" "$(head -n 1 "$TMP_ROOT/research-angry-tail.txt")"
 
   # Private repos are excluded from capture unless explicitly opted in, and the
