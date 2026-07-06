@@ -172,6 +172,73 @@ test_heading_location_fallback() {
     $'client/src/loop.ts\t10\t12' "$range_loc"
 }
 
+# A live review emitted its first Location line as a markdown link
+# (`Location: [path:line](file://.../path)`), which the bare-token anchor parser
+# would not swallow. Normalize the presentation of a Location value before
+# extraction: collapse a markdown link to its TEXT (discarding the URL so no
+# path:line is ever parsed out of a link target) and strip surrounding
+# backticks. Safety stays downstream in snapshot/diff validation.
+test_location_line_normalization() {
+  local snap file_url_loc https_loc backtick_loc heading_link_loc url_only_loc
+
+  snap="/tmp/goobreview-runtime-x/worktrees/y/heads/deadbeef"
+
+  # Exact live shape (shortened): a file:// link Location. TEXT anchors; URL is
+  # discarded entirely regardless of the snapshot root.
+  # shellcheck disable=SC2016 # Backticks/link syntax are literal Markdown in the fixture.
+  file_url_loc=$(printf '%s\n' \
+    '### Snapshot applied without validation' \
+    "Location: [scripts/apply-artifacts.sh:94-112](file://$snap/scripts/apply-artifacts.sh)" \
+    'The snapshot is trusted blindly.' |
+    review_explicit_source_locations "$snap")
+  assert_eq "markdown-link Location with a file:// URL anchors to its TEXT token" \
+    $'scripts/apply-artifacts.sh\t94\t112' "$file_url_loc"
+
+  # A markdown-link Location with an https blob URL. The #L fragment in the URL
+  # is not a path:line token, so only the TEXT anchors.
+  # shellcheck disable=SC2016 # Backticks/link syntax are literal Markdown in the fixture.
+  https_loc=$(printf '%s\n' \
+    '### Off-by-one' \
+    'Location: [client/src/loop.ts:10-12](https://github.com/asavs/goobreview/blob/deadbeef/client/src/loop.ts#L10-L12)' \
+    'The range boundary is mismatched.' |
+    review_explicit_source_locations)
+  assert_eq "markdown-link Location with an https blob URL anchors to its TEXT token" \
+    $'client/src/loop.ts\t10\t12' "$https_loc"
+
+  # A backticked Location value normalizes to the bare token.
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture.
+  backtick_loc=$(printf '%s\n' \
+    '### Session can be spoofed' \
+    'Location: `src/auth.py:42`' \
+    'The query string controls the effective user.' |
+    review_explicit_source_locations)
+  assert_eq "backticked Location value normalizes to a bare path:line token" \
+    $'src/auth.py\t42\t42' "$backtick_loc"
+
+  # A heading carrying a link-wrapped path:line token still resolves via the
+  # last-token rule; the #L fragment in the link target is not a location token.
+  # shellcheck disable=SC2016 # Backticks/link syntax are literal Markdown in the fixture.
+  heading_link_loc=$(printf '%s\n' \
+    '### Off-by-one in [`client/src/loop.ts:10-12`](https://github.com/asavs/goobreview/blob/deadbeef/client/src/loop.ts#L10-L12)' \
+    'The range boundary is mismatched.' |
+    review_explicit_source_locations)
+  assert_eq "heading link-wrapped path:line token anchors and ignores the URL target" \
+    $'client/src/loop.ts\t10\t12' "$heading_link_loc"
+
+  # Negative: the only path:line-shaped text lives inside the link URL. Because
+  # the URL is discarded, nothing anchors. The empty result trips grep's no-match
+  # exit under the suite's `set -e`, so the capture is guarded like the other
+  # empty-output cases.
+  # shellcheck disable=SC2016 # Link syntax is literal Markdown in the fixture.
+  url_only_loc=$(printf '%s\n' \
+    '### Suspicious raw link' \
+    'Location: [see the diff here](https://example.com/raw/scripts/evil.sh:99)' \
+    'Body text.' |
+    review_explicit_source_locations || true)
+  assert_eq "a path:line living only inside a Location link URL never anchors" \
+    "" "$url_only_loc"
+}
+
 test_review_body_dedup_filter() {
   local full_body promoted_json filtered
 

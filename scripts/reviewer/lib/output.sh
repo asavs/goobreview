@@ -146,12 +146,35 @@ review_explicit_source_locations() {
   local snapshot_root="${1:-}"
 
   awk '
+    # Normalize a Location line value before it reaches path:line extraction.
+    # This only reshapes the presentation the model wrapped around a citation;
+    # it never introduces a new location source. A markdown link collapses to
+    # its TEXT and the URL is discarded outright (locations are never parsed out
+    # of a URL, so a path:line-shaped fragment in the link target cannot anchor).
+    # Surrounding backticks and whitespace are then stripped.
+    function normalize_location_value(v,   idx) {
+      sub(/^[[:space:]]+/, "", v)
+      sub(/[[:space:]]+$/, "", v)
+      if (v ~ /^\[[^]]*\]\([^)]*\)/) {
+        v = substr(v, 2)
+        idx = index(v, "]")
+        if (idx > 0) v = substr(v, 1, idx - 1)
+      }
+      sub(/^[[:space:]]+/, "", v)
+      sub(/[[:space:]]+$/, "", v)
+      sub(/^`+/, "", v)
+      sub(/`+$/, "", v)
+      sub(/^[[:space:]]+/, "", v)
+      sub(/[[:space:]]+$/, "", v)
+      return v
+    }
     NR == 1 { heading = $0; sub(/\r$/, "", heading) }
     {
       line = $0
       sub(/\r$/, "", line)
       if (line ~ /^[[:space:]]*[Ll]ocation:[[:space:]]*/) {
         sub(/^[[:space:]]*[Ll]ocation:[[:space:]]*/, "", line)
+        line = normalize_location_value(line)
         print line
         have_location = 1
       }

@@ -133,6 +133,7 @@ test_trace_to_details
 test_review_footer_note
 test_output_parser
 test_heading_location_fallback
+test_location_line_normalization
 test_prompt_assembly
 test_prompt_failure_propagates
 test_diff_per_file_assembly
@@ -178,7 +179,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=456
+EXPECTED_ASSERTIONS=461
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
