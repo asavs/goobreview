@@ -255,6 +255,69 @@ test_agy_invocation_denies_build_tools() {
   assert_contains "refusal shim names the denied tool" "goobreview: vitest is disabled during review" <(printf '%s\n' "$output")
 }
 
+# The concrete model that `--model auto` resolves to is recorded only in agy's
+# per-invocation cli.log, never in the transcript. run_agy_review must recover
+# the propagated model label and expose it via agy_resolved_model_label, and
+# report empty (so the caller falls back to the requested --model alias) when
+# the log is absent or its format is unrecognized.
+# shellcheck disable=SC2016,SC2317 # Literal Go-log text; mocked timeout invoked indirectly.
+test_agy_records_resolved_model_label() {
+  local saved_home="${HOME:-}" prompt_file err_file output worktree_dir home log_dir parse_log
+
+  STATE_DIR="$TMP_ROOT/model-label-state"
+  RUNTIME_STATE_DIR="$TMP_ROOT/model-label-runtime"
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
+  mkdir -p "$STATE_DIR"
+  worktree_dir="$TMP_ROOT/model-label-worktree"
+  mkdir -p "$worktree_dir"
+  prompt_file="$TMP_ROOT/model-label-prompt.md"
+  err_file="$TMP_ROOT/model-label-agy.err"
+  printf 'prompt\n' > "$prompt_file"
+  PERSONALITY_FILE="$TMP_ROOT/model-label-personality.md"
+  PROMPT_FILE="$TMP_ROOT/model-label-engine.md"
+  printf '## Role\nModel-label reviewer.\n' > "$PERSONALITY_FILE"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+
+  home="$TMP_ROOT/model-label-home"
+  HOME="$home"
+  log_dir="$home/.gemini/antigravity-cli/log"
+  mkdir -p "$log_dir"
+
+  # Direct parser checks: the last propagated label wins (agy logs it several
+  # times per run); content without the marker line is a miss.
+  parse_log="$TMP_ROOT/model-label-parse.log"
+  cat > "$parse_log" <<'EOF'
+I0706 21:02:08 model_config_manager.go:157] Propagating selected model override to backend: label="Gemini 3.5 Flash (Medium)"
+I0706 21:02:09 model_config_manager.go:157] Propagating selected model override to backend: label="Gemini 3.5 Pro (High)"
+EOF
+  assert_eq "resolved-model parser returns the last propagated label" "Gemini 3.5 Pro (High)" "$(extract_agy_resolved_model_label "$parse_log")"
+  printf 'no model override line here\n' > "$parse_log"
+  if extract_agy_resolved_model_label "$parse_log" >/dev/null; then fail "parser must miss when no label line is present"; else pass "resolved-model parser misses when no label line is present"; fi
+
+  # End-to-end: agy writes a cli.log carrying the propagated label; the reader
+  # surfaces it for the footer/manifest.
+  timeout() {
+    cat > "$HOME/.gemini/antigravity-cli/log/cli-run.log" <<'EOF'
+I0706 21:02:07 printmode.go:89] Print mode: starting (promptLength=17910, model="auto", conversationID="")
+I0706 21:02:08 model_config_manager.go:157] Propagating selected model override to backend: label="Gemini 3.5 Flash (Medium)"
+EOF
+    printf 'Body\nAPPROVE\n'
+  }
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "run_agy_review returns the stdout review" $'Body\nAPPROVE' "$output"
+  assert_eq "agy exposes the resolved model label from cli.log" "Gemini 3.5 Flash (Medium)" "$(agy_resolved_model_label)"
+
+  # No cli.log at all: the reader reports empty so the caller falls back to the
+  # requested --model alias.
+  rm -f "$log_dir/"cli-*.log
+  timeout() { printf 'Body\nAPPROVE\n'; }
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "agy resolved model label is empty when no cli.log exists" "" "$(agy_resolved_model_label)"
+
+  HOME="$saved_home"
+}
+
 test_agy_warns_on_home_context_files() {
   local saved_home="${HOME:-}" saved_log="$LOG_FILE" saved_refuse="${REFUSE_ON_HOME_CONTEXT:-}" home warn_log
 

@@ -106,6 +106,41 @@ latest_agy_transcript_file() {
     | cut -d' ' -f2-
 }
 
+# The concrete model that `--model auto` routed to is recorded only in agy's
+# per-invocation CLI log, never in the transcript. Same marker trick as
+# latest_agy_transcript_file: agy writes one timestamped cli-<ts>.log per
+# invocation, so the newest one created after the pre-agy marker is this call's
+# log. The daemon runs one flock'd agy at a time, so there is no interleaving.
+latest_agy_cli_log() {
+  local newer_than="${1:-}"
+  local log_dir="${HOME:-}/.gemini/antigravity-cli/log"
+  local find_args=("$log_dir" -name 'cli-*.log' -type f)
+
+  [ -d "$log_dir" ] || return 1
+  if [ -n "$newer_than" ] && [ -e "$newer_than" ]; then
+    find_args+=(-newer "$newer_than")
+  fi
+  find "${find_args[@]}" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -n \
+    | tail -n 1 \
+    | cut -d' ' -f2-
+}
+
+# The display label agy propagates to the backend for the resolved model, e.g.
+# "Gemini 3.5 Flash (Medium)". Best-effort: a missing log, a future agy log
+# format, or an empty label all return non-zero so the caller falls back to the
+# requested --model alias. This is a friendly label (model + reasoning tier),
+# not a raw API model id -- no such id appears in the logs.
+extract_agy_resolved_model_label() {
+  local cli_log="$1" label
+  [ -f "$cli_log" ] || return 1
+  label=$(grep -oE 'Propagating selected model override to backend: label="[^"]*"' "$cli_log" 2>/dev/null \
+    | tail -n 1 \
+    | sed -E 's/.*label="([^"]*)".*/\1/')
+  [ -n "$label" ] || return 1
+  printf '%s' "$label"
+}
+
 # Pick the reviewable planner turn from agy's transcript. Prefer the last
 # turn whose final non-empty line is a valid review event: agy appends
 # boilerplate turns after the actual review (workspace suggestions, wrap-up
@@ -181,7 +216,7 @@ run_agy_review() {
   local ci_state="${5:-}"
   local head_sha="${6:-}"
   local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
-  local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count
+  local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count cli_log resolved_model_file resolved_model_label
   local -a add_dir_args agy_argv
 
   # Cleared unconditionally, before the runtime dir necessarily exists, so a
@@ -189,12 +224,12 @@ run_agy_review() {
   # for the caller to misread.
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   transcript_source_file="$runtime_dir/transcript_source"
-  rm -f "$transcript_source_file"
   # Cleared for the same reason as transcript_source above: a refusal below must
-  # never leave a stale invocation record from a prior run for the dry-run
-  # artifact to misreport as this run's argv.
+  # never leave a stale invocation record or resolved-model label from a prior
+  # run for the dry-run artifact / footer to misreport as this run's.
   invocation_record="$runtime_dir/last-invocation.cmd"
-  rm -f "$invocation_record"
+  resolved_model_file="$runtime_dir/resolved_model_label"
+  rm -f "$transcript_source_file" "$invocation_record" "$resolved_model_file"
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
     log "Refusing to invoke agy with symlinks present in PR-head snapshot: $worktree_dir"
@@ -279,6 +314,11 @@ run_agy_review() {
     return "$agy_status"
   fi
 
+  cli_log=$(latest_agy_cli_log "$transcript_marker" || true)
+  if [ -n "$cli_log" ] && resolved_model_label=$(extract_agy_resolved_model_label "$cli_log"); then
+    printf '%s\n' "$resolved_model_label" >"$resolved_model_file"
+  fi
+
   transcript_file=$(latest_agy_transcript_file "$transcript_marker" || true)
   if [ -n "$transcript_file" ] && extract_last_agy_planner_response "$transcript_file" "$content_tmp" "$thinking_file" && [ -s "$content_tmp" ]; then
     printf 'transcript\n' >"$transcript_source_file"
@@ -318,5 +358,18 @@ agy_transcript_source() {
     tr -d '\n' <"$file"
   else
     printf 'agy_failed'
+  fi
+}
+
+# The display label of the model the immediately preceding run_agy_review
+# resolved `--model auto` to, or empty when it could not be recovered (agy
+# failed, no CLI log, or an unrecognized log format). Callers substitute the
+# requested --model alias when this is empty. Same overwrite contract as
+# agy_transcript_source: read before the next run_agy_review reuses the dir.
+agy_resolved_model_label() {
+  local file
+  file="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime/resolved_model_label"
+  if [ -s "$file" ]; then
+    tr -d '\n' <"$file"
   fi
 }
