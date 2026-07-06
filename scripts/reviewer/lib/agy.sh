@@ -136,7 +136,7 @@ run_agy_review() {
   local ci_state="${5:-}"
   local head_sha="${6:-}"
   local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
-  local runtime_dir prompt old_prompt_personality prompt_personality_was_set=0 raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file
+  local runtime_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file
 
   # Cleared unconditionally, before the runtime dir necessarily exists, so a
   # refusal/failure below never leaves a stale source from a prior invocation
@@ -155,26 +155,9 @@ run_agy_review() {
   rm -f "$runtime_dir/AGENTS.md"
   thinking_file="$runtime_dir/thinking.trace"
   rm -f "$thinking_file"
-  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
-    prompt_personality_was_set=1
-    old_prompt_personality="$PROMPT_PERSONALITY"
-  else
-    old_prompt_personality=""
-  fi
-  PROMPT_PERSONALITY="$prompt_personality"
-  if ! write_agents_md "$personality_file" "$runtime_dir/AGENTS.md" "$ci_state" "$head_sha" "$worktree_dir"; then
-    if [ "$prompt_personality_was_set" -eq 1 ]; then
-      PROMPT_PERSONALITY="$old_prompt_personality"
-    else
-      unset PROMPT_PERSONALITY
-    fi
+  if ! with_prompt_personality "$prompt_personality" write_agents_md "$personality_file" "$runtime_dir/AGENTS.md" "$ci_state" "$head_sha" "$worktree_dir"; then
     printf 'Failed to write trusted runtime AGENTS.md; refusing agy invocation.\n' >"$err_file"
     return 1
-  fi
-  if [ "$prompt_personality_was_set" -eq 1 ]; then
-    PROMPT_PERSONALITY="$old_prompt_personality"
-  else
-    unset PROMPT_PERSONALITY
   fi
   prompt=$(cat "$prompt_file")
   raw_out=$(mktemp "$runtime_dir/agy-stdout.XXXXXX")

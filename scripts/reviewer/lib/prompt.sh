@@ -21,6 +21,29 @@ effective_prompt_personality() {
   printf '%s\n' "${PROMPT_PERSONALITY:-${POSTED_PERSONALITY:-}}"
 }
 
+# Run a command with PROMPT_PERSONALITY pinned to an arm, restoring the prior
+# value (or unset state) afterwards. The prompt and AGENTS.md builders read the
+# arm through effective_prompt_personality, so this is how research capture
+# renders a counterfactual arm without disturbing the posted one.
+with_prompt_personality() {
+  local arm="$1"
+  shift
+  local was_set=0 old="" status=0
+
+  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
+    was_set=1
+    old="$PROMPT_PERSONALITY"
+  fi
+  PROMPT_PERSONALITY="$arm"
+  "$@" || status=$?
+  if [ "$was_set" -eq 1 ]; then
+    PROMPT_PERSONALITY="$old"
+  else
+    unset PROMPT_PERSONALITY
+  fi
+  return "$status"
+}
+
 is_angry_personality() {
   [ "$(effective_prompt_personality)" = "angry" ]
 }

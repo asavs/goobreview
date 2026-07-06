@@ -118,7 +118,7 @@ write_dry_run_artifact() {
   local transcript_source="${11:-agy_failed}"
   local output_file="$DRY_RUN_OUT"
   local required_checks_sha256 inline_comment_count
-  local artifact_tmp artifact_bytes marker marker_bytes body_bytes
+  local artifact_tmp
   local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks agents_md_tmp agents_md_bytes agents_md_sha home_agy_context
   local generated_at generated_at_epoch review_latency_seconds
 
@@ -219,29 +219,7 @@ write_dry_run_artifact() {
     printf '%s\n' "$inline_comments_json" | jq . | append_bounded_stdin "$MAX_ARTIFACT_BYTES" "dry-run inline-comments artifact"
     printf '===== RESOLVED INLINE COMMENTS END =====\n'
   } >"$artifact_tmp"
-  artifact_bytes=$(wc -c <"$artifact_tmp" | tr -d ' ')
-  if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
-    marker=$(printf '\n\n[goobreview: dry-run artifact truncated after %s bytes]\n' "$MAX_ARTIFACT_BYTES")
-    marker_bytes=$(printf '%s' "$marker" | wc -c | tr -d ' ')
-    if [ "$marker_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
-      printf '%s' "$marker" | head -c "$MAX_ARTIFACT_BYTES" >"$artifact_tmp.truncated"
-      install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || fatal "dry-run artifact failed secret-safety scan"
-      rm -f "$artifact_tmp.truncated"
-      rm -f "$artifact_tmp"
-      artifact_tmp=""
-    else
-      body_bytes=$((MAX_ARTIFACT_BYTES - marker_bytes))
-      head -c "$body_bytes" "$artifact_tmp" >"$artifact_tmp.truncated"
-      printf '%s' "$marker" >>"$artifact_tmp.truncated"
-      install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || fatal "dry-run artifact failed secret-safety scan"
-      rm -f "$artifact_tmp.truncated"
-    fi
-  else
-    install_secret_scanned_artifact "$artifact_tmp" "$output_file" || fatal "dry-run artifact failed secret-safety scan"
-    rm -f "$artifact_tmp"
-    artifact_tmp=""
-  fi
-  [ -z "$artifact_tmp" ] || rm -f "$artifact_tmp"
+  install_bounded_scanned_artifact "$artifact_tmp" "$output_file" "$MAX_ARTIFACT_BYTES" "dry-run artifact" || fatal "dry-run artifact failed secret-safety scan"
   rm -f "$agents_md_tmp"
   required_checks_sha256=$(sha256sum "$REQUIRED_CHECKS_FILE" | awk '{print $1}')
   jq -n \
@@ -313,7 +291,7 @@ write_research_review_artifact() {
   local prompt_file="$8"
   local review_body="$9"
   local ci_state="${10:-}"
-  local artifact_tmp artifact_bytes marker marker_bytes body_bytes agents_md_tmp agents_md_bytes agents_md_sha
+  local artifact_tmp agents_md_tmp agents_md_bytes agents_md_sha
 
   mkdir -p "$(dirname "$output_file")"
   chmod 700 "$(dirname "$output_file")" 2>/dev/null || true
@@ -349,29 +327,11 @@ write_research_review_artifact() {
     printf '===== AGY RESPONSE END =====\n'
   } >"$artifact_tmp"
 
-  artifact_bytes=$(wc -c <"$artifact_tmp" | tr -d ' ')
-  if [ "$artifact_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
-    marker=$(printf '\n\n[goobreview: research artifact truncated after %s bytes]\n' "$MAX_ARTIFACT_BYTES")
-    marker_bytes=$(printf '%s' "$marker" | wc -c | tr -d ' ')
-    if [ "$marker_bytes" -gt "$MAX_ARTIFACT_BYTES" ]; then
-      printf '%s' "$marker" | head -c "$MAX_ARTIFACT_BYTES" >"$artifact_tmp.truncated"
-    else
-      body_bytes=$((MAX_ARTIFACT_BYTES - marker_bytes))
-      head -c "$body_bytes" "$artifact_tmp" >"$artifact_tmp.truncated"
-      printf '%s' "$marker" >>"$artifact_tmp.truncated"
-    fi
-    install_secret_scanned_artifact "$artifact_tmp.truncated" "$output_file" || {
-      rm -f "$artifact_tmp" "$artifact_tmp.truncated" "$agents_md_tmp"
-      return 1
-    }
-    rm -f "$artifact_tmp.truncated"
-  else
-    install_secret_scanned_artifact "$artifact_tmp" "$output_file" || {
-      rm -f "$artifact_tmp" "$agents_md_tmp"
-      return 1
-    }
-  fi
-  rm -f "$artifact_tmp" "$agents_md_tmp"
+  install_bounded_scanned_artifact "$artifact_tmp" "$output_file" "$MAX_ARTIFACT_BYTES" "research artifact" || {
+    rm -f "$agents_md_tmp"
+    return 1
+  }
+  rm -f "$agents_md_tmp"
 }
 
 research_personality_file_for_arm() {
@@ -382,66 +342,6 @@ research_personality_file_for_arm() {
     *) return 1 ;;
   esac
 }
-
-write_research_review_artifact_for_arm() {
-  local output_file="$1"
-  local num="$2"
-  local head_sha="$3"
-  local arm="$4"
-  local personality_file="$5"
-  local role="$6"
-  local event="$7"
-  local prompt_file="$8"
-  local review_body="$9"
-  local ci_state="${10:-}"
-  local old_prompt_personality prompt_personality_was_set=0 status
-
-  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
-    prompt_personality_was_set=1
-    old_prompt_personality="$PROMPT_PERSONALITY"
-  else
-    old_prompt_personality=""
-  fi
-  PROMPT_PERSONALITY="$arm"
-  status=0
-  write_research_review_artifact "$output_file" "$num" "$head_sha" "$arm" "$personality_file" "$role" "$event" "$prompt_file" "$review_body" "$ci_state" || status=$?
-  if [ "$prompt_personality_was_set" -eq 1 ]; then
-    PROMPT_PERSONALITY="$old_prompt_personality"
-  else
-    unset PROMPT_PERSONALITY
-  fi
-  return "$status"
-}
-
-build_research_prompt_for_arm() {
-  local arm="$1"
-  local num="$2"
-  local output_prompt_file="$3"
-  local ci_state="$4"
-  local head_sha="$5"
-  local worktree_dir="$6"
-  local pr_metadata_json="$7"
-  local previous_bot_reviews_json="$8"
-  local prior_bot_threads_json="$9"
-  local old_prompt_personality prompt_personality_was_set=0 status
-
-  if [ "${PROMPT_PERSONALITY+x}" = "x" ]; then
-    prompt_personality_was_set=1
-    old_prompt_personality="$PROMPT_PERSONALITY"
-  else
-    old_prompt_personality=""
-  fi
-  PROMPT_PERSONALITY="$arm"
-  status=0
-  build_review_prompt "$num" "$output_prompt_file" "$ci_state" "$head_sha" "$worktree_dir" "$pr_metadata_json" "$previous_bot_reviews_json" "$prior_bot_threads_json" || status=$?
-  if [ "$prompt_personality_was_set" -eq 1 ]; then
-    PROMPT_PERSONALITY="$old_prompt_personality"
-  else
-    unset PROMPT_PERSONALITY
-  fi
-  return "$status"
-}
-
 
 resolve_research_capture_state() {
   RESEARCH_CAPTURE_ENABLED=0
@@ -523,14 +423,14 @@ capture_research_pair() {
   posted_personality_file="$PERSONALITY_FILE"
   counterfactual_personality_file="$(research_personality_file_for_arm "$counterfactual_arm")" || return 0
 
-  if ! write_research_review_artifact_for_arm "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review" "$ci_state"; then
+  if ! with_prompt_personality "$posted_arm" write_research_review_artifact "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review" "$ci_state"; then
     log "PR #$num@$head_sha: failed to write posted research artifact"
     return 0
   fi
 
   counterfactual_err=$(mktemp "$STATE_DIR/research-agy.$num.err.XXXXXX")
   counterfactual_prompt_file=$(mktemp "$STATE_DIR/research-prompt.$num.XXXXXX")
-  if ! build_research_prompt_for_arm "$counterfactual_arm" "$num" "$counterfactual_prompt_file" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prior_bot_threads_json"; then
+  if ! with_prompt_personality "$counterfactual_arm" build_review_prompt "$num" "$counterfactual_prompt_file" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$prior_bot_threads_json"; then
     log "PR #$num@$head_sha: failed to build counterfactual research prompt for $counterfactual_arm"
     rm -f "$counterfactual_err" "$counterfactual_prompt_file"
     return 0
@@ -553,7 +453,7 @@ capture_research_pair() {
   fi
   counterfactual_agy_s=$(( $(date +%s) - counterfactual_started_at ))
 
-  if ! write_research_review_artifact_for_arm "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state"; then
+  if ! with_prompt_personality "$counterfactual_arm" write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state"; then
     log "PR #$num@$head_sha: failed to write counterfactual research artifact"
     rm -f "$counterfactual_err" "$counterfactual_prompt_file"
     return 0
@@ -681,7 +581,7 @@ record_review_failure_and_log() {
   conclude_review_check_run_signal neutral "Review attempt failed" \
     "$message. The daemon will retry on a later tick."
   if [ -z "$DRY_RUN" ] && [ -z "$RENDER_PROMPT_ONLY" ]; then
-    attempts=$(record_review_failure_attempt "$num" "$head_sha")
+    attempts=$(review_attempts_record review-failure "$num" "$head_sha")
     if [ "$FAILURE_MAX_ATTEMPTS" -eq 0 ]; then
       log "$message, will retry next tick (failure cap disabled)"
     elif [ "$attempts" -ge "$FAILURE_MAX_ATTEMPTS" ]; then
@@ -691,6 +591,30 @@ record_review_failure_and_log() {
     fi
   else
     log "$message, will retry next tick"
+  fi
+}
+
+# Shared tail for model output that cannot be posted (an empty response or a
+# missing/invalid final review event): record the capped invalid-output
+# attempt on a live tick and log one line whose suffix reflects the cap state.
+record_invalid_output_and_log() {
+  local num="$1"
+  local head_sha="$2"
+  local message="$3"
+  local invalid_artifact="$4"
+  local invalid_attempts
+
+  if [ -z "$DRY_RUN" ]; then
+    invalid_attempts=$(review_attempts_record invalid-verdict "$num" "$head_sha")
+    if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
+      log "$message; wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
+    elif [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
+      log "$message; wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+    else
+      log "$message; wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
+    fi
+  else
+    log "$message; wrote $invalid_artifact; will retry next tick"
   fi
 }
 
@@ -765,8 +689,27 @@ conclude_review_check_run_signal() {
   REVIEW_CHECK_RUN_ID=""
 }
 
-while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
-  [ -n "${num:-}" ] || continue
+# One PR through the full pipeline: eligibility and cap gates, the CI gate,
+# snapshot and prompt assembly, the agy invocation, verdict parsing, and
+# posting with side effects. Returns 0 to move on to the next PR and 10 to
+# stop the tick (REVIEWER_MAX_PRS or REVIEWER_MAX_ATTEMPTS reached).
+review_one_pr() {
+  local num="$1"
+  local author="$2"
+  local head_sha="$3"
+  local draft="$4"
+  local pr_json_b64="$5"
+  local pr_metadata_json skip_reason bot_reviews_json requested_review existing
+  local failure_attempts invalid_attempts invalid_artifact ci_state ci_summary ci_failure_body
+  local prompt_tmp review_worktree review_threads_json unresolved_bot_threads_json prompt_thread_handle_map_json
+  local agy_err_tmp agy_started_at agy_review_status review verdict_line event review_body
+  local current_pr_json current_head_sha inline_comments_json scope_downgraded scoped_event
+  local filtered_body thinking_trace_file trace_block formatted_body body
+  local resolved_thread_handles still_open_thread_replies auto_resolve_threads auto_resolved_threads still_open_replied
+  local review_check_conclusion
+  # Read by write_dry_run_artifact and capture_research_pair through bash's
+  # dynamic scoping, so they must always be initialized here.
+  local head_committed_at="" agy_elapsed_s="" transcript_source=""
   REVIEW_CHECK_RUN_ID=""
   pr_metadata_json=""
   if [ -n "${pr_json_b64:-}" ]; then
@@ -774,19 +717,19 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
   fi
   if skip_reason=$(reviewer_pr_skip_reason "$num" "$author" "$head_sha" "${draft:-false}" "$BOT_LOGIN" "$EXTRA_SKIP_USER" "$ONLY_PR" "$BOT_AUTHOR"); then
     log "$skip_reason"
-    continue
+    return 0
   fi
 
   if [ "$review_actions" -ge "$MAX_PRS" ]; then
     log "Reached REVIEWER_MAX_PRS=$MAX_PRS, stopping this tick"
-    break
+    return 10
   fi
 
   if ! bot_reviews_json=$(github_api_paginate_array "repos/$REPO/pulls/$num/reviews" 2>>"$LOG_FILE" |
     jq -s --arg bot "$BOT_LOGIN" --arg bot_author "$BOT_AUTHOR" \
       '[.[] | select(.user.login == $bot or .user.login == $bot_author)]'); then
     log "PR #$num@$head_sha: failed to read existing reviews, will retry next tick"
-    continue
+    return 0
   fi
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
@@ -799,7 +742,7 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
     case "$existing" in
       ''|*[!0-9]*)
         log "PR #$num@$head_sha: existing review query returned unexpected count '$existing', will retry next tick"
-        continue
+        return 0
         ;;
     esac
     if [ "$existing" -gt 0 ]; then
@@ -807,28 +750,28 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
         log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, but review was re-requested; reviewing again"
       else
         log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, skipping"
-        continue
+        return 0
       fi
     fi
   fi
 
   if [ "$review_attempts" -ge "$MAX_ATTEMPTS" ]; then
     log "Reached REVIEWER_MAX_ATTEMPTS=$MAX_ATTEMPTS after $review_attempts attempted review(s), stopping this tick"
-    break
+    return 10
   fi
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$FAILURE_MAX_ATTEMPTS" -gt 0 ]; then
-    failure_attempts=$(review_failure_attempt_count "$num" "$head_sha")
+    failure_attempts=$(review_attempts_count review-failure "$num" "$head_sha")
     if [ "$failure_attempts" -ge "$FAILURE_MAX_ATTEMPTS" ]; then
       log "PR #$num@$head_sha: review failures reached REVIEWER_FAILURE_MAX_ATTEMPTS=$FAILURE_MAX_ATTEMPTS; skipping until the PR head changes"
-      continue
+      return 0
     fi
   fi
   review_attempts=$((review_attempts + 1))
 
   if ! ci_state=$(REQUIRED_CHECKS_JSON="$EFFECTIVE_REQUIRED_CHECKS_JSON" bash "$SCRIPT_DIR/check-ci.sh" "$REPO" "$head_sha" "$REQUIRED_CHECKS_FILE" 2>>"$LOG_FILE"); then
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to read CI check-runs"
-    continue
+    return 0
   fi
 
   case "$ci_state" in
@@ -844,7 +787,7 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
         else
           log "PR #$num@$head_sha: CI not yet terminal (state=$ci_state), will retry next tick"
         fi
-        continue
+        return 0
       fi
       ;;
     failing)
@@ -855,7 +798,7 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
         if [ -n "$RENDER_PROMPT_ONLY" ]; then
           log "PR #$num@$head_sha: CI is failing, so no agy prompt would be sent"
           review_actions=$((review_actions + 1))
-          continue
+          return 0
         fi
         log "PR #$num@$head_sha: CI is failing, posting REQUEST_CHANGES without agy"
         ci_summary=$(github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || true)
@@ -873,12 +816,12 @@ EOF
         if [ -n "$DRY_RUN" ]; then
           log "Dry run: would post REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
           review_actions=$((review_actions + 1))
-          continue
+          return 0
         fi
         post_review_started_reaction "$num"
         begin_review_check_run_signal "$num" "$head_sha"
         if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body" "$head_sha" '[]'; then
-          clear_review_failure_attempts "$num" "$head_sha"
+          review_attempts_clear review-failure "$num" "$head_sha"
           log "Posted REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
           conclude_review_check_run_signal failure "Review posted: REQUEST_CHANGES" \
             "Required CI checks were failing at review time, so changes were requested without invoking the reviewer model. A new head SHA gets a fresh review."
@@ -886,12 +829,12 @@ EOF
         else
           record_review_failure_and_log "$num" "$head_sha" "Failed to post REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
         fi
-        continue
+        return 0
       fi
       ;;
     *)
       log "PR #$num@$head_sha: unexpected CI state '$ci_state', will retry next tick"
-      continue
+      return 0
       ;;
   esac
 
@@ -910,13 +853,13 @@ EOF
   fi
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$INVALID_VERDICT_MAX_ATTEMPTS" -gt 0 ]; then
-    invalid_attempts=$(invalid_verdict_attempt_count "$num" "$head_sha")
+    invalid_attempts=$(review_attempts_count invalid-verdict "$num" "$head_sha")
     if [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
       invalid_artifact=$(invalid_verdict_artifact_path "$num" || true)
       log "PR #$num@$head_sha: invalid agy output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=$INVALID_VERDICT_MAX_ATTEMPTS; skipping until the PR head changes (last artifact: ${invalid_artifact:-unavailable})"
       conclude_review_check_run_signal neutral "Reviewer output cap reached" \
         "The reviewer model repeatedly returned output without a valid final review event. This head SHA is skipped until the PR head changes."
-      continue
+      return 0
     fi
   fi
 
@@ -925,29 +868,29 @@ EOF
   if ! review_worktree=$(prepare_review_worktree "$head_sha"); then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to prepare PR-head worktree"
-    continue
+    return 0
   fi
 
   if ! review_threads_json=$(github_pr_review_threads_json "$num" 2>>"$LOG_FILE"); then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to read existing review threads"
-    continue
+    return 0
   fi
   if ! unresolved_bot_threads_json=$(github_unresolved_bot_review_threads_json "$review_threads_json" "$BOT_LOGIN" "$BOT_AUTHOR"); then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to filter existing bot review threads"
-    continue
+    return 0
   fi
   if ! prompt_thread_handle_map_json=$(printf '%s\n' "$unresolved_bot_threads_json" | github_review_thread_handle_map_json); then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to map bot review thread handles"
-    continue
+    return 0
   fi
 
   if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$unresolved_bot_threads_json"; then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to build agy prompt"
-    continue
+    return 0
   fi
 
   if [ -n "$RENDER_PROMPT_ONLY" ]; then
@@ -960,7 +903,7 @@ EOF
     fi
     rm -f "$prompt_tmp"
     review_actions=$((review_actions + 1))
-    continue
+    return 0
   fi
 
   agy_err_tmp=$(mktemp "$STATE_DIR/agy.$num.err.XXXXXX")
@@ -991,7 +934,7 @@ EOF
       record_review_failure_and_log "$num" "$head_sha" "agy failed for PR #$num@$head_sha"
     fi
     rm -f "$prompt_tmp" "$agy_err_tmp"
-    continue
+    return 0
   fi
   cat "$agy_err_tmp" >> "$LOG_FILE"
 
@@ -1001,19 +944,8 @@ EOF
     rm -f "$prompt_tmp" "$agy_err_tmp"
     conclude_review_check_run_signal neutral "Empty reviewer output" \
       "The reviewer model returned an empty response. The daemon will retry on a later tick."
-    if [ -z "$DRY_RUN" ]; then
-      invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
-      if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
-        log "agy returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
-      elif [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
-        log "agy returned empty for PR #$num@$head_sha; wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
-      else
-        log "agy returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
-      fi
-    else
-      log "agy returned empty for PR #$num@$head_sha; wrote $invalid_artifact; will retry next tick"
-    fi
-    continue
+    record_invalid_output_and_log "$num" "$head_sha" "agy returned empty for PR #$num@$head_sha" "$invalid_artifact"
+    return 0
   fi
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
@@ -1022,33 +954,12 @@ EOF
     rm -f "$prompt_tmp" "$agy_err_tmp"
     conclude_review_check_run_signal neutral "Invalid reviewer output" \
       "The reviewer model did not emit a valid final review event. The daemon will retry on a later tick."
-    verdict_line=$(printf '%s' "$review" | awk '
-      {
-        line = $0
-        sub(/\r$/, "", line)
-        trimmed = line
-        sub(/^[[:space:]]+/, "", trimmed)
-        sub(/[[:space:]]+$/, "", trimmed)
-        if (trimmed != "") last = trimmed
-      }
-      END { print last }
-    ')
-    if [ -z "$DRY_RUN" ]; then
-      invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
-      if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
-        log "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
-      elif [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
-        log "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
-      else
-        log "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
-      fi
-    else
-      log "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line); wrote $invalid_artifact; will retry next tick"
-    fi
-    continue
+    verdict_line=$(printf '%s' "$review" | review_last_nonempty_line)
+    record_invalid_output_and_log "$num" "$head_sha" "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line)" "$invalid_artifact"
+    return 0
   fi
   if [ -z "$DRY_RUN" ]; then
-    clear_invalid_verdict_attempts "$num" "$head_sha"
+    review_attempts_clear invalid-verdict "$num" "$head_sha"
   fi
 
   review_body=$(printf '%s' "$review" | review_body_before_verdict | review_demote_oversized_suggestions)
@@ -1057,7 +968,7 @@ EOF
     if ! current_pr_json=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE"); then
       rm -f "$prompt_tmp" "$agy_err_tmp"
       record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to re-read PR head before posting review"
-      continue
+      return 0
     fi
     current_head_sha=$(printf '%s\n' "$current_pr_json" | jq -r '.head.sha // empty')
     if [ "$current_head_sha" != "$head_sha" ]; then
@@ -1065,30 +976,30 @@ EOF
       log "PR #$num@$head_sha: head advanced to $current_head_sha before posting; discarding reviewed result"
       conclude_review_check_run_signal neutral "Superseded" \
         "The PR head advanced while the review was being drafted. The new head SHA gets a fresh review."
-      continue
+      return 0
     fi
     if ! review_threads_json=$(github_pr_review_threads_json "$num" 2>>"$LOG_FILE"); then
       rm -f "$prompt_tmp" "$agy_err_tmp"
       record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to re-read review threads before posting review"
-      continue
+      return 0
     fi
     if ! unresolved_bot_threads_json=$(github_unresolved_bot_review_threads_json "$review_threads_json" "$BOT_LOGIN" "$BOT_AUTHOR"); then
       rm -f "$prompt_tmp" "$agy_err_tmp"
       record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to filter latest bot review threads before posting review"
-      continue
+      return 0
     fi
   fi
 
   if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body" "$review_worktree"); then
     rm -f "$prompt_tmp" "$agy_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to resolve inline review anchors"
-    continue
+    return 0
   fi
   scope_downgraded=0
   scoped_event=$(review_event_after_scope_guard "$event" "$inline_comments_json") || {
     rm -f "$prompt_tmp" "$agy_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to evaluate inline review scope"
-    continue
+    return 0
   }
   if [ "$event" = "REQUEST_CHANGES" ] && [ "$scoped_event" = "COMMENT" ]; then
     log "PR #$num@$head_sha: downgraded REQUEST_CHANGES to COMMENT because all anchored findings target pre-existing or context lines"
@@ -1139,11 +1050,11 @@ EOF
       log "Dry run: would auto-resolve $auto_resolve_threads explicitly selected bot review thread(s) on PR #$num@$head_sha"
     fi
     review_actions=$((review_actions + 1))
-    continue
+    return 0
   fi
 
   if post_review "$num" "$event" "$body" "$head_sha" "$inline_comments_json"; then
-    clear_review_failure_attempts "$num" "$head_sha"
+    review_attempts_clear review-failure "$num" "$head_sha"
     review_check_conclusion=$(review_check_run_conclusion_for_event "$event") || review_check_conclusion=neutral
     conclude_review_check_run_signal "$review_check_conclusion" "Review posted: $event" \
       "GoobReview posted a $event review on this head SHA."
@@ -1170,5 +1081,14 @@ EOF
   else
     rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     record_review_failure_and_log "$num" "$head_sha" "Failed to post review on PR #$num@$head_sha"
+  fi
+}
+
+while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
+  [ -n "${num:-}" ] || continue
+  review_one_pr_status=0
+  review_one_pr "$num" "$author" "$head_sha" "${draft:-false}" "${pr_json_b64:-}" || review_one_pr_status=$?
+  if [ "$review_one_pr_status" -eq 10 ]; then
+    break
   fi
 done <<< "$PRS"
