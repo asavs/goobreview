@@ -689,8 +689,27 @@ conclude_review_check_run_signal() {
   REVIEW_CHECK_RUN_ID=""
 }
 
-while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
-  [ -n "${num:-}" ] || continue
+# One PR through the full pipeline: eligibility and cap gates, the CI gate,
+# snapshot and prompt assembly, the agy invocation, verdict parsing, and
+# posting with side effects. Returns 0 to move on to the next PR and 10 to
+# stop the tick (REVIEWER_MAX_PRS or REVIEWER_MAX_ATTEMPTS reached).
+review_one_pr() {
+  local num="$1"
+  local author="$2"
+  local head_sha="$3"
+  local draft="$4"
+  local pr_json_b64="$5"
+  local pr_metadata_json skip_reason bot_reviews_json requested_review existing
+  local failure_attempts invalid_attempts invalid_artifact ci_state ci_summary ci_failure_body
+  local prompt_tmp review_worktree review_threads_json unresolved_bot_threads_json prompt_thread_handle_map_json
+  local agy_err_tmp agy_started_at agy_review_status review verdict_line event review_body
+  local current_pr_json current_head_sha inline_comments_json scope_downgraded scoped_event
+  local filtered_body thinking_trace_file trace_block formatted_body body
+  local resolved_thread_handles still_open_thread_replies auto_resolve_threads auto_resolved_threads still_open_replied
+  local review_check_conclusion
+  # Read by write_dry_run_artifact and capture_research_pair through bash's
+  # dynamic scoping, so they must always be initialized here.
+  local head_committed_at="" agy_elapsed_s="" transcript_source=""
   REVIEW_CHECK_RUN_ID=""
   pr_metadata_json=""
   if [ -n "${pr_json_b64:-}" ]; then
@@ -698,19 +717,19 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
   fi
   if skip_reason=$(reviewer_pr_skip_reason "$num" "$author" "$head_sha" "${draft:-false}" "$BOT_LOGIN" "$EXTRA_SKIP_USER" "$ONLY_PR" "$BOT_AUTHOR"); then
     log "$skip_reason"
-    continue
+    return 0
   fi
 
   if [ "$review_actions" -ge "$MAX_PRS" ]; then
     log "Reached REVIEWER_MAX_PRS=$MAX_PRS, stopping this tick"
-    break
+    return 10
   fi
 
   if ! bot_reviews_json=$(github_api_paginate_array "repos/$REPO/pulls/$num/reviews" 2>>"$LOG_FILE" |
     jq -s --arg bot "$BOT_LOGIN" --arg bot_author "$BOT_AUTHOR" \
       '[.[] | select(.user.login == $bot or .user.login == $bot_author)]'); then
     log "PR #$num@$head_sha: failed to read existing reviews, will retry next tick"
-    continue
+    return 0
   fi
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
@@ -723,7 +742,7 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
     case "$existing" in
       ''|*[!0-9]*)
         log "PR #$num@$head_sha: existing review query returned unexpected count '$existing', will retry next tick"
-        continue
+        return 0
         ;;
     esac
     if [ "$existing" -gt 0 ]; then
@@ -731,28 +750,28 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
         log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, but review was re-requested; reviewing again"
       else
         log "PR #$num@$head_sha already reviewed by $BOT_LOGIN, skipping"
-        continue
+        return 0
       fi
     fi
   fi
 
   if [ "$review_attempts" -ge "$MAX_ATTEMPTS" ]; then
     log "Reached REVIEWER_MAX_ATTEMPTS=$MAX_ATTEMPTS after $review_attempts attempted review(s), stopping this tick"
-    break
+    return 10
   fi
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$FAILURE_MAX_ATTEMPTS" -gt 0 ]; then
     failure_attempts=$(review_attempts_count review-failure "$num" "$head_sha")
     if [ "$failure_attempts" -ge "$FAILURE_MAX_ATTEMPTS" ]; then
       log "PR #$num@$head_sha: review failures reached REVIEWER_FAILURE_MAX_ATTEMPTS=$FAILURE_MAX_ATTEMPTS; skipping until the PR head changes"
-      continue
+      return 0
     fi
   fi
   review_attempts=$((review_attempts + 1))
 
   if ! ci_state=$(REQUIRED_CHECKS_JSON="$EFFECTIVE_REQUIRED_CHECKS_JSON" bash "$SCRIPT_DIR/check-ci.sh" "$REPO" "$head_sha" "$REQUIRED_CHECKS_FILE" 2>>"$LOG_FILE"); then
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to read CI check-runs"
-    continue
+    return 0
   fi
 
   case "$ci_state" in
@@ -768,7 +787,7 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
         else
           log "PR #$num@$head_sha: CI not yet terminal (state=$ci_state), will retry next tick"
         fi
-        continue
+        return 0
       fi
       ;;
     failing)
@@ -779,7 +798,7 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
         if [ -n "$RENDER_PROMPT_ONLY" ]; then
           log "PR #$num@$head_sha: CI is failing, so no agy prompt would be sent"
           review_actions=$((review_actions + 1))
-          continue
+          return 0
         fi
         log "PR #$num@$head_sha: CI is failing, posting REQUEST_CHANGES without agy"
         ci_summary=$(github_check_runs_summary "$head_sha" 2>>"$LOG_FILE" || true)
@@ -797,7 +816,7 @@ EOF
         if [ -n "$DRY_RUN" ]; then
           log "Dry run: would post REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
           review_actions=$((review_actions + 1))
-          continue
+          return 0
         fi
         post_review_started_reaction "$num"
         begin_review_check_run_signal "$num" "$head_sha"
@@ -810,12 +829,12 @@ EOF
         else
           record_review_failure_and_log "$num" "$head_sha" "Failed to post REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
         fi
-        continue
+        return 0
       fi
       ;;
     *)
       log "PR #$num@$head_sha: unexpected CI state '$ci_state', will retry next tick"
-      continue
+      return 0
       ;;
   esac
 
@@ -840,7 +859,7 @@ EOF
       log "PR #$num@$head_sha: invalid agy output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=$INVALID_VERDICT_MAX_ATTEMPTS; skipping until the PR head changes (last artifact: ${invalid_artifact:-unavailable})"
       conclude_review_check_run_signal neutral "Reviewer output cap reached" \
         "The reviewer model repeatedly returned output without a valid final review event. This head SHA is skipped until the PR head changes."
-      continue
+      return 0
     fi
   fi
 
@@ -849,29 +868,29 @@ EOF
   if ! review_worktree=$(prepare_review_worktree "$head_sha"); then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to prepare PR-head worktree"
-    continue
+    return 0
   fi
 
   if ! review_threads_json=$(github_pr_review_threads_json "$num" 2>>"$LOG_FILE"); then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to read existing review threads"
-    continue
+    return 0
   fi
   if ! unresolved_bot_threads_json=$(github_unresolved_bot_review_threads_json "$review_threads_json" "$BOT_LOGIN" "$BOT_AUTHOR"); then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to filter existing bot review threads"
-    continue
+    return 0
   fi
   if ! prompt_thread_handle_map_json=$(printf '%s\n' "$unresolved_bot_threads_json" | github_review_thread_handle_map_json); then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to map bot review thread handles"
-    continue
+    return 0
   fi
 
   if ! build_review_prompt "$num" "$prompt_tmp" "$ci_state" "$head_sha" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$unresolved_bot_threads_json"; then
     rm -f "$prompt_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to build agy prompt"
-    continue
+    return 0
   fi
 
   if [ -n "$RENDER_PROMPT_ONLY" ]; then
@@ -884,7 +903,7 @@ EOF
     fi
     rm -f "$prompt_tmp"
     review_actions=$((review_actions + 1))
-    continue
+    return 0
   fi
 
   agy_err_tmp=$(mktemp "$STATE_DIR/agy.$num.err.XXXXXX")
@@ -915,7 +934,7 @@ EOF
       record_review_failure_and_log "$num" "$head_sha" "agy failed for PR #$num@$head_sha"
     fi
     rm -f "$prompt_tmp" "$agy_err_tmp"
-    continue
+    return 0
   fi
   cat "$agy_err_tmp" >> "$LOG_FILE"
 
@@ -926,7 +945,7 @@ EOF
     conclude_review_check_run_signal neutral "Empty reviewer output" \
       "The reviewer model returned an empty response. The daemon will retry on a later tick."
     record_invalid_output_and_log "$num" "$head_sha" "agy returned empty for PR #$num@$head_sha" "$invalid_artifact"
-    continue
+    return 0
   fi
 
   if ! event=$(printf '%s' "$review" | review_verdict_event); then
@@ -937,7 +956,7 @@ EOF
       "The reviewer model did not emit a valid final review event. The daemon will retry on a later tick."
     verdict_line=$(printf '%s' "$review" | review_last_nonempty_line)
     record_invalid_output_and_log "$num" "$head_sha" "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line)" "$invalid_artifact"
-    continue
+    return 0
   fi
   if [ -z "$DRY_RUN" ]; then
     review_attempts_clear invalid-verdict "$num" "$head_sha"
@@ -949,7 +968,7 @@ EOF
     if ! current_pr_json=$(github_api_get "repos/$REPO/pulls/$num" 2>>"$LOG_FILE"); then
       rm -f "$prompt_tmp" "$agy_err_tmp"
       record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to re-read PR head before posting review"
-      continue
+      return 0
     fi
     current_head_sha=$(printf '%s\n' "$current_pr_json" | jq -r '.head.sha // empty')
     if [ "$current_head_sha" != "$head_sha" ]; then
@@ -957,30 +976,30 @@ EOF
       log "PR #$num@$head_sha: head advanced to $current_head_sha before posting; discarding reviewed result"
       conclude_review_check_run_signal neutral "Superseded" \
         "The PR head advanced while the review was being drafted. The new head SHA gets a fresh review."
-      continue
+      return 0
     fi
     if ! review_threads_json=$(github_pr_review_threads_json "$num" 2>>"$LOG_FILE"); then
       rm -f "$prompt_tmp" "$agy_err_tmp"
       record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to re-read review threads before posting review"
-      continue
+      return 0
     fi
     if ! unresolved_bot_threads_json=$(github_unresolved_bot_review_threads_json "$review_threads_json" "$BOT_LOGIN" "$BOT_AUTHOR"); then
       rm -f "$prompt_tmp" "$agy_err_tmp"
       record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to filter latest bot review threads before posting review"
-      continue
+      return 0
     fi
   fi
 
   if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body" "$review_worktree"); then
     rm -f "$prompt_tmp" "$agy_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to resolve inline review anchors"
-    continue
+    return 0
   fi
   scope_downgraded=0
   scoped_event=$(review_event_after_scope_guard "$event" "$inline_comments_json") || {
     rm -f "$prompt_tmp" "$agy_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to evaluate inline review scope"
-    continue
+    return 0
   }
   if [ "$event" = "REQUEST_CHANGES" ] && [ "$scoped_event" = "COMMENT" ]; then
     log "PR #$num@$head_sha: downgraded REQUEST_CHANGES to COMMENT because all anchored findings target pre-existing or context lines"
@@ -1031,7 +1050,7 @@ EOF
       log "Dry run: would auto-resolve $auto_resolve_threads explicitly selected bot review thread(s) on PR #$num@$head_sha"
     fi
     review_actions=$((review_actions + 1))
-    continue
+    return 0
   fi
 
   if post_review "$num" "$event" "$body" "$head_sha" "$inline_comments_json"; then
@@ -1062,5 +1081,14 @@ EOF
   else
     rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     record_review_failure_and_log "$num" "$head_sha" "Failed to post review on PR #$num@$head_sha"
+  fi
+}
+
+while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
+  [ -n "${num:-}" ] || continue
+  review_one_pr_status=0
+  review_one_pr "$num" "$author" "$head_sha" "${draft:-false}" "${pr_json_b64:-}" || review_one_pr_status=$?
+  if [ "$review_one_pr_status" -eq 10 ]; then
+    break
   fi
 done <<< "$PRS"
