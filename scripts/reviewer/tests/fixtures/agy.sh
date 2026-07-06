@@ -109,22 +109,79 @@ test_agy_uses_structured_transcript_when_available() {
   transcript_dir="$home/.gemini/antigravity-cli/brain/run-1/.system_generated/logs"
   mkdir -p "$transcript_dir"
 
+  # The transcript ends with a verdict-less boilerplate turn (agy's workspace
+  # wrap-up chatter, observed live on issue #144): extraction must prefer the
+  # last turn that actually carries a review verdict.
   timeout() {
     cat > "$HOME/.gemini/antigravity-cli/brain/run-1/.system_generated/logs/transcript_full.jsonl" <<'EOF'
 {"type":"PLANNER_RESPONSE","thinking":"older trace","content":"Older body\nCOMMENT\n"}
 {"type":"PLANNER_RESPONSE","thinking":"I will inspect `src/main.ts`.\nI will inspect tests.","content":"Structured body\nAPPROVE\n"}
+{"type":"PLANNER_RESPONSE","thinking":"wrap-up chatter","content":"> I recommend setting /tmp/scratch as your active workspace.\n"}
 EOF
     printf 'raw merged trace\nraw merged body\nCOMMENT\n'
   }
 
   output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   trace_file="$RUNTIME_STATE_DIR/agy-runtime/thinking.trace"
-  assert_eq "agy returns structured transcript content instead of raw stdout" $'Structured body\nAPPROVE' "$output"
+  assert_eq "agy returns the last verdict-bearing planner turn" $'Structured body\nAPPROVE' "$output"
   assert_contains "agy writes planner thinking sidecar" 'I will inspect `src/main.ts`.' "$trace_file"
-  assert_not_contains "agy sidecar uses last planner response" "older trace" "$trace_file"
+  assert_not_contains "agy sidecar skips earlier planner turns" "older trace" "$trace_file"
+  assert_not_contains "agy sidecar skips trailing verdict-less turns" "wrap-up chatter" "$trace_file"
   assert_eq "agy records transcript as the source when parsing succeeds" "transcript" "$(agy_transcript_source)"
 
+  # With no verdict-bearing turn at all, extraction falls back to the literal
+  # last turn so the failure surfaces through the invalid-verdict path.
+  timeout() {
+    cat > "$HOME/.gemini/antigravity-cli/brain/run-1/.system_generated/logs/transcript_full.jsonl" <<'EOF'
+{"type":"PLANNER_RESPONSE","thinking":"first","content":"I will run the tests now.\n"}
+{"type":"PLANNER_RESPONSE","thinking":"second","content":"Still working on the build.\n"}
+EOF
+    printf 'raw merged fallback\n'
+  }
+
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "verdict-less transcript falls back to the literal last turn" "Still working on the build." "$output"
+
   HOME="$saved_home"
+}
+
+# Issue #144: agy was re-running the target project's build/test suites (in a
+# writable scratch copy of the read-only snapshot), burning the review timeout.
+# Every subprocess it spawns must resolve build/test entry points to refusal
+# shims; interpreters like node stay unshimmed because agy itself runs on node.
+# shellcheck disable=SC2317 # Mocked timeout command is invoked indirectly.
+test_agy_invocation_denies_build_tools() {
+  local prompt_file err_file output worktree_dir
+
+  STATE_DIR="$TMP_ROOT/deny-tools-state"
+  RUNTIME_STATE_DIR="$TMP_ROOT/deny-tools-runtime"
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
+  mkdir -p "$STATE_DIR"
+  worktree_dir="$TMP_ROOT/deny-tools-worktree"
+  mkdir -p "$worktree_dir"
+  prompt_file="$TMP_ROOT/deny-tools-prompt.md"
+  err_file="$TMP_ROOT/deny-tools-agy.err"
+  printf 'APPROVE\n' > "$prompt_file"
+  PERSONALITY_FILE="$TMP_ROOT/deny-tools-personality.md"
+  PROMPT_FILE="$TMP_ROOT/deny-tools-engine.md"
+  printf '## Role\nDeny-tools reviewer.\n' > "$PERSONALITY_FILE"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+
+  timeout() {
+    printf 'npm_resolves=%s\n' "$(command -v npm || printf missing)"
+    printf 'node_resolves=%s\n' "$(command -v node || printf missing)"
+    npm install 2>/dev/null || printf 'npm_exit=%s\n' "$?"
+    npm test 2>/dev/null || true
+    vitest run 2>/dev/null || true
+  }
+
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_contains "agy PATH resolves npm to the refusal shim" "deny-bin/npm" <(printf '%s\n' "$output")
+  assert_not_contains "node stays unshimmed for agy itself" "deny-bin/node" <(printf '%s\n' "$output")
+  assert_eq "denied build tool exits nonzero" "npm_exit=2" "$(printf '%s\n' "$output" | grep '^npm_exit=')"
+  assert_contains "refusal shim names CI as authoritative" "authoritative for pass/fail" <(printf '%s\n' "$output")
+  assert_contains "refusal shim names the denied tool" "goobreview: vitest is disabled during review" <(printf '%s\n' "$output")
 }
 
 test_agy_warns_on_home_context_files() {

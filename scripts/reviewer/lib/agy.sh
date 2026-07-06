@@ -106,29 +106,74 @@ latest_agy_transcript_file() {
     | cut -d' ' -f2-
 }
 
+# Pick the reviewable planner turn from agy's transcript. Prefer the last
+# turn whose final non-empty line is a valid review event: agy appends
+# boilerplate turns after the actual review (workspace suggestions, wrap-up
+# chatter), and taking the literal last turn discards the postable one. When
+# no turn carries a verdict, fall back to the literal last turn so the
+# failure still surfaces through the invalid-verdict path.
 extract_last_agy_planner_response() {
   local transcript_file="$1" content_file="$2" thinking_file="$3"
+  local turn_tmp
 
-  jq -ers '
+  turn_tmp=$(mktemp)
+  if ! jq -ecs '
+    def last_line:
+      gsub("\r"; "")
+      | split("\n")
+      | map(select(test("[^[:space:]]")))
+      | (.[-1] // "")
+      | sub("^[[:space:]]+"; "")
+      | sub("[[:space:]]+$"; "");
     [ .[]
       | select(type == "object")
       | select(.type == "PLANNER_RESPONSE")
       | select(has("thinking") and has("content"))
       | select((.thinking | type) == "string" and (.content | type) == "string")
-    ]
-    | last
-    | .content
-  ' "$transcript_file" >"$content_file" || return 1
-  jq -ers '
-    [ .[]
-      | select(type == "object")
-      | select(.type == "PLANNER_RESPONSE")
-      | select(has("thinking") and has("content"))
-      | select((.thinking | type) == "string" and (.content | type) == "string")
-    ]
-    | last
-    | .thinking
-  ' "$transcript_file" >"$thinking_file" || return 1
+    ] as $turns
+    | ([ $turns[] | select(.content | last_line | IN("APPROVE", "REQUEST_CHANGES", "COMMENT")) ] | last)
+      // ($turns | last)
+    | select(. != null)
+  ' "$transcript_file" >"$turn_tmp"; then
+    rm -f "$turn_tmp"
+    return 1
+  fi
+  jq -er '.content' "$turn_tmp" >"$content_file" || {
+    rm -f "$turn_tmp"
+    return 1
+  }
+  jq -er '.thinking' "$turn_tmp" >"$thinking_file" || {
+    rm -f "$turn_tmp"
+    return 1
+  }
+  rm -f "$turn_tmp"
+}
+
+# Build/test entry points shadowed in the PATH agy inherits. The model was
+# observed copying the read-only snapshot into its own scratch space and
+# re-running builds and test suites there (issue #144) -- burning the review
+# timeout on infrastructure the sandbox lacks -- so the contract instruction
+# gets a mechanical backstop. Interpreters (node, python) stay unshimmed:
+# agy itself runs on node, and reading files needs no build tool.
+AGY_DENIED_TOOL_NAMES="npm npx yarn pnpm bun vite vitest jest mocha playwright cypress tsc cargo rustc go make cmake mvn gradle pytest tox"
+
+write_agy_tool_shims() {
+  local shim_dir="$1"
+  local shim name
+
+  mkdir -p "$shim_dir" || return 1
+  shim="$shim_dir/.deny-build-tool"
+  cat >"$shim" <<'EOF'
+#!/usr/bin/env bash
+tool=$(basename "$0")
+printf 'goobreview: %s is disabled during review. Do not build, install, or run tests -- the CI check-run conclusions in the review prompt are authoritative for pass/fail. Read source and test files instead.\n' "$tool"
+printf 'goobreview: %s is disabled during review.\n' "$tool" >&2
+exit 2
+EOF
+  chmod 755 "$shim" || return 1
+  for name in $AGY_DENIED_TOOL_NAMES; do
+    ln -sf ".deny-build-tool" "$shim_dir/$name" || return 1
+  done
 }
 
 run_agy_review() {
@@ -159,6 +204,10 @@ run_agy_review() {
     printf 'Failed to write trusted runtime AGENTS.md; refusing agy invocation.\n' >"$err_file"
     return 1
   fi
+  if ! write_agy_tool_shims "$runtime_dir/deny-bin"; then
+    printf 'Failed to write build-tool refusal shims; refusing agy invocation.\n' >"$err_file"
+    return 1
+  fi
   prompt=$(cat "$prompt_file")
   raw_out=$(mktemp "$runtime_dir/agy-stdout.XXXXXX")
   content_tmp=$(mktemp "$runtime_dir/agy-content.XXXXXX")
@@ -174,6 +223,9 @@ run_agy_review() {
     # outlives agy would otherwise hold the lock and deadlock every subsequent
     # tick until killed by hand (issue #143). A no-op when fd 9 is not open.
     exec 9>&-
+    # Every subprocess agy spawns resolves build/test entry points to the
+    # refusal shims first (issue #144). agy itself is not shimmed.
+    export PATH="$runtime_dir/deny-bin:$PATH"
     timeout --kill-after=30 "$AGY_TIMEOUT" agy --sandbox --dangerously-skip-permissions \
       --print-timeout "${AGY_TIMEOUT}s" --model "$AGY_MODEL" --print "$prompt" </dev/null >"$raw_out" 2>"$err_file"
   )
