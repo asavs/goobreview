@@ -128,8 +128,9 @@ test_prompt_assembly() {
   agents_md_tmp=$(mktemp "$TMP_ROOT/test-agents-md.XXXXXX")
   write_agents_md "$PERSONALITY_FILE" "$agents_md_tmp" success abc123 "$worktree_dir"
   assert_contains "agents.md includes personality role" "## Role" "$agents_md_tmp"
-  assert_contains "agents.md gates findings on inspection" "a reported finding asserts you inspected enough adjacent PR-head source and tests" "$agents_md_tmp"
-  assert_contains "agents.md gates APPROVE on inspection" "an APPROVE asserts you inspected enough PR-head source and tests" "$agents_md_tmp"
+  assert_contains "agents.md gates findings on inspection" "a reported finding asserts you read enough adjacent PR-head source and test files" "$agents_md_tmp"
+  assert_contains "agents.md gates APPROVE on inspection" "an APPROVE asserts you read enough PR-head source and test files" "$agents_md_tmp"
+  assert_contains "agents.md forbids running build and test commands" "Do not run build, install, or test commands against the snapshot" "$agents_md_tmp"
   assert_contains "agents.md reports the required-check gate" "Required-check gate: success" "$agents_md_tmp"
   assert_contains "agents.md reports the checked head SHA" "Head SHA: abc123" "$agents_md_tmp"
   assert_contains "agents.md includes GitHub check-run results" "$(printf 'unit-tests\tcompleted\tsuccess')" "$agents_md_tmp"

@@ -44,6 +44,7 @@ test_agy_invocation_isolates_review_context() {
   assert_contains "agy runtime dir has AGENTS.md with personality" "Isolation test reviewer" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
   assert_contains "agy runtime dir AGENTS.md has CI status" "Required-check gate: success" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
   assert_contains "agy runtime dir AGENTS.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
+  assert_contains "agy runtime dir AGENTS.md forbids executing snapshot code" "Inspection means reading files, never executing them" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
   assert_eq "agy records stdout_fallback as transcript source when no transcript exists" "stdout_fallback" "$(agy_transcript_source)"
 }
 

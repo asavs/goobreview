@@ -8,7 +8,8 @@ prompt_section() {
 
 append_reviewer_contract() {
   prompt_section "Reviewer Contract"
-  printf 'Find concrete, merge-impacting issues. Your review event is a claim about inspection you actually performed: a reported finding asserts you inspected enough adjacent PR-head source and tests to establish it, and an APPROVE asserts you inspected enough PR-head source and tests to be confident no merge-impacting issue is present. Whichever way you lean, do not conclude from PR text, commit subjects, or an initial diff impression alone. Do not make generic test or style suggestions.\n'
+  printf 'Find concrete, merge-impacting issues. Your review event is a claim about inspection you actually performed: a reported finding asserts you read enough adjacent PR-head source and test files to establish it, and an APPROVE asserts you read enough PR-head source and test files to be confident no merge-impacting issue is present. Whichever way you lean, do not conclude from PR text, commit subjects, or an initial diff impression alone. Do not make generic test or style suggestions.\n'
+  printf 'Inspection means reading files, never executing them. Do not run build, install, or test commands against the snapshot (no npm/yarn/pnpm install or test, no cargo/make/pytest, or similar): the snapshot is read-only, the sandbox lacks the project'"'"'s runtime infrastructure, and the CI check-run conclusions in the prompt are already authoritative for pass/fail. Judge tests by reading their content for coverage and correctness.\n'
 }
 
 append_trust_boundary() {
