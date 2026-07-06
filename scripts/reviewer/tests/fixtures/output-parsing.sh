@@ -315,6 +315,29 @@ test_trace_to_details() {
     <(printf '%s' "$trace_block")
   assert_contains "sidecar trace leaves missing path unlinked" '`missing.ts`' <(printf '%s' "$trace_block")
   assert_contains "sidecar trace details ends with separator" "---" <(printf '%s' "$trace_block")
+
+  # Regression (mog-template #179): reviewer.sh captures trace_block via
+  # command substitution, which strips the trailing blank lines that
+  # review_trace_details_block emits after "---", so a naive concatenation
+  # with the review body glues the separator onto the body's first line
+  # ("---logic here is completely brain-damaged."). The posted-body
+  # assembly must go through review_body_with_trace_prefix, which restores
+  # the blank line.
+  local composed_body
+  composed_body=$(review_body_with_trace_prefix "$trace_block" "Logic here is completely brain-damaged.")
+  assert_not_contains "trace separator is not glued to the review body" \
+    '---Logic here' \
+    <(printf '%s' "$composed_body")
+  # grep -F splits a pattern containing a literal newline into independent
+  # per-line alternatives (matching any one of them), which would make this
+  # assertion pass even on the unfixed, glued output -- so this checks the
+  # exact contiguous substring via a bash glob comparison instead.
+  if [[ "$composed_body" == *$'---\n\nLogic here is completely brain-damaged.'* ]]; then
+    pass "trace separator is followed by a blank line before the body"
+  else
+    printf 'composed body did not have a blank line after the trace separator:\n%s\n' "$composed_body" >&2
+    fail "trace separator is followed by a blank line before the body"
+  fi
   rm -rf "$sidecar_worktree"
 }
 

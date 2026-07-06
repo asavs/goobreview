@@ -564,6 +564,17 @@ review_trace_details_block() {
   printf '\n</details>\n\n---\n\n'
 }
 
+# Prefixes a rendered review_trace_details_block onto the review body.
+# Callers capture that block via command substitution, which strips its
+# trailing blank lines, so trace_block always arrives ending in a bare "---"
+# with no newline after it -- concatenating it directly onto the body glues
+# the horizontal rule to the body's first line. This reinserts the blank
+# line the caller's command substitution ate.
+review_body_with_trace_prefix() {
+  local trace_block="$1" body="$2"
+  printf '%s\n\n%s\n' "$trace_block" "$body"
+}
+
 # Detect a leading review-trace block — consecutive lines at the top of the
 # body where the model narrates its file-inspection plan ("I will check ...",
 # "I will view `path.ts` ...") — and wrap them in a <details> block with a
