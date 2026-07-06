@@ -114,6 +114,64 @@ APPROVE'
   pass "verdict remains case-sensitive"
 }
 
+# Recovery heuristic (motivated by a live review that put every citation in the
+# finding heading and anchored nothing): a section whose heading carries a
+# path:line token is promotable even without a Location line. Explicit Location
+# lines still win, prose citations never anchor.
+test_heading_location_fallback() {
+  local heading_section heading_loc explicit_wins neither_section prose_loc range_loc
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  heading_section=$(printf '%s\n' \
+    '### Stationary remote player animation defaults to left in `client/src/components/RemotePlayer.tsx:31`' \
+    'The default direction is wrong for a stationary player.' |
+    review_markdown_finding_sections | tr '\0' '\n')
+  assert_contains "finding-section parser emits a heading-anchored section without a Location line" \
+    '### Stationary remote player animation defaults to left' <(printf '%s' "$heading_section")
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  heading_loc=$(printf '%s\n' \
+    '### Stationary remote player defaults to left in `client/src/components/RemotePlayer.tsx:31`' \
+    'The default direction is wrong.' |
+    review_explicit_source_locations)
+  assert_eq "heading path:line token yields the section location when no Location line exists" \
+    $'client/src/components/RemotePlayer.tsx\t31\t31' "$heading_loc"
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  explicit_wins=$(printf '%s\n' \
+    '### Bug near `client/src/A.tsx:99`' \
+    'Location: client/src/B.tsx:5' \
+    'The real anchor is the explicit line, not the heading token.' |
+    review_explicit_source_locations)
+  assert_eq "explicit Location line takes precedence over a heading token in the same section" \
+    $'client/src/B.tsx\t5\t5' "$explicit_wins"
+
+  neither_section=$(printf '%s\n' \
+    '### Heading with no citation at all' \
+    'The bug lives at src/prose.ts:12 down here in the body.' |
+    review_markdown_finding_sections | tr '\0' '\n')
+  assert_not_contains "finding-section parser skips a section with neither a Location line nor a heading token" \
+    '### Heading with no citation' <(printf '%s' "$neither_section")
+
+  # A section with no Location line and no heading token never reaches this
+  # extractor in the daemon (review_markdown_finding_sections drops it first);
+  # calling it directly, the empty result trips grep's no-match exit under the
+  # suite's `set -e`, so the capture is guarded like the other empty-output cases.
+  prose_loc=$(printf '%s\n' \
+    '### Heading with no citation at all' \
+    'The bug lives at src/prose.ts:12 down here in the body.' |
+    review_explicit_source_locations || true)
+  assert_eq "path:line in the body prose does not anchor a heading-fallback section" "" "$prose_loc"
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  range_loc=$(printf '%s\n' \
+    '### Off-by-one across `client/src/loop.ts:10-12`' \
+    'The range boundary is mismatched.' |
+    review_explicit_source_locations)
+  assert_eq "heading range token yields an inclusive line range" \
+    $'client/src/loop.ts\t10\t12' "$range_loc"
+}
+
 test_review_body_dedup_filter() {
   local full_body promoted_json filtered
 
@@ -150,6 +208,17 @@ This has no diff anchor so it stays in the body.'
     'This alias causes a loop.' |
     review_body_without_promoted_sections "$h1_promoted_json")
   assert_not_contains "dedup filter strips promoted h1 section from body" "Alias redirect loop" <(printf '%s\n' "$h1_filtered")
+
+  # A heading-anchored finding (no Location line) is stripped the same way once
+  # promoted, since the promoted comment's first line is the heading itself.
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  heading_promoted_json='[{"path":"client/src/RemotePlayer.tsx","line":31,"side":"RIGHT","body":"### Defaults to left in `client/src/RemotePlayer.tsx:31`\nThe default direction is wrong."}]'
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  heading_filtered=$(printf '%s\n' \
+    '### Defaults to left in `client/src/RemotePlayer.tsx:31`' \
+    'The default direction is wrong.' |
+    review_body_without_promoted_sections "$heading_promoted_json")
+  assert_not_contains "dedup filter strips a promoted heading-anchored section from the body" "Defaults to left in" <(printf '%s\n' "$heading_filtered")
 }
 
 test_unresolved_thread_replies_parser() {
