@@ -133,16 +133,38 @@ review_source_locations() {
       }'
 }
 
+# Source locations a single finding section anchors to. Explicit
+# `Location: path:line` lines win outright: when a section declares any, only
+# those are used and heading tokens are ignored (no mixing). As a recovery
+# heuristic for reviews that put the citation in the finding heading instead of
+# a Location line (e.g. `### Defaults to left in \`client/src/Foo.tsx:31\``), a
+# section with no Location line falls back to the LAST path:line token in its
+# heading (the section's first line). Prose path:line references inside the body
+# are never anchored. Heading-derived locations are validated against the
+# snapshot and the PR diff downstream exactly like explicit ones.
 review_explicit_source_locations() {
   local snapshot_root="${1:-}"
 
   awk '
+    NR == 1 { heading = $0; sub(/\r$/, "", heading) }
     {
       line = $0
       sub(/\r$/, "", line)
       if (line ~ /^[[:space:]]*[Ll]ocation:[[:space:]]*/) {
         sub(/^[[:space:]]*[Ll]ocation:[[:space:]]*/, "", line)
         print line
+        have_location = 1
+      }
+    }
+    END {
+      if (!have_location && heading != "") {
+        rest = heading
+        token = ""
+        while (match(rest, /[A-Za-z0-9_.\/-]+\.[A-Za-z0-9]+:[0-9]+(-[0-9]+)?/)) {
+          token = substr(rest, RSTART, RLENGTH)
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+        if (token != "") print token
       }
     }
   ' | review_source_locations "$snapshot_root"
@@ -164,6 +186,12 @@ review_markdown_finding_sections() {
       }
       return 0
     }
+    function heading_has_location(text,    nl, head) {
+      nl = index(text, "\n")
+      head = (nl > 0) ? substr(text, 1, nl - 1) : text
+      sub(/\r$/, "", head)
+      return head ~ /[A-Za-z0-9_.\/-]+\.[A-Za-z0-9]+:[0-9]+(-[0-9]+)?/
+    }
     function suggestion_fences_balanced(text,    n, lines, i, line, in_suggestion) {
       n = split(text, lines, /\n/)
       in_suggestion = 0
@@ -182,7 +210,7 @@ review_markdown_finding_sections() {
     }
     function emit() {
       if (in_section &&
-          has_location_line(section) &&
+          (has_location_line(section) || heading_has_location(section)) &&
           suggestion_fences_balanced(section)) {
         printf "%s%c", section, 0
       }
