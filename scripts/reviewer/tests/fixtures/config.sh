@@ -97,6 +97,42 @@ test_personality_config_resolution() {
   unset REVIEWER_POSTED_PERSONALITY REVIEWER_PERSONALITY_FILE
 }
 
+test_dry_run_out_resolution() {
+  local saved_log="$LOG_FILE" resolved
+  local state_dir="$TMP_ROOT/dry-out-state"
+
+  mkdir -p "$state_dir"
+  STATE_DIR="$state_dir"
+  LOG_FILE="$TMP_ROOT/dry-out.log"
+  : > "$LOG_FILE"
+
+  # No explicit path and no dry-run: silent no-op, matching the production path
+  # where the daemon calls write_dry_run_artifact on empty/invalid output.
+  DRY_RUN=""
+  DRY_RUN_OUT=""
+  assert_eq "resolve is a no-op outside dry-run with no explicit path" "" "$(resolve_dry_run_out 141)"
+
+  # Dry-run with no explicit path defaults under the state dir using the
+  # dry-run-<pr>-<suffix>.txt scheme, and logs where it went.
+  DRY_RUN=1
+  DRY_RUN_OUT=""
+  resolved="$(resolve_dry_run_out 141)"
+  case "$resolved" in
+    "$state_dir"/dry-run-141-*.txt) pass "dry-run defaults artifact under the state dir" ;;
+    *) fail "dry-run defaults artifact under the state dir (got: $resolved)" ;;
+  esac
+  assert_contains "resolved default destination is logged" "Dry run: writing artifact to $state_dir/dry-run-141-" "$LOG_FILE"
+
+  # An explicit REVIEWER_DRY_RUN_OUT wins verbatim, even under dry-run.
+  DRY_RUN=1
+  DRY_RUN_OUT="$TMP_ROOT/explicit-dry.txt"
+  assert_eq "explicit dry-run-out is honored verbatim" "$TMP_ROOT/explicit-dry.txt" "$(resolve_dry_run_out 141)"
+
+  DRY_RUN=""
+  DRY_RUN_OUT=""
+  LOG_FILE="$saved_log"
+}
+
 test_log_rotation() {
   local log_file="$TMP_ROOT/rotate.log"
 

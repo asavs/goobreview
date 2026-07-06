@@ -116,12 +116,13 @@ write_dry_run_artifact() {
   local worktree_dir="${9:-}"
   local ci_state="${10:-}"
   local transcript_source="${11:-agy_failed}"
-  local output_file="$DRY_RUN_OUT"
+  local output_file
   local required_checks_sha256 inline_comment_count
   local artifact_tmp
   local runtime_dir agy_path agy_version prompt_bytes prompt_sha response_bytes response_sha stderr_bytes stderr_sha snapshot_files snapshot_symlinks agents_md_tmp agents_md_bytes agents_md_sha home_agy_context
   local generated_at generated_at_epoch review_latency_seconds
 
+  output_file=$(resolve_dry_run_out "$num")
   [ -n "$output_file" ] || return 0
 
   mkdir -p "$(dirname "$output_file")"
