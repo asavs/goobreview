@@ -184,6 +184,106 @@ extract_last_agy_planner_response() {
   rm -f "$turn_tmp"
 }
 
+# The transcript path fixes which session produced the final message; its
+# brain session directory (three levels up) is the only place a referenced
+# review artifact may live.
+agy_session_dir_for_transcript() {
+  local transcript_file="$1"
+  local suffix="/.system_generated/logs/transcript_full.jsonl"
+
+  case "$transcript_file" in
+    *"$suffix") printf '%s\n' "${transcript_file%"$suffix"}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Path-shaped tokens from a pointer message, one per line, first-appearance
+# order, deduped. Restricted to .md tokens: the review artifact observed live
+# is markdown (pr_review_report.md), and a tight token shape keeps prose noise
+# out of the validation loop. file:// URI prefixes are stripped.
+agy_artifact_path_candidates() {
+  grep -oE '(file://)?[A-Za-z0-9_.~/-]+\.md' |
+    sed 's|^file://||' |
+    awk '!seen[$0]++'
+}
+
+# Validate one model-referenced artifact path and, on success, copy its
+# content to out_file. The path came from model output after the session read
+# untrusted PR content, so every check is load-bearing: a prompt-injected
+# "reference" to ~/.gemini/app_token.json or any other readable file must
+# never become a posted review. The canonical path must land inside this
+# session's brain directory, must not be a symlink, is capped at
+# MAX_ARTIFACT_BYTES, is secret-scanned, and must end with a valid terminal
+# review event line. Anything less is rejected and the caller falls through
+# to the invalid-output path unchanged.
+read_agy_review_artifact() {
+  local candidate="$1" session_dir="$2" out_file="$3"
+  local resolved_session resolved bytes reason
+
+  # Quoted so the ~ stays a literal in the pattern and the prefix strip; an
+  # unquoted ~/ would tilde-expand here, which is exactly what must not happen
+  # to a model-supplied path. SC2088 misreads the intent.
+  # shellcheck disable=SC2088
+  case "$candidate" in
+    "~") candidate="${HOME:-}" ;;
+    "~/"*) candidate="${HOME:-}/${candidate#"~/"}" ;;
+  esac
+  case "$candidate" in
+    /*) ;;
+    *) candidate="$session_dir/$candidate" ;;
+  esac
+
+  [ -e "$candidate" ] || return 1
+  if [ -L "$candidate" ]; then
+    log "Rejecting symlinked review artifact reference: $candidate"
+    return 1
+  fi
+  [ -f "$candidate" ] || return 1
+  resolved_session=$(realpath -e -- "$session_dir" 2>/dev/null) || return 1
+  resolved=$(realpath -e -- "$candidate" 2>/dev/null) || return 1
+  case "$resolved" in
+    "$resolved_session"/*) ;;
+    *)
+      log "Rejecting review artifact reference outside the session brain directory: $candidate"
+      return 1
+      ;;
+  esac
+
+  bytes=$(wc -c <"$resolved" | tr -d ' ')
+  if [ "$bytes" -gt "${MAX_ARTIFACT_BYTES:-1000000}" ]; then
+    log "Rejecting oversized review artifact ($bytes bytes): $resolved"
+    return 1
+  fi
+  if ! reason=$(artifact_secret_scan "$resolved"); then
+    log "Rejecting review artifact containing high-confidence secret material ($reason): $resolved"
+    return 1
+  fi
+  review_verdict_event <"$resolved" >/dev/null || return 1
+  cat "$resolved" >"$out_file"
+}
+
+# Selection-ladder step for issue #149: when the chosen planner turn carries
+# no verdict, agy (1.0.14+ artifact-centric workflow) has usually written the
+# full review to a file in its brain session directory and replied with a
+# short pointer. Scan that final message for path references and return the
+# first one that survives read_agy_review_artifact validation. Requires a
+# parsed transcript: without one there is no session directory to anchor the
+# containment check, so stdout-only sessions never reach this step.
+select_agy_review_artifact() {
+  local message_file="$1" transcript_file="$2" out_file="$3"
+  local session_dir candidate
+
+  session_dir=$(agy_session_dir_for_transcript "$transcript_file") || return 1
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    if read_agy_review_artifact "$candidate" "$session_dir" "$out_file"; then
+      log "Review sourced from session artifact referenced by the final message: $candidate"
+      return 0
+    fi
+  done < <(agy_artifact_path_candidates <"$message_file")
+  return 1
+}
+
 # Build/test entry points shadowed in the PATH agy inherits. The model was
 # observed copying the read-only snapshot into its own scratch space and
 # re-running builds and test suites there (issue #144) -- burning the review
@@ -216,7 +316,7 @@ run_agy_review() {
   local ci_state="${5:-}"
   local head_sha="${6:-}"
   local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
-  local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count cli_log resolved_model_file resolved_model_label
+  local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count cli_log resolved_model_file resolved_model_label artifact_tmp
   local -a add_dir_args agy_argv
 
   # Cleared unconditionally, before the runtime dir necessarily exists, so a
@@ -320,15 +420,27 @@ run_agy_review() {
   fi
 
   transcript_file=$(latest_agy_transcript_file "$transcript_marker" || true)
+  artifact_tmp=$(mktemp "$runtime_dir/agy-artifact.XXXXXX")
   if [ -n "$transcript_file" ] && extract_last_agy_planner_response "$transcript_file" "$content_tmp" "$thinking_file" && [ -s "$content_tmp" ]; then
-    printf 'transcript\n' >"$transcript_source_file"
-    cat "$content_tmp"
+    if review_verdict_event <"$content_tmp" >/dev/null; then
+      printf 'transcript\n' >"$transcript_source_file"
+      cat "$content_tmp"
+    elif select_agy_review_artifact "$content_tmp" "$transcript_file" "$artifact_tmp"; then
+      printf 'artifact\n' >"$transcript_source_file"
+      cat "$artifact_tmp"
+    else
+      # No verdict in any planner turn and no valid referenced artifact:
+      # emit the last turn so the failure surfaces through the
+      # invalid-output path exactly as before.
+      printf 'transcript\n' >"$transcript_source_file"
+      cat "$content_tmp"
+    fi
   else
     rm -f "$thinking_file"
     printf 'stdout_fallback\n' >"$transcript_source_file"
     cat "$raw_out"
   fi
-  rm -f "$raw_out" "$content_tmp" "$transcript_marker"
+  rm -f "$raw_out" "$content_tmp" "$artifact_tmp" "$transcript_marker"
 }
 
 # Emit, for the dry-run artifact, the actual agy invocation recorded by the
@@ -346,9 +458,11 @@ print_recorded_agy_invocation() {
 }
 
 # Reads back what the immediately preceding run_agy_review call recorded:
-# "transcript" (parsed agy's structured transcript), "stdout_fallback" (transcript
-# missing/unparseable, used raw agy --print output), or "agy_failed" (the call
-# never reached a source decision -- refused, or agy itself exited non-zero).
+# "transcript" (parsed agy's structured transcript), "artifact" (verdict-less
+# final message referenced a validated review artifact in the session's brain
+# directory), "stdout_fallback" (transcript missing/unparseable, used raw
+# agy --print output), or "agy_failed" (the call never reached a source
+# decision -- refused, or agy itself exited non-zero).
 # Must be called before any subsequent run_agy_review call reuses the same
 # runtime dir and overwrites the file.
 agy_transcript_source() {
