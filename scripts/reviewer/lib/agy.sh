@@ -181,7 +181,8 @@ run_agy_review() {
   local ci_state="${5:-}"
   local head_sha="${6:-}"
   local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
-  local runtime_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file
+  local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file
+  local -a add_dir_args
 
   # Cleared unconditionally, before the runtime dir necessarily exists, so a
   # refusal/failure below never leaves a stale source from a prior invocation
@@ -197,10 +198,19 @@ run_agy_review() {
   fi
 
   mkdir -p "$runtime_dir"
-  rm -f "$runtime_dir/AGENTS.md"
+  # The per-invocation trusted workspace holds ONLY AGENTS.md: agy 1.0.16's
+  # --print no longer treats cwd as the workspace, so the trusted channel is
+  # delivered via --add-dir instead, and agy opportunistically ingests any file
+  # visible in an added dir. A stale file surviving here hijacked a canary run
+  # into reviewing the wrong PR, so recreate the dir clean every time -- this is
+  # a correctness requirement, not tidiness. Scratch, deny-bin, and the thinking
+  # trace stay in $runtime_dir, outside the workspace.
+  workspace_dir="$runtime_dir/workspace"
+  rm -rf "$workspace_dir"
+  mkdir -p "$workspace_dir"
   thinking_file="$runtime_dir/thinking.trace"
   rm -f "$thinking_file"
-  if ! with_prompt_personality "$prompt_personality" write_agents_md "$personality_file" "$runtime_dir/AGENTS.md" "$ci_state" "$head_sha" "$worktree_dir"; then
+  if ! with_prompt_personality "$prompt_personality" write_agents_md "$personality_file" "$workspace_dir/AGENTS.md" "$ci_state" "$head_sha" "$worktree_dir"; then
     printf 'Failed to write trusted runtime AGENTS.md; refusing agy invocation.\n' >"$err_file"
     return 1
   fi
@@ -213,8 +223,17 @@ run_agy_review() {
   content_tmp=$(mktemp "$runtime_dir/agy-content.XXXXXX")
   transcript_marker=$(mktemp "$runtime_dir/agy-start.XXXXXX")
 
+  # Attach the trusted workspace (AGENTS.md) always, and the PR-head snapshot
+  # only when one exists, so both become reachable workspace members instead of
+  # prose pointers agy cannot act on. cwd is set to the workspace below so it
+  # matches an added dir, the exact shape the 1.0.16 canary validated.
+  add_dir_args=(--add-dir "$workspace_dir")
+  if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then
+    add_dir_args+=(--add-dir "$worktree_dir")
+  fi
+
   (
-    cd "$runtime_dir" || exit
+    cd "$workspace_dir" || exit
     # Keep the GitHub App identity out of the agent subprocess.  agy's native
     # sandbox confines tool execution; the snapshot is its sole project context.
     unset GH_TOKEN GITHUB_TOKEN REVIEWER_APP_ID REVIEWER_APP_INSTALLATION_ID REVIEWER_APP_PRIVATE_KEY_PATH
@@ -227,7 +246,8 @@ run_agy_review() {
     # refusal shims first (issue #144). agy itself is not shimmed.
     export PATH="$runtime_dir/deny-bin:$PATH"
     timeout --kill-after=30 "$AGY_TIMEOUT" agy --sandbox --dangerously-skip-permissions \
-      --print-timeout "${AGY_TIMEOUT}s" --model "$AGY_MODEL" --print "$prompt" </dev/null >"$raw_out" 2>"$err_file"
+      --print-timeout "${AGY_TIMEOUT}s" --model "$AGY_MODEL" \
+      "${add_dir_args[@]}" --print "$prompt" </dev/null >"$raw_out" 2>"$err_file"
   )
   agy_status=$?
 

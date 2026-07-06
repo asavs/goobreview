@@ -5,7 +5,7 @@
 # shellcheck disable=SC2034,SC2154,SC2317,SC2329
 
 test_agy_invocation_isolates_review_context() {
-  local prompt_file err_file output worktree_dir
+  local prompt_file err_file output worktree_dir workspace_dir no_wt_output add_dir_count
 
   STATE_DIR="$TMP_ROOT/state"
   RUNTIME_STATE_DIR="$TMP_ROOT/runtime-state"
@@ -14,6 +14,7 @@ test_agy_invocation_isolates_review_context() {
   mkdir -p "$STATE_DIR"
   worktree_dir="$TMP_ROOT/worktree"
   mkdir -p "$worktree_dir"
+  workspace_dir="$RUNTIME_STATE_DIR/agy-runtime/workspace"
   prompt_file="$TMP_ROOT/prompt-for-agy.md"
   err_file="$TMP_ROOT/agy.err"
   printf 'APPROVE\n' > "$prompt_file"
@@ -35,17 +36,32 @@ test_agy_invocation_isolates_review_context() {
     printf 'args=%s\n' "$*"
   }
 
+  # Hygiene invariant (canary wrong-PR hijack): plant a stray file in the
+  # workspace before the run. run_agy_review must recreate the dir clean so agy
+  # only ever sees the trusted AGENTS.md, never a leftover it could act on.
+  mkdir -p "$workspace_dir"
+  printf 'stale prompt for a different PR\n' > "$workspace_dir/stray-prompt.md"
+
   output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
-  assert_contains "agy runs outside persistent state and PR snapshot" "cwd=$RUNTIME_STATE_DIR/agy-runtime" <(printf '%s\n' "$output")
+  assert_contains "agy cwd is the trusted workspace matching an added dir" "cwd=$workspace_dir" <(printf '%s\n' "$output")
   assert_contains "agy child gets no gh token" "gh_token=unset" <(printf '%s\n' "$output")
   assert_contains "agy child gets no github token" "github_token=unset" <(printf '%s\n' "$output")
   assert_contains "agy child gets no app key path" "key_path=unset" <(printf '%s\n' "$output")
   assert_contains "agy uses native sandbox" "--sandbox" <(printf '%s\n' "$output")
-  assert_contains "agy runtime dir has AGENTS.md with personality" "Isolation test reviewer" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
-  assert_contains "agy runtime dir AGENTS.md has CI status" "Required-check gate: success" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
-  assert_contains "agy runtime dir AGENTS.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
-  assert_contains "agy runtime dir AGENTS.md forbids executing snapshot code" "Inspection means reading files, never executing them" "$RUNTIME_STATE_DIR/agy-runtime/AGENTS.md"
+  assert_contains "agy attaches the trusted workspace via --add-dir" "--add-dir $workspace_dir" <(printf '%s\n' "$output")
+  assert_contains "agy attaches the PR-head snapshot via --add-dir" "--add-dir $worktree_dir" <(printf '%s\n' "$output")
+  assert_contains "agy workspace has AGENTS.md with personality" "Isolation test reviewer" "$workspace_dir/AGENTS.md"
+  assert_contains "agy workspace AGENTS.md has CI status" "Required-check gate: success" "$workspace_dir/AGENTS.md"
+  assert_contains "agy workspace AGENTS.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$workspace_dir/AGENTS.md"
+  assert_contains "agy workspace AGENTS.md forbids executing snapshot code" "Inspection means reading files, never executing them" "$workspace_dir/AGENTS.md"
+  assert_eq "agy workspace holds only AGENTS.md at invocation time" "AGENTS.md" "$(ls -A "$workspace_dir")"
   assert_eq "agy records stdout_fallback as transcript source when no transcript exists" "stdout_fallback" "$(agy_transcript_source)"
+
+  # With no PR-head snapshot supplied, only the trusted workspace is attached.
+  no_wt_output=$(run_agy_review "$prompt_file" "$err_file" "" "$PERSONALITY_FILE" success abc123)
+  assert_contains "agy attaches the workspace even without a snapshot" "--add-dir $workspace_dir" <(printf '%s\n' "$no_wt_output")
+  add_dir_count=$(printf '%s\n' "$no_wt_output" | grep '^args=' | grep -o -- '--add-dir' | wc -l | tr -d ' ')
+  assert_eq "agy adds no snapshot dir when none is supplied" "1" "$add_dir_count"
 }
 
 # Issue #143: the daemon's flock fd (reviewer.sh fd 9) must never reach agy.
