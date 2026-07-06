@@ -11,7 +11,10 @@ Use COMMENT when the review is informational or you cannot make a
 meaningful approve/request-changes judgment.
 
 Write the review body first in GitHub-flavored markdown. Your final
-non-empty line must be exactly one of those GitHub review events.
+non-empty line must be exactly one of those GitHub review events. If you
+write the review document to a file and reply with a pointer instead, that
+file must also end with exactly one of those events as its final non-empty
+line.
 
 For each concrete finding, use one short, distinctive Markdown heading that
 names the bug. Do not add numeric IDs or severity prefixes; GoobReview derives

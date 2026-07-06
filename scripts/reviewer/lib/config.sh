@@ -241,6 +241,7 @@ validate_reviewer_config() {
   if [ -z "${RENDER_PROMPT_ONLY:-}" ]; then
     require agy
     require timeout
+    require realpath
   fi
 
   local var

@@ -318,6 +318,125 @@ EOF
   HOME="$saved_home"
 }
 
+# Issue #149: agy's artifact-centric workflow (1.0.14+) writes the full review
+# to a file in the brain session directory and ends the session with a short
+# pointer message. When no planner turn carries a verdict, the reader follows
+# the referenced path -- under strict validation, because the path is
+# model-controlled and the session read untrusted PR content.
+# shellcheck disable=SC2016,SC2317 # Literal Markdown backticks; mocked timeout invoked indirectly.
+test_agy_reads_review_from_referenced_artifact() {
+  local saved_home="${HOME:-}" saved_max_artifact="${MAX_ARTIFACT_BYTES:-}"
+  local prompt_file err_file output worktree_dir home session_dir
+
+  STATE_DIR="$TMP_ROOT/artifact-state"
+  RUNTIME_STATE_DIR="$TMP_ROOT/artifact-runtime"
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
+  MAX_ARTIFACT_BYTES=1000000
+  mkdir -p "$STATE_DIR"
+  worktree_dir="$TMP_ROOT/artifact-worktree"
+  mkdir -p "$worktree_dir"
+  prompt_file="$TMP_ROOT/artifact-prompt.md"
+  err_file="$TMP_ROOT/artifact-agy.err"
+  printf 'prompt\n' > "$prompt_file"
+  PERSONALITY_FILE="$TMP_ROOT/artifact-personality.md"
+  PROMPT_FILE="$TMP_ROOT/artifact-engine.md"
+  printf '## Role\nArtifact reviewer.\n' > "$PERSONALITY_FILE"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+
+  home="$TMP_ROOT/artifact-home"
+  HOME="$home"
+  session_dir="$home/.gemini/antigravity-cli/brain/run-42"
+  mkdir -p "$session_dir/.system_generated/logs"
+
+  # Observed live failure mode: verdict-less work-session turns plus a final
+  # pointer message naming the artifact. A dangling reference earlier in the
+  # message (missing_notes.md) must be skipped, not fatal.
+  timeout() {
+    cat > "$session_dir/.system_generated/logs/transcript_full.jsonl" <<'EOF'
+{"type":"PLANNER_RESPONSE","thinking":"inspecting","content":"I will inspect the changed files.\n"}
+{"type":"PLANNER_RESPONSE","thinking":"pointer","content":"I drafted notes in missing_notes.md and saved the review to `pr_review_report.md`. Let me know if you have questions.\n"}
+EOF
+    printf 'pointer only\n'
+  }
+  printf '## Findings\n\nArtifact body.\n\nAPPROVE\n' > "$session_dir/pr_review_report.md"
+
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "verdict-less pointer message reads the review from the referenced artifact" $'## Findings\n\nArtifact body.\n\nAPPROVE' "$output"
+  assert_eq "artifact-sourced review records artifact as the transcript source" "artifact" "$(agy_transcript_source)"
+  assert_contains "artifact selection is logged with the referenced path" "Review sourced from session artifact referenced by the final message: pr_review_report.md" "$LOG_FILE"
+
+  # A verdict-bearing planner turn wins without consulting the artifact.
+  timeout() {
+    cat > "$session_dir/.system_generated/logs/transcript_full.jsonl" <<'EOF'
+{"type":"PLANNER_RESPONSE","thinking":"inline","content":"Inline body\nREQUEST_CHANGES\n"}
+{"type":"PLANNER_RESPONSE","thinking":"pointer","content":"Also saved to `pr_review_report.md`.\n"}
+EOF
+    printf 'unused\n'
+  }
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "verdict-bearing planner turn outranks the referenced artifact" $'Inline body\nREQUEST_CHANGES' "$output"
+  assert_eq "inline verdict keeps transcript as the source" "transcript" "$(agy_transcript_source)"
+
+  # Containment: a reference outside the session brain directory must never
+  # become the posted review, even when the target exists and ends with a
+  # verdict (the injection scenario from the issue). Covers absolute paths
+  # and ../ traversal out of the session directory.
+  printf 'Stolen file contents\nAPPROVE\n' > "$home/.gemini/app_token.md"
+  timeout() {
+    cat > "$session_dir/.system_generated/logs/transcript_full.jsonl" <<EOF
+{"type":"PLANNER_RESPONSE","thinking":"pointer","content":"Saved the review to $home/.gemini/app_token.md and ../../../app_token.md for convenience.\n"}
+EOF
+    printf 'unused\n'
+  }
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "reference outside the session directory falls through to the pointer turn" "Saved the review to $home/.gemini/app_token.md and ../../../app_token.md for convenience." "$output"
+  assert_eq "rejected outside reference keeps transcript as the source" "transcript" "$(agy_transcript_source)"
+  assert_contains "outside reference rejection is logged" "outside the session brain directory" "$LOG_FILE"
+
+  # Symlinks are rejected outright, even when they stay inside the session dir.
+  printf 'Linked body\nAPPROVE\n' > "$session_dir/real_review.md"
+  ln -s "$session_dir/real_review.md" "$session_dir/link_review.md"
+  timeout() {
+    cat > "$session_dir/.system_generated/logs/transcript_full.jsonl" <<'EOF'
+{"type":"PLANNER_RESPONSE","thinking":"pointer","content":"Saved the review to link_review.md in my workspace.\n"}
+EOF
+    printf 'unused\n'
+  }
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "symlinked artifact reference falls through to the pointer turn" "Saved the review to link_review.md in my workspace." "$output"
+  assert_contains "symlink rejection is logged" "Rejecting symlinked review artifact reference" "$LOG_FILE"
+
+  # An artifact without the terminal verdict line stays on the invalid path
+  # (today's live artifacts; the contract line in review-prompt.md is what
+  # asks the model to add it).
+  printf '## Findings\n\nNo verdict here.\n' > "$session_dir/pr_review_report.md"
+  timeout() {
+    cat > "$session_dir/.system_generated/logs/transcript_full.jsonl" <<'EOF'
+{"type":"PLANNER_RESPONSE","thinking":"pointer","content":"Saved the review to pr_review_report.md as requested.\n"}
+EOF
+    printf 'unused\n'
+  }
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "verdict-less artifact falls through to the pointer turn" "Saved the review to pr_review_report.md as requested." "$output"
+
+  # High-confidence secret material blocks the artifact from becoming a review.
+  printf 'GH_TOKEN=ghp_exfiltrated12345\nAPPROVE\n' > "$session_dir/pr_review_report.md"
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "secret-bearing artifact falls through to the pointer turn" "Saved the review to pr_review_report.md as requested." "$output"
+  assert_contains "secret rejection is logged with the scan reason" "Rejecting review artifact containing high-confidence secret material" "$LOG_FILE"
+
+  # Size cap: an artifact over MAX_ARTIFACT_BYTES is rejected.
+  MAX_ARTIFACT_BYTES=32
+  printf 'This body is comfortably longer than the byte cap.\nAPPROVE\n' > "$session_dir/pr_review_report.md"
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "oversized artifact falls through to the pointer turn" "Saved the review to pr_review_report.md as requested." "$output"
+  assert_contains "oversize rejection is logged" "Rejecting oversized review artifact" "$LOG_FILE"
+
+  HOME="$saved_home"
+  MAX_ARTIFACT_BYTES="$saved_max_artifact"
+}
+
 test_agy_warns_on_home_context_files() {
   local saved_home="${HOME:-}" saved_log="$LOG_FILE" saved_refuse="${REFUSE_ON_HOME_CONTEXT:-}" home warn_log
 
