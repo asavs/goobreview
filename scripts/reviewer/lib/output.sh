@@ -2,7 +2,7 @@
 # Antigravity CLI review-output parsing helpers. Keep the reviewer contract tiny:
 # normal markdown review text, then one final GitHub review event line.
 
-review_verdict_event() {
+review_last_nonempty_line() {
   awk '
     {
       line = $0
@@ -10,16 +10,20 @@ review_verdict_event() {
       trimmed = line
       sub(/^[[:space:]]+/, "", trimmed)
       sub(/[[:space:]]+$/, "", trimmed)
-      if (trimmed != "") verdict = trimmed
+      if (trimmed != "") last = trimmed
     }
-    END {
-      if (verdict == "APPROVE" || verdict == "REQUEST_CHANGES" || verdict == "COMMENT") {
-        print verdict
-        exit 0
-      }
-      exit 1
-    }
+    END { print last }
   '
+}
+
+review_verdict_event() {
+  local verdict
+
+  verdict=$(review_last_nonempty_line)
+  case "$verdict" in
+    APPROVE|REQUEST_CHANGES|COMMENT) printf '%s\n' "$verdict" ;;
+    *) return 1 ;;
+  esac
 }
 
 review_body_before_verdict() {
@@ -360,9 +364,42 @@ install_secret_scanned_artifact() {
   secure_install_file "$src" "$dst" || return 1
 }
 
-invalid_verdict_attempts_file() {
-  local num="$1"
-  local head_sha="$2"
+# Cap an assembled artifact at max_bytes (appending a legible truncation
+# marker naming the artifact kind), then secret-scan and install it at dst
+# with mode 0600. Consumes src: it is removed on success and failure alike.
+install_bounded_scanned_artifact() {
+  local src="$1"
+  local dst="$2"
+  local max_bytes="$3"
+  local label="$4"
+  local bytes marker marker_bytes body_bytes truncated status=0
+
+  bytes=$(wc -c <"$src" | tr -d ' ')
+  if [ "$bytes" -gt "$max_bytes" ]; then
+    marker=$(printf '\n\n[goobreview: %s truncated after %s bytes]\n' "$label" "$max_bytes")
+    marker_bytes=$(printf '%s' "$marker" | wc -c | tr -d ' ')
+    body_bytes=$((max_bytes - marker_bytes))
+    [ "$body_bytes" -gt 0 ] || body_bytes=0
+    truncated="$src.truncated"
+    head -c "$body_bytes" "$src" >"$truncated"
+    printf '%s' "$marker" | head -c $((max_bytes - body_bytes)) >>"$truncated"
+    install_secret_scanned_artifact "$truncated" "$dst" || status=1
+    rm -f "$truncated"
+  else
+    install_secret_scanned_artifact "$src" "$dst" || status=1
+  fi
+  rm -f "$src"
+  return "$status"
+}
+
+# Per-PR-head retry counters, one file family per kind ("review-failure" for
+# expensive-step failures, "invalid-verdict" for unparseable model output).
+# The on-disk names ($STATE_DIR/<kind>-<num>-<sha>.count) predate this helper,
+# so deployed state directories keep counting across upgrades.
+review_attempts_file() {
+  local kind="$1"
+  local num="$2"
+  local head_sha="$3"
 
   case "$num" in
     ''|*[!0-9]*) return 1 ;;
@@ -371,71 +408,13 @@ invalid_verdict_attempts_file() {
     ''|*[!A-Za-z0-9._-]*) return 1 ;;
   esac
 
-  printf '%s/invalid-verdict-%s-%s.count\n' "$STATE_DIR" "$num" "$head_sha"
+  printf '%s/%s-%s-%s.count\n' "$STATE_DIR" "$kind" "$num" "$head_sha"
 }
 
-review_failure_attempts_file() {
-  local num="$1"
-  local head_sha="$2"
-
-  case "$num" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-  case "$head_sha" in
-    ''|*[!A-Za-z0-9._-]*) return 1 ;;
-  esac
-
-  printf '%s/review-failure-%s-%s.count\n' "$STATE_DIR" "$num" "$head_sha"
-}
-
-review_failure_attempt_count() {
+review_attempts_count() {
   local file count
 
-  if ! file=$(review_failure_attempts_file "$1" "$2"); then
-    printf '0\n'
-    return 0
-  fi
-  if [ ! -f "$file" ]; then
-    printf '0\n'
-    return 0
-  fi
-  count=$(cat "$file" 2>/dev/null || printf 0)
-  case "$count" in
-    ''|*[!0-9]*) count=0 ;;
-  esac
-  printf '%s\n' "$count"
-}
-
-record_review_failure_attempt() {
-  local file tmp count
-
-  file=$(review_failure_attempts_file "$1" "$2")
-  count=$(review_failure_attempt_count "$1" "$2")
-  count=$((count + 1))
-
-  mkdir -p "$STATE_DIR"
-  tmp=$(mktemp "$STATE_DIR/review-failure-attempts.XXXXXX")
-  printf '%s\n' "$count" >"$tmp"
-  chmod 600 "$tmp" 2>/dev/null || true
-  mv "$tmp" "$file"
-  printf '%s\n' "$count"
-}
-
-clear_review_failure_attempts() {
-  local file
-
-  file=$(review_failure_attempts_file "$1" "$2") || return 0
-  rm -f "$file"
-}
-
-invalid_verdict_attempt_count() {
-  local file count
-
-  if ! file=$(invalid_verdict_attempts_file "$1" "$2"); then
-    printf '0\n'
-    return 0
-  fi
-  if [ ! -f "$file" ]; then
+  if ! file=$(review_attempts_file "$1" "$2" "$3") || [ ! -f "$file" ]; then
     printf '0\n'
     return 0
   fi
@@ -447,25 +426,25 @@ invalid_verdict_attempt_count() {
   printf '%s\n' "$count"
 }
 
-record_invalid_verdict_attempt() {
+review_attempts_record() {
   local file tmp count
 
-  file=$(invalid_verdict_attempts_file "$1" "$2")
-  count=$(invalid_verdict_attempt_count "$1" "$2")
+  file=$(review_attempts_file "$1" "$2" "$3")
+  count=$(review_attempts_count "$1" "$2" "$3")
   count=$((count + 1))
 
   mkdir -p "$STATE_DIR"
-  tmp=$(mktemp "$STATE_DIR/invalid-verdict-attempts.XXXXXX")
+  tmp=$(mktemp "$STATE_DIR/attempt-counter.XXXXXX")
   printf '%s\n' "$count" >"$tmp"
   chmod 600 "$tmp" 2>/dev/null || true
   mv "$tmp" "$file"
   printf '%s\n' "$count"
 }
 
-clear_invalid_verdict_attempts() {
+review_attempts_clear() {
   local file
 
-  file=$(invalid_verdict_attempts_file "$1" "$2") || return 0
+  file=$(review_attempts_file "$1" "$2" "$3") || return 0
   rm -f "$file"
 }
 

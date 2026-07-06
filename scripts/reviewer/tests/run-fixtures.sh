@@ -1444,30 +1444,34 @@ test_invalid_verdict_state() {
   STATE_DIR="$TMP_ROOT/invalid-state"
   mkdir -p "$STATE_DIR"
 
-  assert_eq "missing invalid verdict count is zero" "0" "$(invalid_verdict_attempt_count 17 abc123)"
-  count=$(record_invalid_verdict_attempt 17 abc123)
+  assert_eq "missing invalid verdict count is zero" "0" "$(review_attempts_count invalid-verdict 17 abc123)"
+  count=$(review_attempts_record invalid-verdict 17 abc123)
   assert_eq "invalid verdict first attempt is recorded" "1" "$count"
-  count=$(record_invalid_verdict_attempt 17 abc123)
+  count=$(review_attempts_record invalid-verdict 17 abc123)
   assert_eq "invalid verdict attempts increment per head" "2" "$count"
-  assert_eq "different head has separate invalid verdict count" "0" "$(invalid_verdict_attempt_count 17 def456)"
+  assert_eq "different head has separate invalid verdict count" "0" "$(review_attempts_count invalid-verdict 17 def456)"
 
   artifact=$(write_invalid_verdict_artifact 17 abc123 INVALID_VERDICT $'NOPE\nbody')
   assert_contains "invalid artifact records PR" "PR: #17" "$artifact"
   assert_contains "invalid artifact records head SHA" "Head SHA: abc123" "$artifact"
   assert_contains "invalid artifact persists rejected output" "NOPE" "$artifact"
 
-  clear_invalid_verdict_attempts 17 abc123
-  assert_eq "invalid verdict attempts clear after valid output" "0" "$(invalid_verdict_attempt_count 17 abc123)"
+  review_attempts_clear invalid-verdict 17 abc123
+  assert_eq "invalid verdict attempts clear after valid output" "0" "$(review_attempts_count invalid-verdict 17 abc123)"
 
-  assert_eq "missing review failure count is zero" "0" "$(review_failure_attempt_count 17 abc123)"
-  count=$(record_review_failure_attempt 17 abc123)
+  assert_eq "missing review failure count is zero" "0" "$(review_attempts_count review-failure 17 abc123)"
+  count=$(review_attempts_record review-failure 17 abc123)
   assert_eq "review failure first attempt is recorded" "1" "$count"
-  count=$(record_review_failure_attempt 17 abc123)
+  count=$(review_attempts_record review-failure 17 abc123)
   assert_eq "review failure attempts increment per head" "2" "$count"
-  assert_eq "different head has separate review failure count" "0" "$(review_failure_attempt_count 17 def456)"
+  assert_eq "different head has separate review failure count" "0" "$(review_attempts_count review-failure 17 def456)"
 
-  clear_review_failure_attempts 17 abc123
-  assert_eq "review failure attempts clear after success" "0" "$(review_failure_attempt_count 17 abc123)"
+  review_attempts_clear review-failure 17 abc123
+  assert_eq "review failure attempts clear after success" "0" "$(review_attempts_count review-failure 17 abc123)"
+
+  # The counter kinds share one file family; distinct kinds never collide.
+  review_attempts_record invalid-verdict 17 abc123 >/dev/null
+  assert_eq "counter kinds keep separate counts per head" "0" "$(review_attempts_count review-failure 17 abc123)"
 }
 
 test_artifact_secret_safety() {
@@ -3003,7 +3007,7 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=424
+EXPECTED_ASSERTIONS=425
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
