@@ -49,6 +49,29 @@ validate_bool_env() {
   esac
 }
 
+# Resolve where write_dry_run_artifact should write, echoing the path on stdout.
+# An explicit REVIEWER_DRY_RUN_OUT (DRY_RUN_OUT) wins verbatim and is honored
+# exactly as before. Otherwise, under REVIEWER_DRY_RUN=1, default to a
+# timestamped path under the state dir so a dry run -- whose whole purpose is an
+# inspectable artifact -- never silently produces nothing; the timestamp keeps
+# repeated runs from clobbering, and an overwrite is logged on the off chance the
+# path already exists. Outside dry-run mode with no explicit path, stay a no-op
+# (empty output): the daemon also calls write_dry_run_artifact on empty/invalid
+# reviewer output in production, and that path must remain silent.
+resolve_dry_run_out() {
+  local num="$1" out
+  out="${DRY_RUN_OUT:-}"
+  if [ -z "$out" ]; then
+    [ -n "${DRY_RUN:-}" ] || return 0
+    out="$STATE_DIR/dry-run-$num-$(date -u +%Y%m%dT%H%M%SZ).txt"
+    if [ -e "$out" ]; then
+      log "Dry run: overwriting existing artifact at $out"
+    fi
+    log "Dry run: writing artifact to $out"
+  fi
+  printf '%s' "$out"
+}
+
 resolve_reviewer_personality_config() {
   local configured_posted="${REVIEWER_POSTED_PERSONALITY:-}"
   local configured_file="${REVIEWER_PERSONALITY_FILE:-}"

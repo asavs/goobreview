@@ -55,7 +55,9 @@ jq . config/required-checks.example.json
 # Catch whitespace/conflict markers before committing
 git diff --check
 
-# Dry-run a single PR review against a real target (does not post)
+# Dry-run a single PR review against a real target (does not post).
+# The artifact defaults to $REVIEWER_STATE/dry-run-<pr>-<timestamp>.txt (path is
+# logged); set REVIEWER_DRY_RUN_OUT=/path/to/file to choose it explicitly.
 set -a; . config/reviewer.env; set +a
 REVIEWER_DRY_RUN=1 REVIEWER_ONLY_PR=123 REVIEWER_MAX_PRS=1 scripts/reviewer/reviewer.sh
 tail -n 80 "$REVIEWER_STATE/log.txt"
