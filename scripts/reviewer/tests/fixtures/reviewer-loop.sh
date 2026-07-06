@@ -471,6 +471,128 @@ EOF
   assert_contains "second PR failure is recorded" "PR #2@sha2: failed to read CI check-runs; reached failure cap (1/1), skipping until the PR head changes" "$state_dir/log.txt"
 }
 
+# Regression for the queue livelock: a PR capped on invalid model output must
+# be skipped before the tick's attempt budget is spent and before any GitHub
+# side effects, or with REVIEWER_MAX_ATTEMPTS=1 it consumes every tick forever
+# and starves every PR sorted behind it.
+test_reviewer_invalid_output_cap_skips_before_attempt_budget() {
+  local state_dir runtime_dir test_reviewer env_file key_file bin_dir attempts_file signals_file status output
+
+  state_dir="$TMP_ROOT/invalid-cap-state"
+  runtime_dir="$TMP_ROOT/invalid-cap-runtime"
+  test_reviewer="$TMP_ROOT/invalid-cap-reviewer"
+  bin_dir="$TMP_ROOT/invalid-cap-bin"
+  attempts_file="$TMP_ROOT/invalid-cap-ci-attempts"
+  signals_file="$TMP_ROOT/invalid-cap-signals"
+  mkdir -p "$state_dir" "$runtime_dir" "$bin_dir"
+  cp -R "$REVIEWER_DIR" "$test_reviewer"
+  : > "$signals_file"
+
+  cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  token) printf 'test-token\n' ;;
+  slug)  printf 'goobreview\n' ;;
+  *)     exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/get-installation-token.sh"
+
+  cat > "$test_reviewer/check-ci.sh" <<EOF
+#!/usr/bin/env bash
+count=\$(cat "$attempts_file" 2>/dev/null || printf 0)
+count=\$((count + 1))
+printf '%s\n' "\$count" > "$attempts_file"
+exit 1
+EOF
+  chmod +x "$test_reviewer/check-ci.sh"
+
+  cat > "$bin_dir/curl" <<EOF
+#!/usr/bin/env bash
+body_file=""
+url="\${*: -1}"
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    -o)
+      body_file="\$2"
+      shift 2
+      ;;
+    -D|-w|-H|--data)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+case "\$url" in
+  *'/repos/example/repo/pulls?state=open&per_page=100&page=1')
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"}},{"number":2,"draft":false,"user":{"login":"bob"},"head":{"sha":"sha2"}}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/'*'/reviews?per_page=100&page=1')
+    printf '%s\n' '[]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/reactions'|*'/check-runs'*)
+    printf '%s\n' "\$url" >> "$signals_file"
+    printf '%s\n' '{"id":1}' > "\$body_file"
+    printf '201'
+    ;;
+  *)
+    printf 'unexpected curl URL: %s\n' "\$url" >&2
+    printf '000'
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  cat > "$bin_dir/agy" <<'EOF'
+#!/usr/bin/env bash
+printf 'Looks good.\nAPPROVE\n'
+EOF
+  chmod +x "$bin_dir/agy"
+
+  key_file="$TMP_ROOT/invalid-cap-key.pem"
+  printf 'key\n' > "$key_file"
+  chmod 600 "$key_file"
+
+  printf '## Role\nReview.\n' > "$TMP_ROOT/invalid-cap-personality.md"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/invalid-cap-engine.md"
+  printf '["ci"]\n' > "$TMP_ROOT/invalid-cap-required.json"
+  printf '1\n' > "$state_dir/invalid-verdict-1-sha1.count"
+
+  env_file="$TMP_ROOT/invalid-cap.env"
+  cat > "$env_file" <<EOF
+REVIEWER_REPO=example/repo
+REVIEWER_STATE=$state_dir
+REVIEWER_RUNTIME_STATE=$runtime_dir
+REVIEWER_APP_ID=1
+REVIEWER_APP_INSTALLATION_ID=2
+REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/invalid-cap-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/invalid-cap-engine.md
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/invalid-cap-required.json
+REVIEWER_MAX_PRS=1
+REVIEWER_MAX_ATTEMPTS=1
+REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=1
+EOF
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "invalid-output cap fixture reviewer exits successfully"
+  fi
+  pass "invalid-output cap fixture reviewer exits successfully"
+  assert_contains "invalid-output cap skip is logged" "PR #1@sha1: invalid agy output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=1; skipping until the PR head changes" "$state_dir/log.txt"
+  assert_eq "invalid-output-capped PR does not consume the attempt budget" "1" "$(cat "$attempts_file")"
+  assert_not_contains "invalid-output-capped skip emits no GitHub signals" "repos" "$signals_file"
+}
+
 test_reviewer_agy_quota_failure_reacts_and_skips_failure_cap() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir status output
   local source_dir tarball reactions_file check_runs_file failure_count_file

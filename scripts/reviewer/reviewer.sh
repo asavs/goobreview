@@ -760,10 +760,22 @@ review_one_pr() {
     return 10
   fi
 
+  # Both per-head caps must be checked here -- before the attempt budget is
+  # spent and before any GitHub side effects (eyes reaction, check run).
+  # A capped PR skipped after the increment would consume REVIEWER_MAX_ATTEMPTS
+  # every tick and starve every PR sorted behind it until its head changed.
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$FAILURE_MAX_ATTEMPTS" -gt 0 ]; then
     failure_attempts=$(review_attempts_count review-failure "$num" "$head_sha")
     if [ "$failure_attempts" -ge "$FAILURE_MAX_ATTEMPTS" ]; then
       log "PR #$num@$head_sha: review failures reached REVIEWER_FAILURE_MAX_ATTEMPTS=$FAILURE_MAX_ATTEMPTS; skipping until the PR head changes"
+      return 0
+    fi
+  fi
+  if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$INVALID_VERDICT_MAX_ATTEMPTS" -gt 0 ]; then
+    invalid_attempts=$(review_attempts_count invalid-verdict "$num" "$head_sha")
+    if [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
+      invalid_artifact=$(invalid_verdict_artifact_path "$num" || true)
+      log "PR #$num@$head_sha: invalid agy output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=$INVALID_VERDICT_MAX_ATTEMPTS; skipping until the PR head changes (last artifact: ${invalid_artifact:-unavailable})"
       return 0
     fi
   fi
@@ -849,17 +861,6 @@ EOF
   if [ -z "$RENDER_PROMPT_ONLY" ]; then
     if head_commit_json=$(github_api_get "repos/$REPO/commits/$head_sha" 2>>"$LOG_FILE"); then
       head_committed_at=$(printf '%s\n' "$head_commit_json" | jq -r '.commit.committer.date // empty')
-    fi
-  fi
-
-  if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$INVALID_VERDICT_MAX_ATTEMPTS" -gt 0 ]; then
-    invalid_attempts=$(review_attempts_count invalid-verdict "$num" "$head_sha")
-    if [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
-      invalid_artifact=$(invalid_verdict_artifact_path "$num" || true)
-      log "PR #$num@$head_sha: invalid agy output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=$INVALID_VERDICT_MAX_ATTEMPTS; skipping until the PR head changes (last artifact: ${invalid_artifact:-unavailable})"
-      conclude_review_check_run_signal neutral "Reviewer output cap reached" \
-        "The reviewer model repeatedly returned output without a valid final review event. This head SHA is skipped until the PR head changes."
-      return 0
     fi
   fi
 
