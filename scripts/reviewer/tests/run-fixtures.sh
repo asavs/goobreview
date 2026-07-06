@@ -16,7 +16,10 @@ REVIEWER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LIB_DIR="$REVIEWER_DIR/lib"
 
 TMP_ROOT=$(mktemp -d)
-trap 'rm -rf "$TMP_ROOT"' EXIT
+# Snapshot fixtures leave chmod a-w trees (prepare_review_worktree enforces the
+# read-only snapshot claim on disk), which a non-root rm -rf cannot unlink.
+# Restore owner write before cleanup so the trap never fails the suite.
+trap 'chmod -R u+w "$TMP_ROOT" 2>/dev/null; rm -rf "$TMP_ROOT"' EXIT
 
 LOG_FILE="$TMP_ROOT/test.log"
 : > "$LOG_FILE"

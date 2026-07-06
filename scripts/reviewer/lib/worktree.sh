@@ -67,6 +67,10 @@ prepare_review_worktree() {
     return 1
   fi
 
+  # Enforce the read-only claim we make to agy in the prompt: nothing (e.g. a
+  # subprocess agy spawns) should be able to write into a cached snapshot.
+  chmod -R a-w "$dir"
+
   rm -rf "$tmp"
   printf '%s\n' "$dir"
 }
