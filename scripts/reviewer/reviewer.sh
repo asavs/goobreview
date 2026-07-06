@@ -176,6 +176,8 @@ write_dry_run_artifact() {
     printf 'Observable from GoobReview: prompt payload, agy stdout/stderr, process envelope, runtime cwd, and PR-head snapshot path/counts.\n'
     printf 'Hidden Antigravity CLI system prompt/tool definitions: not observable by GoobReview; injected by agy outside this artifact.\n'
     print_recorded_agy_invocation "$runtime_dir/last-invocation.cmd"
+    printf 'Requested model (--model): %s\n' "$AGY_MODEL"
+    printf 'Resolved model label: %s\n' "${resolved_model_label:-unavailable}"
     printf 'Engine commit: %s\n' "$ENGINE_SHA"
     printf 'Agy wall-clock seconds: %s\n' "${agy_elapsed_s:-unavailable}"
     printf 'Head pushed at: %s\n' "${head_committed_at:-unavailable}"
@@ -395,9 +397,11 @@ capture_research_pair() {
   local posted_review="$9"
   local posted_event="${10}"
   local posted_transcript_source="${11:-agy_failed}"
+  local posted_resolved_model_label="${12:-}"
   local run_id run_dir posted_arm counterfactual_arm posted_dir counterfactual_dir
   local posted_file counterfactual_file manifest_tmp counterfactual_err counterfactual_prompt_file
   local counterfactual_personality_file counterfactual_review counterfactual_event counterfactual_transcript_source
+  local counterfactual_resolved_model_label=""
   local generated_at generated_at_epoch review_latency_seconds required_checks_sha256 posted_personality_file
 
   [ "$RESEARCH_CAPTURE_ENABLED" = "1" ] || return 0
@@ -441,6 +445,7 @@ capture_research_pair() {
   counterfactual_started_at=$(date +%s)
   if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
     counterfactual_transcript_source=$(agy_transcript_source)
+    counterfactual_resolved_model_label=$(agy_resolved_model_label)
     cat "$counterfactual_err" >>"$LOG_FILE"
     if [ -z "${counterfactual_review// }" ]; then
       counterfactual_event="EMPTY_RESPONSE"
@@ -449,6 +454,7 @@ capture_research_pair() {
     fi
   else
     counterfactual_transcript_source=$(agy_transcript_source)
+    counterfactual_resolved_model_label=$(agy_resolved_model_label)
     cat "$counterfactual_err" >>"$LOG_FILE"
     counterfactual_event="AGY_FAILED"
     counterfactual_review=$(cat "$counterfactual_err")
@@ -481,7 +487,9 @@ capture_research_pair() {
     --arg counterfactual_artifact "$counterfactual_file" \
     --arg posted_personality_file "$posted_personality_file" \
     --arg counterfactual_personality_file "$counterfactual_personality_file" \
-    --arg model "$AGY_MODEL" \
+    --arg requested_model "$AGY_MODEL" \
+    --arg posted_resolved_model_label "$posted_resolved_model_label" \
+    --arg counterfactual_resolved_model_label "$counterfactual_resolved_model_label" \
     --arg engine_sha "$ENGINE_SHA" \
     --arg posted_transcript_source "$posted_transcript_source" \
     --arg counterfactual_transcript_source "$counterfactual_transcript_source" \
@@ -509,7 +517,11 @@ capture_research_pair() {
         posted: $posted_personality_file,
         counterfactual: $counterfactual_personality_file
       },
-      model: $model,
+      requested_model: $requested_model,
+      resolved_model_label: {
+        posted: (if $posted_resolved_model_label == "" then null else $posted_resolved_model_label end),
+        counterfactual: (if $counterfactual_resolved_model_label == "" then null else $counterfactual_resolved_model_label end)
+      },
       engine_sha: $engine_sha,
       posted_transcript_source: $posted_transcript_source,
       counterfactual_transcript_source: $counterfactual_transcript_source,
@@ -711,7 +723,7 @@ review_one_pr() {
   local review_check_conclusion
   # Read by write_dry_run_artifact and capture_research_pair through bash's
   # dynamic scoping, so they must always be initialized here.
-  local head_committed_at="" agy_elapsed_s="" transcript_source=""
+  local head_committed_at="" agy_elapsed_s="" transcript_source="" resolved_model_label=""
   REVIEW_CHECK_RUN_ID=""
   pr_metadata_json=""
   if [ -n "${pr_json_b64:-}" ]; then
@@ -915,6 +927,7 @@ EOF
   review=$(run_agy_review "$prompt_tmp" "$agy_err_tmp" "$review_worktree" "$PERSONALITY_FILE" "$ci_state" "$head_sha") || agy_review_status=$?
   agy_elapsed_s=$(( $(date +%s) - agy_started_at ))
   transcript_source=$(agy_transcript_source)
+  resolved_model_label=$(agy_resolved_model_label)
   if [ "$agy_review_status" -ne 0 ]; then
     cat "$agy_err_tmp" >> "$LOG_FILE"
     if [ -n "$DRY_RUN" ]; then
@@ -1029,7 +1042,7 @@ EOF
 $formatted_body
 
 ---
-$(review_footer_note "$AGY_MODEL" "${agy_elapsed_s:-0}" "$ENGINE_SHA")
+$(review_footer_note "${resolved_model_label:-$AGY_MODEL}" "${agy_elapsed_s:-0}" "$ENGINE_SHA")
 EOF
 )
 
@@ -1074,7 +1087,7 @@ EOF
         log "PR #$num@$head_sha: failed to post one or more still-open thread replies"
       fi
     fi
-    capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$unresolved_bot_threads_json" "$prompt_tmp" "$review" "$event" "$transcript_source"
+    capture_research_pair "$num" "$head_sha" "$ci_state" "$review_worktree" "$pr_metadata_json" "$bot_reviews_json" "$unresolved_bot_threads_json" "$prompt_tmp" "$review" "$event" "$transcript_source" "$resolved_model_label"
     rm -f "$prompt_tmp" "$agy_err_tmp" "$resolved_thread_handles" "$still_open_thread_replies"
     log "Posted $event review on PR #$num@$head_sha"
     review_actions=$((review_actions + 1))
