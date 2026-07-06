@@ -1,0 +1,335 @@
+#!/usr/bin/env bash
+# Review-output parsing fixtures for the reviewer suite. Sourced by run-fixtures.sh, which
+# provides the assert helpers, TMP_ROOT, and the sourced reviewer libs; the
+# runner's registration list controls execution order.
+# shellcheck disable=SC2034,SC2154,SC2317,SC2329
+
+test_output_parser() {
+  local valid approve expected_body locations sections malformed_sections resolved_handles
+
+  # shellcheck disable=SC2016
+  valid='## Summary
+This helper lets callers spoof users.
+
+## Blocking Findings
+### User spoofing
+Location: src/auth.py:42
+
+Impact: Anyone can select a different user by query string.
+Fix: Use the authenticated session user instead.
+REQUEST_CHANGES'
+  expected_body=$(printf '%s' "$valid" | sed '$d')
+
+  assert_eq "valid verdict maps to event" "REQUEST_CHANGES" "$(printf '%s' "$valid" | review_verdict_event)"
+  assert_eq "review body strips only final verdict line" "$expected_body" "$(printf '%s' "$valid" | review_body_before_verdict)"
+  assert_eq "file and line references stay in body" "1" "$(printf '%s' "$valid" | review_body_before_verdict | grep -c 'src/auth.py:42')"
+
+  locations=$(printf '%s\n' \
+    "See \`src/auth.py:42\` and src/auth.py:42-45." \
+    'The generated file dist/app.js:9 is not a second finding.' \
+    '../outside.py:3 must not be accepted as a repository path.' |
+    review_source_locations)
+  assert_eq "source-location parser finds unique path and line ranges" $'src/auth.py\t42\t42\nsrc/auth.py\t42\t45\ndist/app.js\t9\t9' "$locations"
+
+  file_url_locations=$(printf '%s\n' \
+    "[Player.tsx:530](file:///tmp/test-snap/client/src/Player.tsx#L530-L535)" |
+    review_source_locations "/tmp/test-snap")
+  assert_eq "source-location parser extracts repo-relative range from file-url link" \
+    $'client/src/Player.tsx\t530\t535' "$file_url_locations"
+
+  sections=$(printf '%s\n' \
+    '## Summary' \
+    'No blocking findings.' \
+    '' \
+    '### Session can be spoofed' \
+    'Location: src/auth.py:42' \
+    "The query string controls the effective user." \
+    '' \
+    '```suggestion' \
+    'user = session.user' \
+    '```' \
+    '' \
+    '### Unrelated note' \
+    'No source location.' |
+    review_markdown_finding_sections | tr '\0' '\n')
+  assert_contains "finding-section parser keeps explicit-location finding heading" "### Session can be spoofed" <(printf '%s' "$sections")
+  assert_not_contains "finding-section parser skips sections without Location" "### Unrelated note" <(printf '%s' "$sections")
+  assert_contains "finding-section parser preserves valid suggestion fences" '```suggestion' <(printf '%s' "$sections")
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  h1_sections=$(printf '%s\n' \
+    '# Alias try_files redirect loop' \
+    'Location: deploy/nginx/mog.conf:43' \
+    'The alias block causes a redirect loop.' |
+    review_markdown_finding_sections | tr '\0' '\n')
+  assert_contains "finding-section parser accepts h1 headings" "# Alias try_files redirect loop" <(printf '%s' "$h1_sections")
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  malformed_sections=$(printf '%s\n' \
+    '### Broken suggestion fence' \
+    'Location: src/auth.py:42' \
+    'The changed line needs a replacement.' \
+    '```suggestion' \
+    'return session.user' |
+    review_markdown_finding_sections | tr '\0' '\n')
+  assert_not_contains "finding-section parser rejects malformed suggestion fences for inline promotion" "### Broken suggestion fence" <(printf '%s' "$malformed_sections")
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  resolved_handles=$(printf '%s\n' \
+    '## Summary' \
+    'null-deref-footgun is mentioned here but must not resolve.' \
+    '' \
+    '## Unresolved Prior Threads' \
+    '- still-open-thing must stay open.' \
+    '' \
+    '## Resolved Prior Threads' \
+    '- null-deref-footgun fixed by the session rewrite.' \
+    '- `p2-stale-render` no longer reproduces.' \
+    '- null-deref-footgun duplicate should only appear once.' \
+    '' \
+    '## Remaining Findings' \
+    '- off-by-one is still broken.' |
+    review_resolved_thread_handles)
+  assert_eq "resolved-thread parser extracts leading slug handle per bullet in resolved section only" $'null-deref-footgun\np2-stale-render' "$resolved_handles"
+
+  if printf 'NOPE\n' | review_verdict_event >/dev/null; then
+    fail "malformed verdict is rejected"
+  fi
+  pass "malformed verdict is rejected"
+
+  if printf 'APPROVE\nintro\n' | review_verdict_event >/dev/null; then
+    fail "verdict must be final non-empty line"
+  fi
+  pass "verdict must be final non-empty line"
+
+  approve='## Summary
+No findings.
+APPROVE'
+  assert_eq "approve output remains parseable without metadata" "APPROVE" "$(printf '%s' "$approve" | review_verdict_event)"
+
+  assert_eq "verdict line tolerates CRLF and whitespace" "APPROVE" "$(printf '%s\r\n' '  APPROVE' | review_verdict_event)"
+  if printf '%s\n' 'approve' | review_verdict_event >/dev/null; then
+    fail "verdict remains case-sensitive"
+  fi
+  pass "verdict remains case-sensitive"
+}
+
+test_review_body_dedup_filter() {
+  local full_body promoted_json filtered
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  full_body='## Summary
+This PR changes the auth path.
+
+### Render stays stale
+Location: src/app.py:42
+This is read from a ref that does not schedule a render.
+
+### Not promoted
+Location: src/app.py:99
+This has no diff anchor so it stays in the body.'
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  promoted_json='[{"path":"src/app.py","line":42,"side":"RIGHT","body":"### Render stays stale\nLocation: src/app.py:42\nThis is read from a ref that does not schedule a render."}]'
+
+  filtered=$(printf '%s\n' "$full_body" | review_body_without_promoted_sections "$promoted_json")
+
+  assert_not_contains "dedup filter strips promoted finding section from body" "### Render stays stale" <(printf '%s\n' "$filtered")
+  assert_contains "dedup filter preserves summary section" "## Summary" <(printf '%s\n' "$filtered")
+  assert_contains "dedup filter preserves non-promoted finding in body" "### Not promoted" <(printf '%s\n' "$filtered")
+  assert_eq "dedup filter passthrough when no inline comments" \
+    "$(printf '%s\n' "$full_body")" \
+    "$(printf '%s\n' "$full_body" | review_body_without_promoted_sections '[]')"
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture review text.
+  h1_promoted_json='[{"path":"deploy/nginx/mog.conf","line":43,"side":"RIGHT","body":"# Alias redirect loop\nLocation: deploy/nginx/mog.conf:43\nThis alias causes a loop."}]'
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture text.
+  h1_filtered=$(printf '%s\n' \
+    '# Alias redirect loop' \
+    'Location: deploy/nginx/mog.conf:43' \
+    'This alias causes a loop.' |
+    review_body_without_promoted_sections "$h1_promoted_json")
+  assert_not_contains "dedup filter strips promoted h1 section from body" "Alias redirect loop" <(printf '%s\n' "$h1_filtered")
+}
+
+test_unresolved_thread_replies_parser() {
+  local replies
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the fixture text.
+  replies=$(printf '%s\n' \
+    '## Resolved Prior Threads' \
+    '- p2-stale-render confirmed fixed.' \
+    '' \
+    '## Unresolved Prior Threads' \
+    '- null-deref-footgun still present — guard added to wrong branch.' \
+    '- `missing-null-check`: not fixed — checked only the success path.' \
+    '- null-deref-footgun duplicate should only appear once.' \
+    '' \
+    '## New Findings' \
+    '- off-by-one is new.' |
+    review_unresolved_thread_replies)
+
+  assert_contains "unresolved reply parser extracts unresolved handle" "null-deref-footgun" <(printf '%s\n' "$replies")
+  assert_contains "unresolved reply parser extracts reply body text" "guard added to wrong branch" <(printf '%s\n' "$replies")
+  assert_contains "unresolved reply parser handles backtick-quoted handles" "missing-null-check" <(printf '%s\n' "$replies")
+  assert_not_contains "unresolved reply parser ignores resolved section" "p2-stale-render" <(printf '%s\n' "$replies")
+  assert_eq "unresolved reply parser deduplicates handles" "2" "$(printf '%s\n' "$replies" | grep -c $'\t' || printf 0)"
+}
+
+test_still_open_thread_reply_posting() {
+  local handle_map replies_file replied reply_calls_file threads
+
+  reply_calls_file="$TMP_ROOT/still-open-reply-calls"
+  replies_file="$TMP_ROOT/still-open-replies.txt"
+  : > "$reply_calls_file"
+
+  handle_map='[
+    {"handle": "null-deref-footgun", "id": "thread-1"},
+    {"handle": "stale-render", "id": "thread-2"}
+  ]'
+
+  threads='[
+    {"id": "thread-1", "isResolved": false},
+    {"id": "thread-2", "isResolved": true}
+  ]'
+
+  printf '%s\t%s\n' "null-deref-footgun" "still present — guard added to wrong branch" > "$replies_file"
+  printf '%s\t%s\n' "stale-render" "still open" >> "$replies_file"
+  printf '%s\t%s\n' "not-in-map" "unmatched handle" >> "$replies_file"
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly.
+  github_api_graphql() {
+    local thread_id
+    thread_id=$(printf '%s\n' "$2" | jq -r '.threadId')
+    printf '%s\n' "$thread_id" >> "$reply_calls_file"
+    jq -n --arg id "$thread_id" '{data: {addPullRequestReviewThreadReply: {comment: {id: ("c-" + $id)}}}}'
+  }
+
+  replied=$(github_reply_still_open_thread_handles_json "$handle_map" "$replies_file" "$threads")
+  assert_eq "still-open reply posts only to open unresolved threads" "1" "$replied"
+  assert_eq "still-open reply targets the correct thread ID" "thread-1" "$(cat "$reply_calls_file")"
+  assert_not_contains "still-open reply skips already-resolved thread" "thread-2" "$reply_calls_file"
+}
+
+# shellcheck disable=SC2016 # Fixtures intentionally use literal Markdown backticks.
+test_trace_to_details() {
+  local result
+
+  # No trace — pass through unchanged
+  result=$(printf '%s\n' \
+    '## Summary' \
+    'Looks fine.' \
+    'APPROVE' | review_trace_to_details)
+  assert_contains "no-trace content passes through unchanged" "## Summary" <(printf '%s' "$result")
+  assert_not_contains "no-trace output has no details block" "<details>" <(printf '%s' "$result")
+
+  # Trace with 2+ lines — wrapped in <details>
+  result=$(printf '%s\n' \
+    'I will check the directory structure of the snapshot.' \
+    'I will view `src/main.ts` from the head snapshot.' \
+    '' \
+    'Are you kidding me?' \
+    'APPROVE' | review_trace_to_details)
+  assert_contains "trace is wrapped in details block" "<details>" <(printf '%s' "$result")
+  assert_contains "trace details has summary" "Review trace" <(printf '%s' "$result")
+  assert_contains "trace is followed by separator" "---" <(printf '%s' "$result")
+  assert_contains "trace preserves original lines" "I will check the directory structure" <(printf '%s' "$result")
+  assert_contains "trace preserves original lines" "I will view \`src/main.ts\`" <(printf '%s' "$result")
+  assert_contains "actual review body follows separator" "Are you kidding me?" <(printf '%s' "$result")
+  assert_eq "details block appears before review body" \
+    "yes" \
+    "$(printf '%s' "$result" | awk 'BEGIN{details_line=0; review_line=0} /^<details>/{details_line=NR} /^Are you kidding me/{review_line=NR} END{print (details_line > 0 && review_line > details_line ? "yes" : "no")}')"
+
+  # Single trace line — no wrapping (threshold is 2)
+  result=$(printf '%s\n' \
+    'I will check the directory.' \
+    '' \
+    '## Summary' \
+    'APPROVE' | review_trace_to_details)
+  assert_not_contains "single trace line does not wrap" "<details>" <(printf '%s' "$result")
+
+  # Non-trace first line — no wrapping
+  result=$(printf '%s\n' \
+    '## Summary' \
+    'Looks fine.' \
+    'APPROVE' | review_trace_to_details)
+  assert_not_contains "non-trace first line does not trigger wrapping" "<details>" <(printf '%s' "$result")
+
+  # Path linking within trace
+  local tmp_worktree
+  tmp_worktree=$(mktemp -d)
+  mkdir -p "$tmp_worktree/client/src"
+  touch "$tmp_worktree/client/src/main.ts"
+  mkdir -p "$tmp_worktree/src"
+  touch "$tmp_worktree/src/audio.ts"
+  result=$(printf '%s\n' \
+    'I will view `client/src/main.ts` from the head snapshot.' \
+    'I will view `src/audio.ts` too.' \
+    'I will view `nonexistent.ts` — not in snapshot.' \
+    '' \
+    'Findings.' \
+    'APPROVE' | review_trace_to_details "abc123" "owner/repo" "$tmp_worktree")
+  assert_contains "existing path gets GitHub blob link for client/src/main.ts" \
+    '[`client/src/main.ts`](https://github.com/owner/repo/blob/abc123/client/src/main.ts)' \
+    <(printf '%s' "$result")
+  assert_contains "existing path gets GitHub blob link for src/audio.ts" \
+    '[`src/audio.ts`](https://github.com/owner/repo/blob/abc123/src/audio.ts)' \
+    <(printf '%s' "$result")
+  assert_contains "nonexistent path remains as plain backticks" \
+    '`nonexistent.ts`' \
+    <(printf '%s' "$result")
+  assert_not_contains "nonexistent path does not get linked" \
+    'nonexistent.ts`](https://' \
+    <(printf '%s' "$result")
+  rm -rf "$tmp_worktree"
+
+  # Trace followed by empty lines then review — still wraps
+  result=$(printf '%s\n' \
+    'I will read the diff first.' \
+    'I will examine the test files.' \
+    '' \
+    '' \
+    '## Main Finding' \
+    'APPROVE' | review_trace_to_details)
+  assert_contains "trace wraps even with extra blank lines before review" "<details>" <(printf '%s' "$result")
+
+  # I'll variant
+  result=$(printf '%s\n' \
+    "I'll check the files first." \
+    "I'll view \`foo.ts\` next." \
+    '' \
+    'Findings.' \
+    'APPROVE' | review_trace_to_details)
+  assert_contains "I'll variant is detected as trace" "<details>" <(printf '%s' "$result")
+
+  local trace_file trace_block sidecar_worktree
+  sidecar_worktree=$(mktemp -d)
+  mkdir -p "$sidecar_worktree/client/src"
+  touch "$sidecar_worktree/client/src/main.ts"
+  trace_file="$TMP_ROOT/thinking.trace"
+  printf 'I will inspect `client/src/main.ts`.\nI will inspect `missing.ts`.\n' > "$trace_file"
+  trace_block=$(review_trace_details_block "$trace_file" "abc123" "owner/repo" "$sidecar_worktree")
+  assert_contains "sidecar trace emits compact details summary" "<details><summary>Review trace</summary>" <(printf '%s' "$trace_block")
+  assert_contains "sidecar trace linkifies existing snapshot path" \
+    '[`client/src/main.ts`](https://github.com/owner/repo/blob/abc123/client/src/main.ts)' \
+    <(printf '%s' "$trace_block")
+  assert_contains "sidecar trace leaves missing path unlinked" '`missing.ts`' <(printf '%s' "$trace_block")
+  assert_contains "sidecar trace details ends with separator" "---" <(printf '%s' "$trace_block")
+  rm -rf "$sidecar_worktree"
+}
+
+test_review_footer_note() {
+  assert_eq "zero duration formats as seconds" "0s" "$(format_agy_duration 0)"
+  assert_eq "sub-minute duration formats as seconds" "59s" "$(format_agy_duration 59)"
+  assert_eq "minute duration formats with zero-padded seconds" "4m12s" "$(format_agy_duration 252)"
+  assert_eq "non-numeric duration degrades to zero" "0s" "$(format_agy_duration bogus)"
+
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
+  assert_eq "footer carries model, duration, and linked engine sha" \
+    '*Drafted autonomously by gemini-3-pro in 4m12s via goobreview antigravity-cli [`abc1234`](https://github.com/asavs/goobreview/commit/abc1234).*' \
+    "$(review_footer_note "gemini-3-pro" 252 "abc1234")"
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
+  assert_eq "footer omits engine link when sha is unknown" \
+    '*Drafted autonomously by auto in 0s via goobreview antigravity-cli.*' \
+    "$(review_footer_note "auto" 0 "unknown")"
+}
