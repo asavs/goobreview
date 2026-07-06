@@ -787,7 +787,7 @@ EOF
 test_reviewer_research_capture_posts_selected_review_only() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir config_dir status output
   local source_dir tarball review_payload reactions_file check_runs_file posted_body manifest research_dir dry_run_out dry_comments_json
-  local manifest_latency dry_run_latency head_committed_at_fixture
+  local manifest_latency dry_run_latency head_committed_at_fixture expected_review_worktree
 
   head_committed_at_fixture="$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
   state_dir="$TMP_ROOT/research-state"
@@ -1018,6 +1018,18 @@ EOF
   assert_contains "counterfactual artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$research_dir/none/artifact.txt"
   assert_contains "posted artifact agents.md reflects angry personality" "You are a very angry senior engineer." "$research_dir/angry/artifact.txt"
   assert_contains "counterfactual artifact agents.md reflects control personality" "## Role" "$research_dir/none/artifact.txt"
+
+  # Regression (mog-template #179): write_research_review_artifact re-renders
+  # AGENTS.md for the archive but was omitting the snapshot worktree dir arg
+  # to write_agents_md, so every archived AGENTS.md had a blank "mounted
+  # read-only at:" line and a sha256 that didn't match what the model
+  # actually received. review_worktree here is example/repo@sha1's cached
+  # snapshot dir; assert both archived arms captured its real, non-blank path.
+  expected_review_worktree="$runtime_dir/worktrees/example_repo/heads/sha1"
+  assert_contains "posted artifact agents.md captures the snapshot mount path" \
+    "mounted read-only at: $expected_review_worktree" "$research_dir/angry/artifact.txt"
+  assert_contains "counterfactual artifact agents.md captures the snapshot mount path" \
+    "mounted read-only at: $expected_review_worktree" "$research_dir/none/artifact.txt"
 
   dry_run_out="$TMP_ROOT/research-dry-run.txt"
   : > "$reactions_file"

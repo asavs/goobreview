@@ -291,13 +291,14 @@ write_research_review_artifact() {
   local prompt_file="$8"
   local review_body="$9"
   local ci_state="${10:-}"
+  local worktree_dir="${11:-}"
   local artifact_tmp agents_md_tmp agents_md_bytes agents_md_sha
 
   mkdir -p "$(dirname "$output_file")"
   chmod 700 "$(dirname "$output_file")" 2>/dev/null || true
   artifact_tmp=$(mktemp "$STATE_DIR/research-artifact.XXXXXX")
   agents_md_tmp=$(mktemp "$STATE_DIR/research-agents-md.XXXXXX")
-  write_agents_md "$personality_file" "$agents_md_tmp" "$ci_state" "$head_sha" || {
+  write_agents_md "$personality_file" "$agents_md_tmp" "$ci_state" "$head_sha" "$worktree_dir" || {
     rm -f "$artifact_tmp" "$agents_md_tmp"
     return 1
   }
@@ -423,7 +424,7 @@ capture_research_pair() {
   posted_personality_file="$PERSONALITY_FILE"
   counterfactual_personality_file="$(research_personality_file_for_arm "$counterfactual_arm")" || return 0
 
-  if ! with_prompt_personality "$posted_arm" write_research_review_artifact "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review" "$ci_state"; then
+  if ! with_prompt_personality "$posted_arm" write_research_review_artifact "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review" "$ci_state" "$review_worktree"; then
     log "PR #$num@$head_sha: failed to write posted research artifact"
     return 0
   fi
@@ -453,7 +454,7 @@ capture_research_pair() {
   fi
   counterfactual_agy_s=$(( $(date +%s) - counterfactual_started_at ))
 
-  if ! with_prompt_personality "$counterfactual_arm" write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state"; then
+  if ! with_prompt_personality "$counterfactual_arm" write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state" "$review_worktree"; then
     log "PR #$num@$head_sha: failed to write counterfactual research artifact"
     rm -f "$counterfactual_err" "$counterfactual_prompt_file"
     return 0
