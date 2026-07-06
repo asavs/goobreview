@@ -64,6 +64,61 @@ test_agy_invocation_isolates_review_context() {
   assert_eq "agy adds no snapshot dir when none is supplied" "1" "$add_dir_count"
 }
 
+# The dry-run artifact must report the argv agy actually ran, not a static
+# template that drifted from the real flags. run_agy_review records the actual
+# invocation (with the prompt elided to a byte count) at call time, and
+# print_recorded_agy_invocation formats it for the artifact.
+# shellcheck disable=SC2317 # Mocked timeout command is invoked indirectly.
+test_agy_records_actual_invocation() {
+  local prompt_file err_file worktree_dir runtime_dir record_file output expected_bytes
+
+  STATE_DIR="$TMP_ROOT/invrec-state"
+  RUNTIME_STATE_DIR="$TMP_ROOT/invrec-runtime"
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
+  mkdir -p "$STATE_DIR"
+  worktree_dir="$TMP_ROOT/invrec-worktree"
+  mkdir -p "$worktree_dir"
+  prompt_file="$TMP_ROOT/invrec-prompt.md"
+  err_file="$TMP_ROOT/invrec-agy.err"
+  # A distinctive prompt body so we can prove it is elided from the record.
+  printf 'UNIQUE_PROMPT_SENTINEL_9137\nAPPROVE\n' > "$prompt_file"
+  PERSONALITY_FILE="$TMP_ROOT/invrec-personality.md"
+  PROMPT_FILE="$TMP_ROOT/invrec-engine.md"
+  printf '## Role\nInvocation-record reviewer.\n' > "$PERSONALITY_FILE"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+
+  timeout() { printf 'done\n'; }
+
+  run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123 >/dev/null
+
+  runtime_dir="$RUNTIME_STATE_DIR/agy-runtime"
+  record_file="$runtime_dir/last-invocation.cmd"
+  if [ -s "$record_file" ]; then
+    pass "run_agy_review records the actual invocation"
+  else
+    fail "run_agy_review records the actual invocation"
+  fi
+  assert_contains "recorded invocation keeps the --add-dir attachments" "--add-dir" "$record_file"
+  assert_contains "recorded invocation attaches the trusted workspace" "$runtime_dir/workspace" "$record_file"
+  assert_contains "recorded invocation attaches the PR-head snapshot" "$worktree_dir" "$record_file"
+  assert_contains "recorded invocation elides the prompt to a byte count" "bytes>" "$record_file"
+  assert_not_contains "recorded invocation omits the prompt text" "UNIQUE_PROMPT_SENTINEL_9137" "$record_file"
+
+  # The placeholder reports the true byte size of the prompt passed to agy.
+  expected_bytes=$(printf '%s' "$(cat "$prompt_file")" | wc -c | tr -d ' ')
+  assert_contains "recorded invocation byte count matches the prompt size" "<prompt: $expected_bytes bytes>" "$record_file"
+
+  # Artifact-side formatter prints the recorded line under a clear header.
+  output=$(print_recorded_agy_invocation "$record_file")
+  assert_contains "recorded-invocation formatter uses a clear header" "Invocation (recorded):" <(printf '%s\n' "$output")
+  assert_contains "recorded-invocation formatter shows the flags" "--add-dir" <(printf '%s\n' "$output")
+
+  # Graceful fallback when the record is missing (e.g. a pre-invocation refusal).
+  output=$(print_recorded_agy_invocation "$TMP_ROOT/invrec-missing.cmd")
+  assert_contains "recorded-invocation formatter falls back when the record is absent" "invocation record unavailable" <(printf '%s\n' "$output")
+}
+
 # Issue #143: the daemon's flock fd (reviewer.sh fd 9) must never reach agy.
 # An agy tool-call child (e.g. npm ci) that outlives agy would otherwise
 # inherit the lock and deadlock every subsequent tick until killed by hand.

@@ -181,8 +181,8 @@ run_agy_review() {
   local ci_state="${5:-}"
   local head_sha="${6:-}"
   local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
-  local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file
-  local -a add_dir_args
+  local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count
+  local -a add_dir_args agy_argv
 
   # Cleared unconditionally, before the runtime dir necessarily exists, so a
   # refusal/failure below never leaves a stale source from a prior invocation
@@ -190,6 +190,11 @@ run_agy_review() {
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   transcript_source_file="$runtime_dir/transcript_source"
   rm -f "$transcript_source_file"
+  # Cleared for the same reason as transcript_source above: a refusal below must
+  # never leave a stale invocation record from a prior run for the dry-run
+  # artifact to misreport as this run's argv.
+  invocation_record="$runtime_dir/last-invocation.cmd"
+  rm -f "$invocation_record"
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
     log "Refusing to invoke agy with symlinks present in PR-head snapshot: $worktree_dir"
@@ -232,6 +237,25 @@ run_agy_review() {
     add_dir_args+=(--add-dir "$worktree_dir")
   fi
 
+  # The full argv is built ONCE here and used twice below: recorded to the
+  # invocation record, then executed verbatim in the subshell. That makes drift
+  # between what the dry-run artifact reports and what actually runs
+  # structurally impossible -- the previous hand-maintained "Command template"
+  # silently omitted the --add-dir attachments added in 5dfa46f, which briefly
+  # misled incident forensics. The prompt argument is appended only at execution
+  # time; in the record it is elided to a byte-count placeholder (it is huge and
+  # already captured verbatim elsewhere in the artifact -- the point of this
+  # record is the flags). Recorded args go through %q so the line is unambiguous
+  # even if a path contains spaces.
+  agy_argv=(timeout --kill-after=30 "$AGY_TIMEOUT" agy --sandbox \
+    --dangerously-skip-permissions --print-timeout "${AGY_TIMEOUT}s" \
+    --model "$AGY_MODEL" "${add_dir_args[@]}" --print)
+  prompt_byte_count=$(printf '%s' "$prompt" | wc -c | tr -d ' ')
+  {
+    printf '%q ' "${agy_argv[@]}"
+    printf '<prompt: %s bytes>\n' "$prompt_byte_count"
+  } >"$invocation_record"
+
   (
     cd "$workspace_dir" || exit
     # Keep the GitHub App identity out of the agent subprocess.  agy's native
@@ -245,9 +269,7 @@ run_agy_review() {
     # Every subprocess agy spawns resolves build/test entry points to the
     # refusal shims first (issue #144). agy itself is not shimmed.
     export PATH="$runtime_dir/deny-bin:$PATH"
-    timeout --kill-after=30 "$AGY_TIMEOUT" agy --sandbox --dangerously-skip-permissions \
-      --print-timeout "${AGY_TIMEOUT}s" --model "$AGY_MODEL" \
-      "${add_dir_args[@]}" --print "$prompt" </dev/null >"$raw_out" 2>"$err_file"
+    "${agy_argv[@]}" "$prompt" </dev/null >"$raw_out" 2>"$err_file"
   )
   agy_status=$?
 
@@ -267,6 +289,20 @@ run_agy_review() {
     cat "$raw_out"
   fi
   rm -f "$raw_out" "$content_tmp" "$transcript_marker"
+}
+
+# Emit, for the dry-run artifact, the actual agy invocation recorded by the
+# preceding run_agy_review (its --add-dir attachments and flags; the prompt is
+# already elided to a byte count at record time). Falls back gracefully when the
+# record is missing -- e.g. agy refused before invocation, so no argv ran.
+print_recorded_agy_invocation() {
+  local record_file="$1"
+  if [ -s "$record_file" ]; then
+    printf 'Invocation (recorded): '
+    cat "$record_file"
+  else
+    printf 'Invocation (recorded): invocation record unavailable\n'
+  fi
 }
 
 # Reads back what the immediately preceding run_agy_review call recorded:
