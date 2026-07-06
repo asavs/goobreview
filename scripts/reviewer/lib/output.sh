@@ -556,23 +556,35 @@ BEGIN {
 {
   print linkify($0)
 }
-function linkify(s) {
+function linkify(s,    result, rest, token, tok_start, tok_len, quoted, path, frag, url) {
   if (repo == "" || head_sha == "" || !has_idx) return s
   result = ""
   rest = s
   while (match(rest, /`[^`]+`/)) {
-    token = substr(rest, RSTART, RLENGTH)
+    tok_start = RSTART
+    tok_len = RLENGTH
+    token = substr(rest, tok_start, tok_len)
     quoted = substr(token, 2, length(token) - 2)
     path = quoted
+    # Preserve the cited line (or range) as a GitHub blob fragment so links land
+    # on the finding, not the top of the file. match() clobbers RSTART/RLENGTH,
+    # so the enclosing token span is captured in tok_start/tok_len above.
+    frag = ""
+    if (match(quoted, /:[0-9]+-[0-9]+$/)) {
+      frag = "#L" substr(quoted, RSTART + 1)
+      sub(/-/, "-L", frag)
+    } else if (match(quoted, /:[0-9]+$/)) {
+      frag = "#L" substr(quoted, RSTART + 1)
+    }
     gsub(/:[0-9]+(-[0-9]+)?$/, "", path)
-    result = result substr(rest, 1, RSTART - 1)
+    result = result substr(rest, 1, tok_start - 1)
     if (path in paths) {
-      url = "https://github.com/" repo "/blob/" head_sha "/" path
+      url = "https://github.com/" repo "/blob/" head_sha "/" path frag
       result = result "[" sprintf("`%s`", quoted) "](" url ")"
     } else {
       result = result token
     }
-    rest = substr(rest, RSTART + RLENGTH)
+    rest = substr(rest, tok_start + tok_len)
   }
   return result rest
 }
@@ -683,23 +695,35 @@ function is_trace_line(s) {
   return 0
 }
 
-function linkify(s) {
+function linkify(s,    result, rest, token, tok_start, tok_len, quoted, path, frag, url) {
   if (repo == "" || head_sha == "" || !has_idx) return s
   result = ""
   rest = s
   while (match(rest, /`[^`]+`/)) {
-    token = substr(rest, RSTART, RLENGTH)
+    tok_start = RSTART
+    tok_len = RLENGTH
+    token = substr(rest, tok_start, tok_len)
     quoted = substr(token, 2, length(token) - 2)
     path = quoted
+    # Preserve the cited line (or range) as a GitHub blob fragment so links land
+    # on the finding, not the top of the file. match() clobbers RSTART/RLENGTH,
+    # so the enclosing token span is captured in tok_start/tok_len above.
+    frag = ""
+    if (match(quoted, /:[0-9]+-[0-9]+$/)) {
+      frag = "#L" substr(quoted, RSTART + 1)
+      sub(/-/, "-L", frag)
+    } else if (match(quoted, /:[0-9]+$/)) {
+      frag = "#L" substr(quoted, RSTART + 1)
+    }
     gsub(/:[0-9]+(-[0-9]+)?$/, "", path)
-    result = result substr(rest, 1, RSTART - 1)
+    result = result substr(rest, 1, tok_start - 1)
     if (path in paths) {
-      url = "https://github.com/" repo "/blob/" head_sha "/" path
+      url = "https://github.com/" repo "/blob/" head_sha "/" path frag
       result = result "[" sprintf("`%s`", quoted) "](" url ")"
     } else {
       result = result token
     }
-    rest = substr(rest, RSTART + RLENGTH)
+    rest = substr(rest, tok_start + tok_len)
   }
   return result rest
 }

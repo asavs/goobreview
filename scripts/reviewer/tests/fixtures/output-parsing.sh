@@ -332,16 +332,20 @@ test_trace_to_details() {
   mkdir -p "$tmp_worktree/src"
   touch "$tmp_worktree/src/audio.ts"
   result=$(printf '%s\n' \
-    'I will view `client/src/main.ts` from the head snapshot.' \
+    'I will view `client/src/main.ts:42` from the head snapshot.' \
+    'I will view `client/src/main.ts:10-12` in full.' \
     'I will view `src/audio.ts` too.' \
     'I will view `nonexistent.ts` — not in snapshot.' \
     '' \
     'Findings.' \
     'APPROVE' | review_trace_to_details "abc123" "owner/repo" "$tmp_worktree")
-  assert_contains "existing path gets GitHub blob link for client/src/main.ts" \
-    '[`client/src/main.ts`](https://github.com/owner/repo/blob/abc123/client/src/main.ts)' \
+  assert_contains "cited line becomes a blob link with an #L line fragment" \
+    '[`client/src/main.ts:42`](https://github.com/owner/repo/blob/abc123/client/src/main.ts#L42)' \
     <(printf '%s' "$result")
-  assert_contains "existing path gets GitHub blob link for src/audio.ts" \
+  assert_contains "cited line range becomes a blob link with an #L-range fragment" \
+    '[`client/src/main.ts:10-12`](https://github.com/owner/repo/blob/abc123/client/src/main.ts#L10-L12)' \
+    <(printf '%s' "$result")
+  assert_contains "existing path without a line keeps a plain blob link for src/audio.ts" \
     '[`src/audio.ts`](https://github.com/owner/repo/blob/abc123/src/audio.ts)' \
     <(printf '%s' "$result")
   assert_contains "nonexistent path remains as plain backticks" \
@@ -376,11 +380,14 @@ test_trace_to_details() {
   mkdir -p "$sidecar_worktree/client/src"
   touch "$sidecar_worktree/client/src/main.ts"
   trace_file="$TMP_ROOT/thinking.trace"
-  printf 'I will inspect `client/src/main.ts`.\nI will inspect `missing.ts`.\n' > "$trace_file"
+  printf 'I will inspect `client/src/main.ts:99`.\nI will inspect `client/src/main.ts:5-8`.\nI will inspect `missing.ts`.\n' > "$trace_file"
   trace_block=$(review_trace_details_block "$trace_file" "abc123" "owner/repo" "$sidecar_worktree")
   assert_contains "sidecar trace emits compact details summary" "<details><summary>Review trace</summary>" <(printf '%s' "$trace_block")
-  assert_contains "sidecar trace linkifies existing snapshot path" \
-    '[`client/src/main.ts`](https://github.com/owner/repo/blob/abc123/client/src/main.ts)' \
+  assert_contains "sidecar trace linkifies cited line with an #L fragment" \
+    '[`client/src/main.ts:99`](https://github.com/owner/repo/blob/abc123/client/src/main.ts#L99)' \
+    <(printf '%s' "$trace_block")
+  assert_contains "sidecar trace linkifies cited range with an #L-range fragment" \
+    '[`client/src/main.ts:5-8`](https://github.com/owner/repo/blob/abc123/client/src/main.ts#L5-L8)' \
     <(printf '%s' "$trace_block")
   assert_contains "sidecar trace leaves missing path unlinked" '`missing.ts`' <(printf '%s' "$trace_block")
   assert_contains "sidecar trace details ends with separator" "---" <(printf '%s' "$trace_block")
