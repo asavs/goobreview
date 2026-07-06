@@ -39,6 +39,7 @@ REFUSE_ON_HOME_CONTEXT="${REVIEWER_REFUSE_ON_HOME_CONTEXT:-0}"
 MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 AUTO_RESOLVE_BOT_THREADS="${REVIEWER_AUTO_RESOLVE_BOT_THREADS:-0}"
+CHECK_RUN_SIGNAL="${REVIEWER_CHECK_RUN_SIGNAL:-1}"
 FAILURE_MAX_ATTEMPTS="${REVIEWER_FAILURE_MAX_ATTEMPTS:-3}"
 INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
@@ -677,6 +678,8 @@ record_review_failure_and_log() {
   local message="$3"
   local attempts
 
+  conclude_review_check_run_signal neutral "Review attempt failed" \
+    "$message. The daemon will retry on a later tick."
   if [ -z "$DRY_RUN" ] && [ -z "$RENDER_PROMPT_ONLY" ]; then
     attempts=$(record_review_failure_attempt "$num" "$head_sha")
     if [ "$FAILURE_MAX_ATTEMPTS" -eq 0 ]; then
@@ -723,8 +726,48 @@ post_agy_backoff_reaction() {
   fi
 }
 
+# Open the daemon's own "goobreview" check run on the PR head as the daemon
+# commits to working the PR this tick -- the idiomatic per-commit "a bot is
+# working on this" surface, visible in the merge box and Checks tab alongside
+# CI. Requires the App's checks:write permission; best-effort like reactions:
+# a failed create (e.g. an installation that has not approved the permission)
+# is logged and never blocks the review. Callers must only invoke this on a
+# live tick.
+begin_review_check_run_signal() {
+  local num="$1"
+  local head_sha="$2"
+
+  REVIEW_CHECK_RUN_ID=""
+  [ "$CHECK_RUN_SIGNAL" = "1" ] || return 0
+  if REVIEW_CHECK_RUN_ID=$(github_create_review_check_run "$head_sha" 2>>"$LOG_FILE"); then
+    log "Opened review check run $REVIEW_CHECK_RUN_ID on PR #$num@$head_sha"
+  else
+    REVIEW_CHECK_RUN_ID=""
+    log "Failed to open review check run on PR #$num@$head_sha (continuing; needs the App's checks:write permission)"
+  fi
+}
+
+# Conclude the check run opened by begin_review_check_run_signal. A no-op when
+# none is open, so failure paths that run before the daemon commits to a PR
+# (or on dry-run/prompt-only ticks, which never open one) never touch GitHub.
+# Clears the id so a check run is concluded at most once.
+conclude_review_check_run_signal() {
+  local conclusion="$1"
+  local title="$2"
+  local summary="$3"
+
+  [ -n "${REVIEW_CHECK_RUN_ID:-}" ] || return 0
+  if github_conclude_review_check_run "$REVIEW_CHECK_RUN_ID" "$conclusion" "$title" "$summary" 2>>"$LOG_FILE"; then
+    log "Concluded review check run $REVIEW_CHECK_RUN_ID as $conclusion"
+  else
+    log "Failed to conclude review check run $REVIEW_CHECK_RUN_ID (continuing)"
+  fi
+  REVIEW_CHECK_RUN_ID=""
+}
+
 while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
   [ -n "${num:-}" ] || continue
+  REVIEW_CHECK_RUN_ID=""
   pr_metadata_json=""
   if [ -n "${pr_json_b64:-}" ]; then
     pr_metadata_json=$(printf '%s' "$pr_json_b64" | base64 -d) || pr_metadata_json=""
@@ -833,9 +876,12 @@ EOF
           continue
         fi
         post_review_started_reaction "$num"
+        begin_review_check_run_signal "$num" "$head_sha"
         if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body" "$head_sha" '[]'; then
           clear_review_failure_attempts "$num" "$head_sha"
           log "Posted REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
+          conclude_review_check_run_signal failure "Review posted: REQUEST_CHANGES" \
+            "Required CI checks were failing at review time, so changes were requested without invoking the reviewer model. A new head SHA gets a fresh review."
           review_actions=$((review_actions + 1))
         else
           record_review_failure_and_log "$num" "$head_sha" "Failed to post REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
@@ -853,6 +899,7 @@ EOF
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
     post_review_started_reaction "$num"
+    begin_review_check_run_signal "$num" "$head_sha"
   fi
 
   head_committed_at=""
@@ -867,6 +914,8 @@ EOF
     if [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
       invalid_artifact=$(invalid_verdict_artifact_path "$num" || true)
       log "PR #$num@$head_sha: invalid agy output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=$INVALID_VERDICT_MAX_ATTEMPTS; skipping until the PR head changes (last artifact: ${invalid_artifact:-unavailable})"
+      conclude_review_check_run_signal neutral "Reviewer output cap reached" \
+        "The reviewer model repeatedly returned output without a valid final review event. This head SHA is skipped until the PR head changes."
       continue
     fi
   fi
@@ -935,6 +984,8 @@ EOF
       # the author happens to push again, at which point the review would
       # cover both the missed push and the new one at once.
       [ -n "$DRY_RUN" ] || post_agy_backoff_reaction "$num"
+      conclude_review_check_run_signal neutral "Rate limited" \
+        "The Antigravity model quota is exhausted. The review is queued and retries automatically once the backoff clears."
       log "PR #$num@$head_sha: agy quota exhausted; not counted toward the failure cap, will retry once backoff clears"
     else
       record_review_failure_and_log "$num" "$head_sha" "agy failed for PR #$num@$head_sha"
@@ -948,6 +999,8 @@ EOF
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$review")
     write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
     rm -f "$prompt_tmp" "$agy_err_tmp"
+    conclude_review_check_run_signal neutral "Empty reviewer output" \
+      "The reviewer model returned an empty response. The daemon will retry on a later tick."
     if [ -z "$DRY_RUN" ]; then
       invalid_attempts=$(record_invalid_verdict_attempt "$num" "$head_sha")
       if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
@@ -967,6 +1020,8 @@ EOF
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "INVALID_VERDICT" "$review")
     write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
     rm -f "$prompt_tmp" "$agy_err_tmp"
+    conclude_review_check_run_signal neutral "Invalid reviewer output" \
+      "The reviewer model did not emit a valid final review event. The daemon will retry on a later tick."
     verdict_line=$(printf '%s' "$review" | awk '
       {
         line = $0
@@ -1008,6 +1063,8 @@ EOF
     if [ "$current_head_sha" != "$head_sha" ]; then
       rm -f "$prompt_tmp" "$agy_err_tmp"
       log "PR #$num@$head_sha: head advanced to $current_head_sha before posting; discarding reviewed result"
+      conclude_review_check_run_signal neutral "Superseded" \
+        "The PR head advanced while the review was being drafted. The new head SHA gets a fresh review."
       continue
     fi
     if ! review_threads_json=$(github_pr_review_threads_json "$num" 2>>"$LOG_FILE"); then
@@ -1087,6 +1144,9 @@ EOF
 
   if post_review "$num" "$event" "$body" "$head_sha" "$inline_comments_json"; then
     clear_review_failure_attempts "$num" "$head_sha"
+    review_check_conclusion=$(review_check_run_conclusion_for_event "$event") || review_check_conclusion=neutral
+    conclude_review_check_run_signal "$review_check_conclusion" "Review posted: $event" \
+      "GoobReview posted a $event review on this head SHA."
     if [ "$AUTO_RESOLVE_BOT_THREADS" = "1" ]; then
       if auto_resolved_threads=$(github_resolve_review_thread_handles_json "$prompt_thread_handle_map_json" "$resolved_thread_handles" "$unresolved_bot_threads_json" "$head_sha" 2>>"$LOG_FILE"); then
         if [ "$auto_resolved_threads" -gt 0 ]; then

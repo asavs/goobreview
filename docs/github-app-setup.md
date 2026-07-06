@@ -40,7 +40,7 @@ These are filled in automatically; this section is the reference if you ever nee
 
 | Permission | Setting | Why |
 |---|---|---|
-| Checks | Read-only | CI gate — reads check-runs before calling `agy` |
+| Checks | Read & Write | CI gate — reads check-runs before calling `agy`; also posts the daemon's own "goobreview" check run on each PR head it reviews (in progress → review outcome) |
 | Contents | Read-only | Downloads the PR-head source snapshot for read-only review context |
 | Issues | Read & Write | Reserved for future issue or PR-conversation workflows; the reviewer does not currently call Issues endpoints |
 | Metadata | Read-only | Auto-selected; required for any repo API access |
@@ -49,6 +49,8 @@ These are filled in automatically; this section is the reference if you ever nee
 Everything else (Actions, Administration, Attestations, Code scanning, Commit statuses, Dependabot, Deployments, Discussions, Environments, Packages, Pages, Projects, Secrets, Webhooks, Workflows, etc.) &mdash; **No access**. Same for Account permissions and Organization permissions: leave everything at **No access**. The daemon only talks to repository-level APIs.
 
 **Webhook → Active** is unchecked. GoobReview polls; it doesn't receive webhooks.
+
+**Upgrading an existing App from Checks: Read-only.** Apps registered before the check-run signal existed have Checks at Read-only. Edit the App (Settings → Developer settings → GitHub Apps → Permissions & events), set **Checks** to **Read and write**, save, then approve the permission request GitHub sends to the installation (Settings → Installations → Configure). Until approved, the daemon logs a skipped check-run create on each review and everything else works as before.
 
 ## Doing it by hand (no Cloud Shell)
 
