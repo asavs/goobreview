@@ -24,12 +24,18 @@ agy_backoff_remaining() {
 }
 
 set_agy_quota_backoff() {
-  local err_file="$1" retry_ms delay_seconds until
+  local err_file="$1" retry_ms delay_seconds until reset_m reset_s
 
   retry_ms=$(grep -Eo 'retryDelayMs: [0-9]+' "$err_file" | tail -n 1 | sed -E 's/[^0-9]//g' || true)
   if [ -n "$retry_ms" ]; then
     delay_seconds=$(((retry_ms + 999) / 1000))
-  elif grep -qiE 'QUOTA_EXHAUSTED|exhausted your capacity|No capacity available|rate limit' "$err_file"; then
+  elif reset_m=$(grep -Eo 'Resets in [0-9]+m[0-9]+s' "$err_file" | tail -n 1 | grep -Eo '[0-9]+' | sed -n '1p'); then
+    # Antigravity's RESOURCE_EXHAUSTED message reports a concrete reset window
+    # ("Resets in 13m20s") rather than retryDelayMs; parsing it gives a much
+    # tighter backoff than AGY_QUOTA_DEFAULT_BACKOFF's 1-hour fallback.
+    reset_s=$(grep -Eo 'Resets in [0-9]+m[0-9]+s' "$err_file" | tail -n 1 | grep -Eo '[0-9]+' | sed -n '2p')
+    delay_seconds=$((reset_m * 60 + ${reset_s:-0}))
+  elif grep -qiE 'QUOTA_EXHAUSTED|RESOURCE_EXHAUSTED|Individual quota reached|exhausted your capacity|No capacity available|rate limit' "$err_file"; then
     delay_seconds="$AGY_QUOTA_DEFAULT_BACKOFF"
   else
     return 1
@@ -408,13 +414,24 @@ run_agy_review() {
   )
   agy_status=$?
 
+  cli_log=$(latest_agy_cli_log "$transcript_marker" || true)
+  # agy can hit RESOURCE_EXHAUSTED, retry internally, and still exit 0 with an
+  # empty planner turn -- the quota error only ever reaches its own
+  # per-invocation cli-<ts>.log, never agy's own stdout/stderr. Surface just
+  # the matching lines (not the whole multi-KB log) onto err_file so
+  # set_agy_quota_backoff can see it regardless of agy's exit status, without
+  # bloating the daemon log on ordinary runs where nothing matches.
+  if [ -n "$cli_log" ] && [ -f "$cli_log" ]; then
+    grep -iE 'RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED|Individual quota reached|retryDelayMs|Resets in [0-9]+m[0-9]+s|exhausted your capacity|No capacity available|rate limit' \
+      "$cli_log" >>"$err_file" 2>/dev/null || true
+  fi
+
   if [ "$agy_status" -ne 0 ]; then
     cat "$raw_out"
     rm -f "$raw_out" "$content_tmp" "$transcript_marker"
     return "$agy_status"
   fi
 
-  cli_log=$(latest_agy_cli_log "$transcript_marker" || true)
   if [ -n "$cli_log" ] && resolved_model_label=$(extract_agy_resolved_model_label "$cli_log"); then
     printf '%s\n' "$resolved_model_label" >"$resolved_model_file"
   fi
