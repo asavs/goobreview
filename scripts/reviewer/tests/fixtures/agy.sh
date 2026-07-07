@@ -318,6 +318,120 @@ EOF
   HOME="$saved_home"
 }
 
+# Direct unit coverage for set_agy_quota_backoff's matching/parsing: no
+# reviewer.sh integration needed since the function only reads an err-file
+# path and STATE_DIR-scoped globals.
+test_agy_quota_backoff_detection() {
+  local err_file until_epoch now delay
+
+  AGY_BACKOFF_FILE="$TMP_ROOT/quota-detect-backoff"
+  AGY_QUOTA_DEFAULT_BACKOFF=3600
+  AGY_QUOTA_BACKOFF_PADDING=300
+  err_file="$TMP_ROOT/quota-detect.err"
+
+  # retryDelayMs wins when present, converted to whole seconds (rounded up).
+  rm -f "$AGY_BACKOFF_FILE"
+  printf 'upstream error: retryDelayMs: 2500\n' > "$err_file"
+  if ! set_agy_quota_backoff "$err_file"; then fail "retryDelayMs is detected as quota exhaustion"; else pass "retryDelayMs is detected as quota exhaustion"; fi
+  now=$(date +%s)
+  until_epoch=$(cat "$AGY_BACKOFF_FILE")
+  delay=$((until_epoch - now - AGY_QUOTA_BACKOFF_PADDING))
+  assert_eq "retryDelayMs rounds 2500ms up to 3s" "3" "$delay"
+
+  # The real Antigravity RESOURCE_EXHAUSTED message reports a reset window
+  # rather than retryDelayMs; "Resets in 13m20s" must parse to 800s exactly,
+  # not fall back to the 1-hour default.
+  rm -f "$AGY_BACKOFF_FILE"
+  printf 'RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 13m20s.\n' > "$err_file"
+  if ! set_agy_quota_backoff "$err_file"; then fail "Resets-in message is detected as quota exhaustion"; else pass "Resets-in message is detected as quota exhaustion"; fi
+  now=$(date +%s)
+  until_epoch=$(cat "$AGY_BACKOFF_FILE")
+  delay=$((until_epoch - now - AGY_QUOTA_BACKOFF_PADDING))
+  assert_eq "Resets in 13m20s parses to an 800s delay" "800" "$delay"
+
+  # Quota-specific phrases stand on their own without needing a reset window.
+  rm -f "$AGY_BACKOFF_FILE"
+  printf 'error: rate limit exceeded, try again later\n' > "$err_file"
+  if ! set_agy_quota_backoff "$err_file"; then fail "bare rate-limit phrase is detected as quota exhaustion"; else pass "bare rate-limit phrase is detected as quota exhaustion"; fi
+  assert_eq "bare rate-limit phrase falls back to the default backoff" "$AGY_QUOTA_DEFAULT_BACKOFF" "$(( $(cat "$AGY_BACKOFF_FILE") - $(date +%s) - AGY_QUOTA_BACKOFF_PADDING ))"
+
+  # RESOURCE_EXHAUSTED is a generic gRPC status also used for unrelated
+  # conditions (e.g. an oversized request); alone it must NOT be treated as
+  # quota exhaustion, or a persistent unrelated failure would be silently
+  # converted into an infinite quiet retry loop instead of surfacing.
+  rm -f "$AGY_BACKOFF_FILE"
+  printf 'RESOURCE_EXHAUSTED: request payload exceeds the maximum size\n' > "$err_file"
+  if set_agy_quota_backoff "$err_file"; then fail "bare RESOURCE_EXHAUSTED without quota context is not treated as quota exhaustion"; else pass "bare RESOURCE_EXHAUSTED without quota context is not treated as quota exhaustion"; fi
+  if [ -f "$AGY_BACKOFF_FILE" ]; then fail "bare RESOURCE_EXHAUSTED writes no backoff file"; else pass "bare RESOURCE_EXHAUSTED writes no backoff file"; fi
+
+  # RESOURCE_EXHAUSTED co-occurring with quota-shaped language (even split
+  # across lines) is still treated as quota exhaustion.
+  rm -f "$AGY_BACKOFF_FILE"
+  printf 'RESOURCE_EXHAUSTED\nHTTP 429 Too Many Requests\n' > "$err_file"
+  if ! set_agy_quota_backoff "$err_file"; then fail "RESOURCE_EXHAUSTED with a 429 status is detected as quota exhaustion"; else pass "RESOURCE_EXHAUSTED with a 429 status is detected as quota exhaustion"; fi
+
+  # Ordinary output carries none of these signals and must not trigger.
+  rm -f "$AGY_BACKOFF_FILE"
+  printf 'a completely unrelated stderr line\n' > "$err_file"
+  if set_agy_quota_backoff "$err_file"; then fail "unrelated stderr is not treated as quota exhaustion"; else pass "unrelated stderr is not treated as quota exhaustion"; fi
+}
+
+# Regression for the PR #186 live incident: Antigravity's print-mode can hit
+# RESOURCE_EXHAUSTED, retry internally, and still exit 0 with an empty planner
+# turn -- agy's own stdout/stderr carry nothing, so the only place the quota
+# error appears is its per-invocation cli.log. run_agy_review must surface
+# that text onto err_file regardless of the empty body, so the caller's
+# set_agy_quota_backoff check (in reviewer.sh's empty-response branch) can see
+# it instead of spending the invalid-verdict budget on a transient rate limit.
+# shellcheck disable=SC2317 # Mocked timeout command is invoked indirectly.
+test_agy_surfaces_quota_exhaustion_from_cli_log_on_empty_response() {
+  local saved_home="${HOME:-}" prompt_file err_file output worktree_dir home log_dir
+
+  STATE_DIR="$TMP_ROOT/quota-cli-log-state"
+  RUNTIME_STATE_DIR="$TMP_ROOT/quota-cli-log-runtime"
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
+  mkdir -p "$STATE_DIR"
+  worktree_dir="$TMP_ROOT/quota-cli-log-worktree"
+  mkdir -p "$worktree_dir"
+  prompt_file="$TMP_ROOT/quota-cli-log-prompt.md"
+  err_file="$TMP_ROOT/quota-cli-log-agy.err"
+  printf 'prompt\n' > "$prompt_file"
+  PERSONALITY_FILE="$TMP_ROOT/quota-cli-log-personality.md"
+  PROMPT_FILE="$TMP_ROOT/quota-cli-log-engine.md"
+  printf '## Role\nQuota reviewer.\n' > "$PERSONALITY_FILE"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+
+  home="$TMP_ROOT/quota-cli-log-home"
+  HOME="$home"
+  log_dir="$home/.gemini/antigravity-cli/log"
+  mkdir -p "$log_dir"
+
+  timeout() {
+    cat > "$HOME/.gemini/antigravity-cli/log/cli-run.log" <<'EOF'
+I0707 21:12:10 model_resolver.go:62] Resolving model auto
+E0707 21:12:12 log.go:398] model unreachable: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 13m20s.
+EOF
+    printf ''
+  }
+
+  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  assert_eq "empty planner turn returns an empty review body" "" "$output"
+  assert_contains "quota text from cli.log reaches err_file despite the empty body" "RESOURCE_EXHAUSTED" "$err_file"
+
+  AGY_BACKOFF_FILE="$TMP_ROOT/quota-cli-log-backoff"
+  AGY_QUOTA_DEFAULT_BACKOFF=3600
+  AGY_QUOTA_BACKOFF_PADDING=300
+  rm -f "$AGY_BACKOFF_FILE"
+  if ! set_agy_quota_backoff "$err_file"; then
+    fail "quota exhaustion surfaced via cli.log is detected by set_agy_quota_backoff"
+  else
+    pass "quota exhaustion surfaced via cli.log is detected by set_agy_quota_backoff"
+  fi
+
+  HOME="$saved_home"
+}
+
 # Issue #149: agy's artifact-centric workflow (1.0.14+) writes the full review
 # to a file in the brain session directory and ends the session with a short
 # pointer message. When no planner turn carries a verdict, the reader follows

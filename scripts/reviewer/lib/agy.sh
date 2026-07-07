@@ -24,18 +24,29 @@ agy_backoff_remaining() {
 }
 
 set_agy_quota_backoff() {
-  local err_file="$1" retry_ms delay_seconds until reset_m reset_s
+  local err_file="$1" retry_ms delay_seconds until reset_line reset_m reset_s
 
   retry_ms=$(grep -Eo 'retryDelayMs: [0-9]+' "$err_file" | tail -n 1 | sed -E 's/[^0-9]//g' || true)
+  reset_line=$(grep -Eo 'Resets in [0-9]+m[0-9]+s' "$err_file" | tail -n 1 || true)
   if [ -n "$retry_ms" ]; then
     delay_seconds=$(((retry_ms + 999) / 1000))
-  elif reset_m=$(grep -Eo 'Resets in [0-9]+m[0-9]+s' "$err_file" | tail -n 1 | grep -Eo '[0-9]+' | sed -n '1p'); then
+  elif [ -n "$reset_line" ]; then
     # Antigravity's RESOURCE_EXHAUSTED message reports a concrete reset window
     # ("Resets in 13m20s") rather than retryDelayMs; parsing it gives a much
-    # tighter backoff than AGY_QUOTA_DEFAULT_BACKOFF's 1-hour fallback.
-    reset_s=$(grep -Eo 'Resets in [0-9]+m[0-9]+s' "$err_file" | tail -n 1 | grep -Eo '[0-9]+' | sed -n '2p')
-    delay_seconds=$((reset_m * 60 + ${reset_s:-0}))
-  elif grep -qiE 'QUOTA_EXHAUSTED|RESOURCE_EXHAUSTED|Individual quota reached|exhausted your capacity|No capacity available|rate limit' "$err_file"; then
+    # tighter backoff than AGY_QUOTA_DEFAULT_BACKOFF's 1-hour fallback. A
+    # single capture-group substitution avoids relying on positional field
+    # order across a second, separately-run grep pipeline.
+    reset_m=$(printf '%s' "$reset_line" | sed -E 's/Resets in ([0-9]+)m([0-9]+)s/\1/')
+    reset_s=$(printf '%s' "$reset_line" | sed -E 's/Resets in ([0-9]+)m([0-9]+)s/\2/')
+    delay_seconds=$((reset_m * 60 + reset_s))
+  elif grep -qiE 'QUOTA_EXHAUSTED|Individual quota reached|exhausted your capacity|No capacity available|rate limit' "$err_file"; then
+    delay_seconds="$AGY_QUOTA_DEFAULT_BACKOFF"
+  elif grep -qi 'RESOURCE_EXHAUSTED' "$err_file" && grep -qiE 'quota|429|rate limit' "$err_file"; then
+    # RESOURCE_EXHAUSTED alone is a generic gRPC status (also used for e.g.
+    # oversized-request errors) -- treating it as quota on its own risks
+    # silently converting an unrelated, persistent failure into an infinite
+    # quiet retry loop. Require it to co-occur with quota-shaped language
+    # before backing off.
     delay_seconds="$AGY_QUOTA_DEFAULT_BACKOFF"
   else
     return 1
