@@ -955,6 +955,19 @@ EOF
   cat "$agy_err_tmp" >> "$LOG_FILE"
 
   if [ -z "${review// }" ]; then
+    if set_agy_quota_backoff "$agy_err_tmp"; then
+      # agy can hit quota exhaustion, retry internally, and still exit 0 with
+      # an empty body -- this is the same transient condition the non-zero-exit
+      # quota path handles below, so it must not spend the invalid-verdict
+      # budget either (see the rationale on the exit-status branch above).
+      write_dry_run_artifact "$num" "$head_sha" "AGY_QUOTA" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
+      [ -n "$DRY_RUN" ] || post_agy_backoff_reaction "$num"
+      conclude_review_check_run_signal neutral "Rate limited" \
+        "The Antigravity model quota is exhausted. The review is queued and retries automatically once the backoff clears."
+      log "PR #$num@$head_sha: agy quota exhausted (empty response); not counted toward the failure cap, will retry once backoff clears"
+      rm -f "$prompt_tmp" "$agy_err_tmp"
+      return 0
+    fi
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$review")
     write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
     rm -f "$prompt_tmp" "$agy_err_tmp"
