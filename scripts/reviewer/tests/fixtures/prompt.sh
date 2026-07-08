@@ -252,6 +252,45 @@ test_prompt_assembly() {
   INCLUDE_COMMIT_SUBJECTS=1
 }
 
+test_prior_bot_thread_author_reply_context() {
+  local output prior_bot_threads_json
+
+  output="$TMP_ROOT/prior-thread-author-replies.md"
+  BOT_LOGIN="goobreview[bot]"
+  BOT_AUTHOR="app/goobreview"
+  PRIOR_THREAD_AUTHOR_REPLY_LIMIT=2
+  PRIOR_THREAD_AUTHOR_REPLY_MAX_BYTES=48
+
+  prior_bot_threads_json='[
+    {
+      "id": "thread-1",
+      "isResolved": false,
+      "viewerCanResolve": true,
+      "path": "src/app.py",
+      "line": 42,
+      "comments": {
+        "nodes": [
+          {"author": {"login": "goobreview[bot]"}, "body": "### Null deref footgun\nLocation: src/app.py:42"},
+          {"author": {"login": "alice"}, "body": "Older author note that should be count-capped."},
+          {"author": {"login": "goobreview[bot]"}, "body": "Bot follow-up must not appear as author evidence."},
+          {"author": {"login": "bob"}, "body": "I added a guard before dereferencing."},
+          {"author": {"login": "carol"}, "body": "The regression test now covers the nil session case and fails on the old code."}
+        ]
+      }
+    }
+  ]'
+
+  append_prior_bot_inline_threads "$prior_bot_threads_json" > "$output"
+
+  assert_contains "prior thread prompt labels author evidence" "Author replies (recent non-bot; account for before repeating):" "$output"
+  assert_contains "prior thread prompt includes recent human reply" "I added a guard before dereferencing." "$output"
+  assert_contains "prior thread prompt caps long human reply" "[goobreview: author reply truncated after 48 bytes]" "$output"
+  assert_not_contains "prior thread prompt omits count-capped older human reply" "Older author note" "$output"
+  assert_not_contains "prior thread prompt does not echo bot replies as author evidence" "Bot follow-up" "$output"
+
+  unset PRIOR_THREAD_AUTHOR_REPLY_LIMIT PRIOR_THREAD_AUTHOR_REPLY_MAX_BYTES
+}
+
 test_prompt_failure_propagates() {
   local prompt_file worktree_dir
 

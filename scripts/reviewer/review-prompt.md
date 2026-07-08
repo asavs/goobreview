@@ -54,11 +54,12 @@ verified in the read-only PR-head snapshot (not merely claimed fixed), one
 handle per bullet, for example `- null-deref-footgun fixed by the session
 rewrite`. GoobReview posts a confirming reply and resolves each thread.
 For threads that remain unfixed, include them in a `## Unresolved Prior Threads`
-section with your explanation, for example `- null-deref-footgun still present —
+section with your explanation, for example `- null-deref-footgun still present -
 the guard was added but only in the success path`. GoobReview posts your
-explanation as a reply to keep the thread visible. Do not list handles you
+explanation as a reply to keep the thread visible. If author replies are shown
+for a prior thread, accept evidence that proves the thread fixed or refute it
+against the PR-head source before repeating the finding. Do not list handles you
 have not verified.
-
 Sections of this prompt may carry a `[goobreview: ... omitted ...]`
 marker. Account for anything you did not see before approving: omitted
 file diffs are readable in the PR-head snapshot, so read them there or
