@@ -715,6 +715,31 @@ begin_review_check_run_signal() {
   fi
 }
 
+# Best-effort: when a PR is CI-gated (pending/incomplete), surface a
+# "goobreview" check run with status=queued so the PR doesn't look
+# untouched while it waits. Only called on live ticks (never
+# RENDER_PROMPT_ONLY/DRY_RUN, which must never touch GitHub). Idempotent:
+# queries existing check-runs for the head SHA first and skips creation if
+# a "goobreview" run is already present, since ticks fire every minute and
+# re-POSTing would create a new run each time. When the review attempt
+# later actually starts, begin_review_check_run_signal creates its own
+# fresh in_progress run, which supersedes this queued one as the latest
+# check run for the name+SHA -- no update-in-place needed.
+ensure_queued_check_run_signal() {
+  local num="$1"
+  local head_sha="$2"
+
+  [ "$CHECK_RUN_SIGNAL" = "1" ] || return 0
+  if github_goobreview_check_run_exists "$head_sha" 2>>"$LOG_FILE"; then
+    return 0
+  fi
+  if github_create_queued_check_run "$head_sha" >/dev/null 2>>"$LOG_FILE"; then
+    log "Opened queued goobreview check run on PR #$num@$head_sha (waiting on CI)"
+  else
+    log "Failed to open queued goobreview check run on PR #$num@$head_sha (continuing; needs the App's checks:write permission)"
+  fi
+}
+
 # Conclude the check run opened by begin_review_check_run_signal. A no-op when
 # none is open, so failure paths that run before the daemon commits to a PR
 # (or on dry-run/prompt-only ticks, which never open one) never touch GitHub.
@@ -823,10 +848,9 @@ review_one_pr() {
       return 0
     fi
   fi
-  review_attempts=$((review_attempts + 1))
-
   if ! ci_state=$(REQUIRED_CHECKS_JSON="$EFFECTIVE_REQUIRED_CHECKS_JSON" bash "$SCRIPT_DIR/check-ci.sh" "$REPO" "$head_sha" "$REQUIRED_CHECKS_FILE" 2>>"$LOG_FILE"); then
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to read CI check-runs"
+    review_attempts=$((review_attempts + 1))
     return 0
   fi
 
@@ -843,6 +867,9 @@ review_one_pr() {
         else
           log "PR #$num@$head_sha: CI not yet terminal (state=$ci_state), will retry next tick"
         fi
+        if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
+          ensure_queued_check_run_signal "$num" "$head_sha"
+        fi
         return 0
       fi
       ;;
@@ -851,6 +878,7 @@ review_one_pr() {
         log "PR #$num@$head_sha: dry run bypassing CI state=failing"
         ci_state="dry-run-bypassed-failing"
       else
+        review_attempts=$((review_attempts + 1))
         if [ -n "$RENDER_PROMPT_ONLY" ]; then
           log "PR #$num@$head_sha: CI is failing, so no agy prompt would be sent"
           review_actions=$((review_actions + 1))
@@ -894,6 +922,7 @@ EOF
       ;;
   esac
 
+  review_attempts=$((review_attempts + 1))
   log "Reviewing PR #$num@$head_sha"
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then

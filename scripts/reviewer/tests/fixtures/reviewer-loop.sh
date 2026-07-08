@@ -354,6 +354,387 @@ EOF
   assert_not_contains "attempt budget does not walk second PR" "PR #2@sha2: failed to read CI check-runs" "$state_dir/log.txt"
 }
 
+test_reviewer_pending_ci_does_not_starve_queue() {
+  local runtime_dir test_reviewer env_file key_file bin_dir source_dir tarball
+  local pending_state failing_state success_state posts_file agy_file status output
+
+  runtime_dir="$TMP_ROOT/ci-budget-runtime"
+  test_reviewer="$TMP_ROOT/ci-budget-reviewer"
+  bin_dir="$TMP_ROOT/ci-budget-bin"
+  source_dir="$TMP_ROOT/ci-budget-source"
+  tarball="$TMP_ROOT/ci-budget.tar.gz"
+  pending_state="$TMP_ROOT/ci-budget-pending-state"
+  failing_state="$TMP_ROOT/ci-budget-failing-state"
+  success_state="$TMP_ROOT/ci-budget-success-state"
+  posts_file="$TMP_ROOT/ci-budget-posts"
+  agy_file="$TMP_ROOT/ci-budget-agy"
+  mkdir -p "$runtime_dir" "$bin_dir" "$source_dir/repo-root" \
+    "$pending_state" "$failing_state" "$success_state"
+  chmod 700 "$runtime_dir" "$pending_state" "$failing_state" "$success_state"
+  cp -R "$REVIEWER_DIR" "$test_reviewer"
+  printf 'hello\n' > "$source_dir/repo-root/README.md"
+  tar -czf "$tarball" -C "$source_dir" repo-root
+  : > "$posts_file"
+  : > "$agy_file"
+
+  cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  token) printf 'test-token\n' ;;
+  slug)  printf 'goobreview\n' ;;
+  *)     exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/get-installation-token.sh"
+
+  cat > "$test_reviewer/check-ci.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${FIXTURE_SCENARIO:-} $2" in
+  pending-success\ sha1) printf 'pending\n' ;;
+  pending-success\ sha2|success-success\ *) printf 'success\n' ;;
+  failing-failing\ *) printf 'failing\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/check-ci.sh"
+
+  cat > "$bin_dir/curl" <<EOF
+#!/usr/bin/env bash
+body_file=""
+data=""
+method="GET"
+url="\${*: -1}"
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    -o)
+      body_file="\$2"
+      shift 2
+      ;;
+    -d|--data|--data-binary)
+      data="\$2"
+      shift 2
+      ;;
+    -X)
+      method="\$2"
+      shift 2
+      ;;
+    -D|-w|-H)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+case "\$method \$url" in
+  *'GET '*'repos/example/repo/pulls?state=open&per_page=100&page=1')
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1","ref":"feature-1"},"base":{"ref":"main"},"title":"First PR","body":"First","changed_files":1},{"number":2,"draft":false,"user":{"login":"bob"},"head":{"sha":"sha2","ref":"feature-2"},"base":{"ref":"main"},"title":"Second PR","body":"Second","changed_files":1}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/pulls/1')
+    printf '%s\n' '{"number":1,"head":{"sha":"sha1","ref":"feature-1"},"base":{"ref":"main"},"title":"First PR","body":"First","changed_files":1}' > "\$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/pulls/2')
+    printf '%s\n' '{"number":2,"head":{"sha":"sha2","ref":"feature-2"},"base":{"ref":"main"},"title":"Second PR","body":"Second","changed_files":1}' > "\$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/pulls/'*'/reviews?per_page=100&page=1')
+    printf '%s\n' '[]' > "\$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/pulls/'*'/files?per_page=100&page=1')
+    printf '%s\n' '[{"filename":"README.md","status":"modified","additions":1,"deletions":0,"patch":"@@ -1,0 +1,1 @@\n+hello"}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/pulls/'*'/commits?per_page=100&page=1')
+    printf '%s\n' '[{"commit":{"message":"Update README"}}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/commits/'*'/check-runs?filter=latest&per_page=100&page=1')
+    printf '%s\n' '{"total_count":1,"check_runs":[{"name":"ci","status":"completed","conclusion":"failure"}]}' > "\$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/commits/'sha*)
+    printf '%s\n' '{"commit":{"committer":{"date":"2026-07-04T23:00:00Z"}}}' > "\$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/tarball/'sha*)
+    cat "$tarball" > "\$body_file"
+    printf '200'
+    ;;
+  *'POST '*'repos/example/repo/issues/1/reactions')
+    printf '%s\n' '{"id":1,"content":"eyes"}' > "\$body_file"
+    printf '201'
+    ;;
+  *'POST '*'repos/example/repo/check-runs')
+    printf '%s\n' '{"id":77}' > "\$body_file"
+    printf '201'
+    ;;
+  *'PATCH '*'repos/example/repo/check-runs/77')
+    printf '%s\n' '{"id":77}' > "\$body_file"
+    printf '200'
+    ;;
+  *'POST '*'repos/example/repo/pulls/1/reviews')
+    printf '%s\n' "\$data" >> "$posts_file"
+    printf '%s\n' '{"id":1}' > "\$body_file"
+    printf '200'
+    ;;
+  *'POST '*'graphql')
+    printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}' > "\$body_file"
+    printf '200'
+    ;;
+  *)
+    printf 'unexpected curl %s %s\n' "\$method" "\$url" >&2
+    printf '000'
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  cat > "$bin_dir/agy" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\${FIXTURE_SCENARIO:-unknown}" >> "$agy_file"
+if [ "\${FIXTURE_SCENARIO:-}" = "success-success" ]; then
+  printf 'fixture agy failure\n' >&2
+  exit 1
+fi
+printf 'Looks good.\nAPPROVE\n'
+EOF
+  chmod +x "$bin_dir/agy"
+
+  key_file="$TMP_ROOT/ci-budget-key.pem"
+  printf 'key\n' > "$key_file"
+  chmod 600 "$key_file"
+
+  printf '## Role\nReview.\n' > "$TMP_ROOT/ci-budget-personality.md"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/ci-budget-engine.md"
+  printf '["ci"]\n' > "$TMP_ROOT/ci-budget-required.json"
+
+  env_file="$TMP_ROOT/ci-budget.env"
+  cat > "$env_file" <<EOF
+REVIEWER_REPO=example/repo
+REVIEWER_RUNTIME_STATE=$runtime_dir
+REVIEWER_APP_ID=1
+REVIEWER_APP_INSTALLATION_ID=2
+REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/ci-budget-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/ci-budget-engine.md
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/ci-budget-required.json
+REVIEWER_MAX_PRS=1
+REVIEWER_MAX_ATTEMPTS=1
+EOF
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$pending_state" REVIEWER_DRY_RUN=1 FIXTURE_SCENARIO=pending-success PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "pending-CI queue fixture exits successfully"
+  fi
+  pass "pending-CI queue fixture exits successfully"
+  assert_contains "pending CI is deferred to the next tick" "PR #1@sha1: CI not yet terminal (state=pending), will retry next tick" "$pending_state/log.txt"
+  assert_contains "reviewable PR behind pending CI is reviewed in the same tick" "Reviewing PR #2@sha2" "$pending_state/log.txt"
+  assert_eq "pending CI leaves the one attempt for the reviewable PR" "1" "$(wc -l < "$agy_file" | tr -d ' ')"
+
+  : > "$agy_file"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$failing_state" FIXTURE_SCENARIO=failing-failing PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "failing-CI budget fixture exits successfully"
+  fi
+  pass "failing-CI budget fixture exits successfully"
+  assert_contains "failing CI posts REQUEST_CHANGES" '"event": "REQUEST_CHANGES"' "$posts_file"
+  assert_not_contains "failing CI spends the attempt before the second PR" "PR #2@sha2: CI is failing" "$failing_state/log.txt"
+  assert_eq "failing CI does not invoke agy" "0" "$(wc -l < "$agy_file" | tr -d ' ')"
+
+  : > "$agy_file"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$success_state" REVIEWER_DRY_RUN=1 FIXTURE_SCENARIO=success-success PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "successful-CI budget fixture exits successfully"
+  fi
+  pass "successful-CI budget fixture exits successfully"
+  assert_contains "first successful-CI PR reaches review execution" "Reviewing PR #1@sha1" "$success_state/log.txt"
+  assert_eq "first successful-CI PR invokes agy once" "1" "$(wc -l < "$agy_file" | tr -d ' ')"
+  assert_contains "successful-CI attempt exhausts the tick budget" "Reached REVIEWER_MAX_ATTEMPTS=1 after 1 attempted review(s), stopping this tick" "$success_state/log.txt"
+  assert_not_contains "successful-CI attempt does not process the second PR" "Reviewing PR #2@sha2" "$success_state/log.txt"
+}
+
+test_reviewer_pending_ci_opens_queued_check_run() {
+  local runtime_dir test_reviewer env_file key_file bin_dir posts_file marker_file
+  local create_state idempotent_state dry_run_state render_state status output
+
+  runtime_dir="$TMP_ROOT/queued-check-runtime"
+  test_reviewer="$TMP_ROOT/queued-check-reviewer"
+  bin_dir="$TMP_ROOT/queued-check-bin"
+  posts_file="$TMP_ROOT/queued-check-posts"
+  marker_file="$TMP_ROOT/queued-check-created"
+  create_state="$TMP_ROOT/queued-check-create-state"
+  idempotent_state="$TMP_ROOT/queued-check-idempotent-state"
+  dry_run_state="$TMP_ROOT/queued-check-dry-run-state"
+  render_state="$TMP_ROOT/queued-check-render-state"
+  mkdir -p "$runtime_dir" "$bin_dir" "$create_state" "$idempotent_state" \
+    "$dry_run_state" "$render_state"
+  chmod 700 "$runtime_dir" "$create_state" "$idempotent_state" "$dry_run_state" "$render_state"
+  cp -R "$REVIEWER_DIR" "$test_reviewer"
+  : > "$posts_file"
+
+  cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  token) printf 'test-token\n' ;;
+  slug)  printf 'goobreview\n' ;;
+  *)     exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/get-installation-token.sh"
+
+  cat > "$test_reviewer/check-ci.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'pending\n'
+EOF
+  chmod +x "$test_reviewer/check-ci.sh"
+
+  cat > "$bin_dir/curl" <<'EOF'
+#!/usr/bin/env bash
+body_file=""
+data=""
+method="GET"
+url="${*: -1}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) body_file="$2"; shift 2 ;;
+    -d|--data|--data-binary) data="$2"; shift 2 ;;
+    -X) method="$2"; shift 2 ;;
+    -D|-w|-H|--connect-timeout|--max-time) shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$method $url" in
+  *'GET '*'repos/example/repo/pulls?state=open&per_page=100&page=1')
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"}}]' > "$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/pulls/1/reviews?per_page=100&page=1')
+    printf '%s\n' '[]' > "$body_file"
+    printf '200'
+    ;;
+  *'GET '*'repos/example/repo/commits/sha1/check-runs?filter=latest&per_page=100&page=1')
+    if [ "${FIXTURE_SCENARIO:-}" = "persistent" ] && [ -e "$MARKER_FILE" ]; then
+      printf '%s\n' '{"total_count":1,"check_runs":[{"name":"goobreview","status":"queued"}]}' > "$body_file"
+    else
+      printf '%s\n' '{"total_count":0,"check_runs":[]}' > "$body_file"
+    fi
+    printf '200'
+    ;;
+  *'POST '*'repos/example/repo/check-runs')
+    printf '%s\n' "$data" | jq -c . >> "$POSTS_FILE"
+    : > "$MARKER_FILE"
+    printf '%s\n' '{"id":77}' > "$body_file"
+    printf '201'
+    ;;
+  *)
+    printf 'unexpected curl %s %s\n' "$method" "$url" >&2
+    printf '000'
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  cat > "$bin_dir/agy" <<'EOF'
+#!/usr/bin/env bash
+printf 'unexpected agy invocation in pending-CI queued-check fixture\n' >&2
+exit 1
+EOF
+  chmod +x "$bin_dir/agy"
+
+  key_file="$TMP_ROOT/queued-check-key.pem"
+  printf 'key\n' > "$key_file"
+  chmod 600 "$key_file"
+  printf '## Role\nReview.\n' > "$TMP_ROOT/queued-check-personality.md"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/queued-check-engine.md"
+  printf '["ci"]\n' > "$TMP_ROOT/queued-check-required.json"
+
+  env_file="$TMP_ROOT/queued-check.env"
+  cat > "$env_file" <<EOF
+REVIEWER_REPO=example/repo
+REVIEWER_RUNTIME_STATE=$runtime_dir
+REVIEWER_APP_ID=1
+REVIEWER_APP_INSTALLATION_ID=2
+REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/queued-check-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/queued-check-engine.md
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/queued-check-required.json
+REVIEWER_MAX_PRS=1
+REVIEWER_MAX_ATTEMPTS=1
+EOF
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$create_state" FIXTURE_SCENARIO=always-missing POSTS_FILE="$posts_file" MARKER_FILE="$marker_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "pending-CI queued check fixture exits successfully"
+  fi
+  pass "pending-CI queued check fixture exits successfully"
+  assert_eq "first live pending-CI tick posts one check run" "1" "$(wc -l < "$posts_file" | tr -d ' ')"
+  assert_contains "pending-CI check run payload names goobreview" '"name":"goobreview"' "$posts_file"
+  assert_contains "pending-CI check run payload is queued" '"status":"queued"' "$posts_file"
+  assert_contains "pending-CI queued check creation is logged" "Opened queued goobreview check run" "$create_state/log.txt"
+
+  : > "$posts_file"
+  rm -f "$marker_file"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$idempotent_state" FIXTURE_SCENARIO=persistent POSTS_FILE="$posts_file" MARKER_FILE="$marker_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "queued check idempotency first tick exits successfully"
+  fi
+  pass "queued check idempotency first tick exits successfully"
+
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$idempotent_state" FIXTURE_SCENARIO=persistent POSTS_FILE="$posts_file" MARKER_FILE="$marker_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "queued check idempotency second tick exits successfully"
+  fi
+  pass "queued check idempotency second tick exits successfully"
+  assert_eq "two pending-CI ticks post only one queued check run" "1" "$(wc -l < "$posts_file" | tr -d ' ')"
+
+  : > "$posts_file"
+  rm -f "$marker_file"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; unset REVIEWER_DRY_RUN_BYPASS_CI; REVIEWER_STATE="$dry_run_state" REVIEWER_DRY_RUN=1 POSTS_FILE="$posts_file" MARKER_FILE="$marker_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "pending-CI dry-run fixture exits successfully"
+  fi
+  pass "pending-CI dry-run fixture exits successfully"
+  assert_eq "pending-CI dry run posts no queued check run" "0" "$(wc -l < "$posts_file" | tr -d ' ')"
+
+  : > "$posts_file"
+  rm -f "$marker_file"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$render_state" REVIEWER_RENDER_PROMPT_ONLY=1 POSTS_FILE="$posts_file" MARKER_FILE="$marker_file" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "pending-CI render-only fixture exits successfully"
+  fi
+  pass "pending-CI render-only fixture exits successfully"
+  assert_eq "pending-CI render-only tick posts no queued check run" "0" "$(wc -l < "$posts_file" | tr -d ' ')"
+}
+
 test_reviewer_failure_cap_skips_poisoned_pr() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir attempts_file status output
 
