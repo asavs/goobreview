@@ -360,7 +360,11 @@ review_collapse_stacked_hr() {
     function flush_pending(    i) {
       if (pending_count == 0) return
       if (hr_count >= 2) {
+        # Pad the surviving rule with blank lines: a bare --- directly under a
+        # text line is a Markdown setext heading, not a horizontal rule.
+        print ""
         print "---"
+        print ""
       } else {
         for (i = 1; i <= pending_count; i++) print pending[i]
       }

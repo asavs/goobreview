@@ -300,7 +300,7 @@ test_review_post_body_cleanup() {
     '---' \
     '*footer text*' |
     review_collapse_stacked_hr)
-  assert_eq "stacked horizontal rules collapse to one rule" $'Review prose.\n---\n*footer text*' "$collapsed"
+  assert_eq "stacked horizontal rules collapse to one blank-padded rule" $'Review prose.\n\n---\n\n*footer text*' "$collapsed"
 
   collapsed_blank=$(printf '%s\n' \
     'Review prose.' \
@@ -309,7 +309,7 @@ test_review_post_body_cleanup() {
     '---' \
     '*footer text*' |
     review_collapse_stacked_hr)
-  assert_eq "stacked horizontal rules with blank separator collapse to one rule" $'Review prose.\n---\n*footer text*' "$collapsed_blank"
+  assert_eq "stacked horizontal rules with blank separator collapse to one blank-padded rule" $'Review prose.\n\n---\n\n*footer text*' "$collapsed_blank"
 
   summary=$(review_inline_summary_body REQUEST_CHANGES 2)
   assert_eq "inline-only request changes gets non-empty summary" \

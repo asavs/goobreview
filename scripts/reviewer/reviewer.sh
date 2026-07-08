@@ -468,7 +468,6 @@ capture_research_pair() {
       cat "$counterfactual_retry_err" >>"$LOG_FILE"
       if [ -z "${counterfactual_review// }" ]; then
         counterfactual_event="EMPTY_RESPONSE"
-        counterfactual_pair_complete="false"
       elif ! counterfactual_event=$(printf '%s' "$counterfactual_review" | review_verdict_event); then
         counterfactual_event="INVALID"
       fi
@@ -481,6 +480,13 @@ capture_research_pair() {
     fi
     rm -f "$counterfactual_retry_err"
   fi
+  # The pair is usable for arm comparison only when the counterfactual ended
+  # in a real review verdict; EMPTY_RESPONSE/INVALID/AGY_FAILED all mean the
+  # posted arm has no counterpart.
+  case "$counterfactual_event" in
+    APPROVE|REQUEST_CHANGES|COMMENT) counterfactual_pair_complete="true" ;;
+    *) counterfactual_pair_complete="false" ;;
+  esac
   counterfactual_agy_s=$(( $(date +%s) - counterfactual_started_at ))
 
   if ! with_prompt_personality "$counterfactual_arm" write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state" "$review_worktree"; then
