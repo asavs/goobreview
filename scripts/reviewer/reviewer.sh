@@ -715,6 +715,31 @@ begin_review_check_run_signal() {
   fi
 }
 
+# Best-effort: when a PR is CI-gated (pending/incomplete), surface a
+# "goobreview" check run with status=queued so the PR doesn't look
+# untouched while it waits. Only called on live ticks (never
+# RENDER_PROMPT_ONLY/DRY_RUN, which must never touch GitHub). Idempotent:
+# queries existing check-runs for the head SHA first and skips creation if
+# a "goobreview" run is already present, since ticks fire every minute and
+# re-POSTing would create a new run each time. When the review attempt
+# later actually starts, begin_review_check_run_signal creates its own
+# fresh in_progress run, which supersedes this queued one as the latest
+# check run for the name+SHA -- no update-in-place needed.
+ensure_queued_check_run_signal() {
+  local num="$1"
+  local head_sha="$2"
+
+  [ "$CHECK_RUN_SIGNAL" = "1" ] || return 0
+  if github_goobreview_check_run_exists "$head_sha" 2>>"$LOG_FILE"; then
+    return 0
+  fi
+  if github_create_queued_check_run "$head_sha" >/dev/null 2>>"$LOG_FILE"; then
+    log "Opened queued goobreview check run on PR #$num@$head_sha (waiting on CI)"
+  else
+    log "Failed to open queued goobreview check run on PR #$num@$head_sha (continuing; needs the App's checks:write permission)"
+  fi
+}
+
 # Conclude the check run opened by begin_review_check_run_signal. A no-op when
 # none is open, so failure paths that run before the daemon commits to a PR
 # (or on dry-run/prompt-only ticks, which never open one) never touch GitHub.
@@ -841,6 +866,9 @@ review_one_pr() {
           log "PR #$num@$head_sha: required checks are missing from complete GitHub check-run data (state=incomplete), will retry next tick"
         else
           log "PR #$num@$head_sha: CI not yet terminal (state=$ci_state), will retry next tick"
+        fi
+        if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
+          ensure_queued_check_run_signal "$num" "$head_sha"
         fi
         return 0
       fi

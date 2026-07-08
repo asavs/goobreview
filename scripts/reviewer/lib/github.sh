@@ -559,6 +559,35 @@ github_create_review_check_run() {
   printf '%s\n' "$id"
 }
 
+github_create_queued_check_run() {
+  local head_sha="$1"
+  local payload response id
+
+  payload=$(jq -n \
+    --arg head_sha "$head_sha" \
+    '{
+      name: "goobreview",
+      head_sha: $head_sha,
+      status: "queued",
+      details_url: "https://github.com/asavs/goobreview",
+      output: {
+        title: "Waiting for CI",
+        summary: "Waiting for required checks to pass before review."
+      }
+    }')
+  response=$(github_api_post_json "repos/$REPO/check-runs" "$payload") || return 1
+  id=$(printf '%s\n' "$response" | jq -r '.id // empty')
+  [ -n "$id" ] || return 1
+  printf '%s\n' "$id"
+}
+
+github_goobreview_check_run_exists() {
+  local head_sha="$1"
+
+  github_check_runs_json "$head_sha" |
+    jq -e 'any(.check_runs[]?; .name == "goobreview")' >/dev/null
+}
+
 github_conclude_review_check_run() {
   local id="$1"
   local conclusion="$2"
