@@ -823,10 +823,9 @@ review_one_pr() {
       return 0
     fi
   fi
-  review_attempts=$((review_attempts + 1))
-
   if ! ci_state=$(REQUIRED_CHECKS_JSON="$EFFECTIVE_REQUIRED_CHECKS_JSON" bash "$SCRIPT_DIR/check-ci.sh" "$REPO" "$head_sha" "$REQUIRED_CHECKS_FILE" 2>>"$LOG_FILE"); then
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to read CI check-runs"
+    review_attempts=$((review_attempts + 1))
     return 0
   fi
 
@@ -851,6 +850,7 @@ review_one_pr() {
         log "PR #$num@$head_sha: dry run bypassing CI state=failing"
         ci_state="dry-run-bypassed-failing"
       else
+        review_attempts=$((review_attempts + 1))
         if [ -n "$RENDER_PROMPT_ONLY" ]; then
           log "PR #$num@$head_sha: CI is failing, so no agy prompt would be sent"
           review_actions=$((review_actions + 1))
@@ -894,6 +894,7 @@ EOF
       ;;
   esac
 
+  review_attempts=$((review_attempts + 1))
   log "Reviewing PR #$num@$head_sha"
 
   if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
