@@ -63,7 +63,8 @@ review_rewrite_snapshot_file_links() {
   escaped_head=$(printf '%s' "$head_sha" | sed 's/[\\&|]/\\&/g')
   sed -E \
     -e "s|file://${escaped_root}/([^[:space:])]+)#L([0-9]+)-L?([0-9]+)|https://github.com/${escaped_repo}/blob/${escaped_head}/\1#L\2-L\3|g" \
-    -e "s|file://${escaped_root}/([^[:space:])]+)#L([0-9]+)|https://github.com/${escaped_repo}/blob/${escaped_head}/\1#L\2|g"
+    -e "s|file://${escaped_root}/([^[:space:])]+)#L([0-9]+)|https://github.com/${escaped_repo}/blob/${escaped_head}/\1#L\2|g" \
+    -e "s|file://${escaped_root}/([^#[:space:])]+)|https://github.com/${escaped_repo}/blob/${escaped_head}/\1|g"
 }
 
 review_demote_oversized_suggestions() {

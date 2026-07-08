@@ -240,7 +240,7 @@ test_location_line_normalization() {
 }
 
 test_review_post_body_cleanup() {
-  local cleaned linked stripped summary
+  local anchored_linked bare_linked cleaned stripped summary wrapped_linked
 
   cleaned=$(printf '%s\n' \
     '### Broken cleanup' \
@@ -251,13 +251,29 @@ test_review_post_body_cleanup() {
   assert_eq "inline post-body cleanup strips parser heading and location" \
     'This cleanup deletes the active debug surface.' "$cleaned"
 
-  linked=$(printf '%s\n' \
+  bare_linked=$(printf '%s\n' \
+    'file:///tmp/snap/client/src/hooks/useQaGameDebug.ts' |
+    review_rewrite_snapshot_file_links abc123 owner/repo /tmp/snap)
+  assert_contains "anchor-less file-url links are rewritten to GitHub blob links" \
+    'https://github.com/owner/repo/blob/abc123/client/src/hooks/useQaGameDebug.ts' \
+    <(printf '%s' "$bare_linked")
+  assert_not_contains "anchor-less file-url rewrite removes dead file scheme" 'file:///tmp/snap' <(printf '%s' "$bare_linked")
+
+  wrapped_linked=$(printf '%s\n' \
+    '[useQaGameDebug](file:///tmp/snap/client/src/hooks/useQaGameDebug.ts) is wrong.' |
+    review_rewrite_snapshot_file_links abc123 owner/repo /tmp/snap)
+  assert_contains "markdown-wrapped anchor-less file-url links keep the closing paren" \
+    '[useQaGameDebug](https://github.com/owner/repo/blob/abc123/client/src/hooks/useQaGameDebug.ts) is wrong.' \
+    <(printf '%s' "$wrapped_linked")
+  assert_not_contains "markdown-wrapped anchor-less file-url rewrite removes dead file scheme" 'file:///tmp/snap' <(printf '%s' "$wrapped_linked")
+
+  anchored_linked=$(printf '%s\n' \
     '[useQaGameDebug](file:///tmp/snap/client/src/hooks/useQaGameDebug.ts#L58-L69) is wrong.' |
     review_rewrite_snapshot_file_links abc123 owner/repo /tmp/snap)
   assert_contains "file-url links are rewritten to GitHub blob links" \
     'https://github.com/owner/repo/blob/abc123/client/src/hooks/useQaGameDebug.ts#L58-L69' \
-    <(printf '%s' "$linked")
-  assert_not_contains "file-url rewrite removes dead file scheme" 'file:///tmp/snap' <(printf '%s' "$linked")
+    <(printf '%s' "$anchored_linked")
+  assert_not_contains "file-url rewrite removes dead file scheme" 'file:///tmp/snap' <(printf '%s' "$anchored_linked")
 
   stripped=$(printf '%s\n' \
     'Seriously, this is broken.' \
