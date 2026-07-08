@@ -240,7 +240,7 @@ test_location_line_normalization() {
 }
 
 test_review_post_body_cleanup() {
-  local anchored_linked bare_linked cleaned stripped summary wrapped_linked
+  local anchored_linked bare_linked cleaned collapsed collapsed_blank legit stripped summary wrapped_linked
 
   cleaned=$(printf '%s\n' \
     '### Broken cleanup' \
@@ -281,6 +281,35 @@ test_review_post_body_cleanup() {
     'Here are the concrete issues that must be resolved before this can land:' |
     review_strip_dangling_finding_intro)
   assert_eq "dangling intro is stripped after inline promotion" 'Seriously, this is broken.' "$stripped"
+
+  stripped=$(printf '%s\n' \
+    'The auth flow still needs work.' \
+    '' \
+    'Here is my review. I am requesting changes because the auth check is missing.' |
+    review_strip_dangling_finding_intro)
+  assert_eq "here-is-my-review intro line is stripped after inline promotion" 'The auth flow still needs work.' "$stripped"
+
+  legit=$(printf '%s\n' \
+    'The bug is right here in this function.' |
+    review_strip_dangling_finding_intro)
+  assert_eq "legit prose containing here is not stripped" 'The bug is right here in this function.' "$legit"
+
+  collapsed=$(printf '%s\n' \
+    'Review prose.' \
+    '---' \
+    '---' \
+    '*footer text*' |
+    review_collapse_stacked_hr)
+  assert_eq "stacked horizontal rules collapse to one rule" $'Review prose.\n---\n*footer text*' "$collapsed"
+
+  collapsed_blank=$(printf '%s\n' \
+    'Review prose.' \
+    '---' \
+    '' \
+    '---' \
+    '*footer text*' |
+    review_collapse_stacked_hr)
+  assert_eq "stacked horizontal rules with blank separator collapse to one rule" $'Review prose.\n---\n*footer text*' "$collapsed_blank"
 
   summary=$(review_inline_summary_body REQUEST_CHANGES 2)
   assert_eq "inline-only request changes gets non-empty summary" \

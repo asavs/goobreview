@@ -1039,6 +1039,7 @@ EOF
   filtered_body=$(printf '%s\n' "$review_body" |
     review_body_without_promoted_sections "$inline_comments_json" |
     review_strip_dangling_finding_intro |
+    review_collapse_stacked_hr |
     review_rewrite_snapshot_file_links "$head_sha" "$REPO" "$review_worktree")
   inline_comment_count=$(printf '%s\n' "$inline_comments_json" | jq 'length') || {
     rm -f "$prompt_tmp" "$agy_err_tmp"

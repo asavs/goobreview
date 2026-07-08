@@ -342,11 +342,54 @@ review_strip_dangling_finding_intro() {
       lower = tolower(last)
       if (lower ~ /^here are .*(:|\.|-)?$/ ||
           lower ~ /^here are the[[:alnum:] -]*$/ ||
+          lower ~ /^here is my review/ ||
+          lower ~ /^here is the review/ ||
+          lower ~ /^below are/ ||
+          lower ~ /^my findings are below/ ||
           lower ~ /^these are .*(:|\.|-)?$/) {
         n--
         while (n > 0 && trim(lines[n]) == "") n--
       }
       for (i = 1; i <= n; i++) print lines[i]
+    }
+  '
+}
+
+review_collapse_stacked_hr() {
+  awk '
+    function flush_pending(    i) {
+      if (pending_count == 0) return
+      if (hr_count >= 2) {
+        print "---"
+      } else {
+        for (i = 1; i <= pending_count; i++) print pending[i]
+      }
+      pending_count = 0
+      hr_count = 0
+    }
+    function is_blank_or_hr(line,    s) {
+      s = line
+      sub(/\r$/, "", s)
+      if (s ~ /^[[:space:]]*$/) return 1
+      if (s ~ /^[[:space:]]*---+[[:space:]]*$/) return 1
+      return 0
+    }
+    function is_hr(line,    s) {
+      s = line
+      sub(/\r$/, "", s)
+      return (s ~ /^[[:space:]]*---+[[:space:]]*$/)
+    }
+    is_blank_or_hr($0) {
+      pending[++pending_count] = $0
+      if (is_hr($0)) hr_count++
+      next
+    }
+    {
+      flush_pending()
+      print
+    }
+    END {
+      flush_pending()
     }
   '
 }
