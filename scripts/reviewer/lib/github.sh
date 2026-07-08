@@ -76,6 +76,16 @@ github_pr_review_threads_json() {
                   outdated
                 }
               }
+              recentComments: comments(last: 20) {
+                nodes {
+                  author {
+                    login
+                  }
+                  body
+                  url
+                  createdAt
+                }
+              }
             }
           }
         }
@@ -141,7 +151,10 @@ github_unresolved_bot_review_threads_json() {
 # deterministically: a slug shared by two threads gains a "-l<line>" suffix,
 # and any still-identical slug gains a "-<n>" running suffix.
 github_review_thread_handle_map_json() {
-  jq '
+  local bot_login="${BOT_LOGIN:-}"
+  local bot_author="${BOT_AUTHOR:-}"
+
+  jq --arg bot "$bot_login" --arg bot_author "$bot_author" '
     def slugify($s):
       ($s // "")
       | ascii_downcase
@@ -158,10 +171,22 @@ github_review_thread_handle_map_json() {
       | (map(select(test("^[[:space:]]*#{1,6}[[:space:]]+")))[0] // "")
       | sub("^[[:space:]]*#{1,6}[[:space:]]+"; "")
       | sub("[[:space:]]+$"; "");
+    def non_bot_comments($comments; $thread_author):
+      ($comments // [])
+      | map(
+          select((.body // "") | test("[^[:space:]]"))
+          | select((.author.login // "") as $login
+              | $login != $bot
+              and ($bot_author == "" or $login != $bot_author)
+              and ($thread_author == "" or $login != $thread_author))
+          | {body: (.body // ""), createdAt: (.createdAt // ""), url: (.url // "")}
+        );
     [
       .[]?
       | select(.isResolved == false)
       | (.comments.nodes[0].body // "") as $body
+      | (.comments.nodes[0].author.login // "") as $thread_author
+      | (non_bot_comments(.recentComments.nodes // .comments.nodes // []; $thread_author)) as $author_replies
       | (heading($body)) as $head
       | (if ($head | length) > 0 then slugify($head) else slugify(first_line($body)) end) as $base0
       | (if ($base0 | length) > 0 then $base0 else "thread" end) as $base
@@ -171,6 +196,7 @@ github_review_thread_handle_map_json() {
           path,
           line: (.line // .originalLine // null),
           subject: (first_line($body)),
+          authorReplies: $author_replies,
           base: $base
         }
     ]
@@ -194,6 +220,7 @@ github_review_thread_handle_map_json() {
             path: $it.path,
             line: $it.line,
             subject: $it.subject,
+            authorReplies: $it.authorReplies,
             handle: $handle
           } ])
     | .out

@@ -361,6 +361,8 @@ append_prior_bot_inline_threads() {
   local unresolved_threads_json="${1:-[]}"
   local max_threads="${PRIOR_THREAD_SUMMARY_LIMIT:-12}"
   local max_body_bytes="${PRIOR_THREAD_BODY_MAX_BYTES:-500}"
+  local max_author_replies="${PRIOR_THREAD_AUTHOR_REPLY_LIMIT:-3}"
+  local max_author_reply_bytes="${PRIOR_THREAD_AUTHOR_REPLY_MAX_BYTES:-700}"
   local handle_map_json count omitted
 
   handle_map_json=$(printf '%s\n' "$unresolved_threads_json" | github_review_thread_handle_map_json) || return 1
@@ -371,13 +373,39 @@ append_prior_bot_inline_threads() {
   printf 'Unresolved bot thread count: %s\n\n' "$count"
 
   printf '%s\n' "$handle_map_json" |
-    jq -r --argjson limit "$max_threads" --argjson body_max "$max_body_bytes" '
+    jq -r \
+      --argjson limit "$max_threads" \
+      --argjson body_max "$max_body_bytes" \
+      --argjson reply_limit "$max_author_replies" \
+      --argjson reply_body_max "$max_author_reply_bytes" '
+      def one_line($body):
+        ($body // "")
+        | gsub("\r"; "")
+        | gsub("[\n\t ]+"; " ")
+        | sub("^[[:space:]]+"; "")
+        | sub("[[:space:]]+$"; "");
+      def cap($body; $max; $label):
+        ($body // "") as $text
+        | if ($text | length) > $max
+          then $text[:$max] + " [goobreview: " + $label + " truncated after " + ($max|tostring) + " bytes]"
+          else $text
+          end;
+      def recent_author_replies($replies):
+        ($replies // []) as $all
+        | if $reply_limit <= 0 then []
+          else $all[((($all | length) - $reply_limit) | if . < 0 then 0 else . end):]
+          end;
       .[:$limit][]
       | "- " + .handle + " " + (.path // "?") + ":" + ((.line // "?") | tostring)
         + (if .viewerCanResolve then "" else " (not resolvable by this App)" end)
         + "\n  Subject: "
         + (((.subject // "[empty first comment]") | sub("^[[:space:]]*#{1,6}[[:space:]]+"; ""))
             | if length > $body_max then .[:$body_max] + "\n\n[goobreview: prior inline-thread subject truncated after " + ($body_max|tostring) + " bytes]" else . end)
+        + (recent_author_replies(.authorReplies) as $replies
+            | if ($replies | length) > 0 then
+                "\n  Author replies (recent non-bot; account for before repeating):"
+                + ($replies | map("\n    - " + cap(one_line(.body); $reply_body_max; "author reply")) | join(""))
+              else "" end)
     '
   if [ "$count" -gt "$max_threads" ]; then
     omitted=$((count - max_threads))
