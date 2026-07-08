@@ -239,6 +239,38 @@ test_location_line_normalization() {
     "" "$url_only_loc"
 }
 
+test_review_post_body_cleanup() {
+  local cleaned linked stripped summary
+
+  cleaned=$(printf '%s\n' \
+    '### Broken cleanup' \
+    'Location: client/src/hooks/useQaGameDebug.ts:58-69' \
+    '' \
+    'This cleanup deletes the active debug surface.' |
+    review_inline_comment_post_body)
+  assert_eq "inline post-body cleanup strips parser heading and location" \
+    'This cleanup deletes the active debug surface.' "$cleaned"
+
+  linked=$(printf '%s\n' \
+    '[useQaGameDebug](file:///tmp/snap/client/src/hooks/useQaGameDebug.ts#L58-L69) is wrong.' |
+    review_rewrite_snapshot_file_links abc123 owner/repo /tmp/snap)
+  assert_contains "file-url links are rewritten to GitHub blob links" \
+    'https://github.com/owner/repo/blob/abc123/client/src/hooks/useQaGameDebug.ts#L58-L69' \
+    <(printf '%s' "$linked")
+  assert_not_contains "file-url rewrite removes dead file scheme" 'file:///tmp/snap' <(printf '%s' "$linked")
+
+  stripped=$(printf '%s\n' \
+    'Seriously, this is broken.' \
+    '' \
+    'Here are the concrete issues that must be resolved before this can land:' |
+    review_strip_dangling_finding_intro)
+  assert_eq "dangling intro is stripped after inline promotion" 'Seriously, this is broken.' "$stripped"
+
+  summary=$(review_inline_summary_body REQUEST_CHANGES 2)
+  assert_eq "inline-only request changes gets non-empty summary" \
+    'I found 2 merge-blocking findings and posted them inline.' "$summary"
+}
+
 test_review_body_dedup_filter() {
   local full_body promoted_json filtered
 

@@ -717,7 +717,7 @@ review_one_pr() {
   local failure_attempts invalid_attempts invalid_artifact ci_state ci_summary ci_failure_body
   local prompt_tmp review_worktree review_threads_json unresolved_bot_threads_json prompt_thread_handle_map_json
   local agy_err_tmp agy_started_at agy_review_status review verdict_line event review_body
-  local current_pr_json current_head_sha inline_comments_json scope_downgraded scoped_event
+  local current_pr_json current_head_sha inline_comments_json inline_comment_count scope_downgraded scoped_event
   local filtered_body thinking_trace_file trace_block formatted_body body
   local resolved_thread_handles still_open_thread_replies auto_resolve_threads auto_resolved_threads still_open_replied
   local review_check_conclusion
@@ -1019,7 +1019,7 @@ EOF
     fi
   fi
 
-  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body" "$review_worktree"); then
+  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body" "$review_worktree" "$head_sha" "$REPO"); then
     rm -f "$prompt_tmp" "$agy_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to resolve inline review anchors"
     return 0
@@ -1036,7 +1036,18 @@ EOF
   fi
   event="$scoped_event"
 
-  filtered_body=$(printf '%s\n' "$review_body" | review_body_without_promoted_sections "$inline_comments_json")
+  filtered_body=$(printf '%s\n' "$review_body" |
+    review_body_without_promoted_sections "$inline_comments_json" |
+    review_strip_dangling_finding_intro |
+    review_rewrite_snapshot_file_links "$head_sha" "$REPO" "$review_worktree")
+  inline_comment_count=$(printf '%s\n' "$inline_comments_json" | jq 'length') || {
+    rm -f "$prompt_tmp" "$agy_err_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to count resolved inline review comments"
+    return 0
+  }
+  if [ -z "$(printf '%s' "$filtered_body" | tr -d '[:space:]')" ] && [ "$inline_comment_count" -gt 0 ]; then
+    filtered_body=$(review_inline_summary_body "$event" "$inline_comment_count")
+  fi
   if [ "$scope_downgraded" -eq 1 ]; then
     filtered_body=$(cat <<EOF
 $filtered_body
