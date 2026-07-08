@@ -352,7 +352,9 @@ review_inline_comments_json() {
   local num="$1"
   local review_body="$2"
   local snapshot_root="${3:-}"
-  local changed_files anchors comments seen section locations path start_line end_line anchor side anchor_introduced has_range chosen_anchor chosen_side chosen_start chosen_end chosen_has_range chosen_anchor_introduced finding_introduced
+  local head_sha="${4:-}"
+  local repo_full_name="${5:-${REPO:-}}"
+  local changed_files anchors comments seen section section_heading locations path start_line end_line anchor side anchor_introduced has_range chosen_anchor chosen_side chosen_start chosen_end chosen_has_range chosen_anchor_introduced finding_introduced sanitized_section
 
   changed_files=$(mktemp)
   anchors=$(mktemp)
@@ -436,6 +438,13 @@ review_inline_comments_json() {
       chosen_anchor_introduced="$anchor_introduced"
     done <<<"$locations"
     [ -n "$chosen_anchor" ] || continue
+    section_heading=$(printf '%s' "$section" | awk '/^[[:space:]]*#{1,6}[[:space:]]+/ { sub(/\r$/, ""); print; exit }')
+    sanitized_section=$(printf '%s' "$section" |
+      review_inline_comment_post_body |
+      review_rewrite_snapshot_file_links "$head_sha" "$repo_full_name" "$snapshot_root")
+    if [ -z "$(printf '%s' "$sanitized_section" | tr -d '[:space:]')" ]; then
+      sanitized_section="See the anchored diff line for this finding."
+    fi
     if [ "$chosen_has_range" -eq 1 ]; then
       jq -n \
         --arg path "$(printf '%s' "$chosen_anchor" | jq -r '.path')" \
@@ -444,8 +453,10 @@ review_inline_comments_json() {
         --arg side "$chosen_side" \
         --argjson anchor_introduced "$chosen_anchor_introduced" \
         --argjson finding_introduced "$finding_introduced" \
-        --arg body "$section" \
+        --arg body "$sanitized_section" \
+        --arg heading "$section_heading" \
         '{path: $path, start_line: $start_line, start_side: $side, line: $line, side: $side, body: $body,
+          _goobreview_heading: $heading,
           _goobreview_anchor_introduced: $anchor_introduced,
           _goobreview_finding_introduced: $finding_introduced}' >>"$comments"
     else
@@ -455,8 +466,10 @@ review_inline_comments_json() {
         --arg side "$chosen_side" \
         --argjson anchor_introduced "$chosen_anchor_introduced" \
         --argjson finding_introduced "$finding_introduced" \
-        --arg body "$section" \
+        --arg body "$sanitized_section" \
+        --arg heading "$section_heading" \
         '{path: $path, line: $line, side: $side, body: $body,
+          _goobreview_heading: $heading,
           _goobreview_anchor_introduced: $anchor_introduced,
           _goobreview_finding_introduced: $finding_introduced}' >>"$comments"
     fi

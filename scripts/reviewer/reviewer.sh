@@ -402,6 +402,7 @@ capture_research_pair() {
   local posted_file counterfactual_file manifest_tmp counterfactual_err counterfactual_prompt_file
   local counterfactual_personality_file counterfactual_review counterfactual_event counterfactual_transcript_source
   local counterfactual_resolved_model_label=""
+  local counterfactual_pair_complete="true"
   local generated_at generated_at_epoch review_latency_seconds required_checks_sha256 posted_personality_file
 
   [ "$RESEARCH_CAPTURE_ENABLED" = "1" ] || return 0
@@ -441,7 +442,7 @@ capture_research_pair() {
     rm -f "$counterfactual_err" "$counterfactual_prompt_file"
     return 0
   fi
-  local counterfactual_started_at counterfactual_agy_s
+  local counterfactual_started_at counterfactual_agy_s counterfactual_retry_err
   counterfactual_started_at=$(date +%s)
   if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
     counterfactual_transcript_source=$(agy_transcript_source)
@@ -459,6 +460,33 @@ capture_research_pair() {
     counterfactual_event="AGY_FAILED"
     counterfactual_review=$(cat "$counterfactual_err")
   fi
+  if [ "$counterfactual_event" = "EMPTY_RESPONSE" ]; then
+    counterfactual_retry_err=$(mktemp "$STATE_DIR/research-agy.$num.retry.err.XXXXXX")
+    if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_retry_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
+      counterfactual_transcript_source=$(agy_transcript_source)
+      counterfactual_resolved_model_label=$(agy_resolved_model_label)
+      cat "$counterfactual_retry_err" >>"$LOG_FILE"
+      if [ -z "${counterfactual_review// }" ]; then
+        counterfactual_event="EMPTY_RESPONSE"
+      elif ! counterfactual_event=$(printf '%s' "$counterfactual_review" | review_verdict_event); then
+        counterfactual_event="INVALID"
+      fi
+    else
+      counterfactual_transcript_source=$(agy_transcript_source)
+      counterfactual_resolved_model_label=$(agy_resolved_model_label)
+      cat "$counterfactual_retry_err" >>"$LOG_FILE"
+      counterfactual_event="AGY_FAILED"
+      counterfactual_review=$(cat "$counterfactual_retry_err")
+    fi
+    rm -f "$counterfactual_retry_err"
+  fi
+  # The pair is usable for arm comparison only when the counterfactual ended
+  # in a real review verdict; EMPTY_RESPONSE/INVALID/AGY_FAILED all mean the
+  # posted arm has no counterpart.
+  case "$counterfactual_event" in
+    APPROVE|REQUEST_CHANGES|COMMENT) counterfactual_pair_complete="true" ;;
+    *) counterfactual_pair_complete="false" ;;
+  esac
   counterfactual_agy_s=$(( $(date +%s) - counterfactual_started_at ))
 
   if ! with_prompt_personality "$counterfactual_arm" write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state" "$review_worktree"; then
@@ -501,6 +529,7 @@ capture_research_pair() {
     --arg repo_visibility "$RESEARCH_REPO_VISIBILITY" \
     --arg research_eligible "$research_eligible" \
     --argjson required_checks "$EFFECTIVE_REQUIRED_CHECKS_JSON" \
+    --argjson pair_complete "$counterfactual_pair_complete" \
     '{
       repo: $repo,
       pr: ($pr | tonumber),
@@ -509,6 +538,7 @@ capture_research_pair() {
       posted_personality: $posted_personality,
       posted_arm: $posted_arm,
       counterfactual_arm: $counterfactual_arm,
+      pair_complete: $pair_complete,
       posted_event: $posted_event,
       counterfactual_event: $counterfactual_event,
       posted_artifact: $posted_artifact,
@@ -717,7 +747,7 @@ review_one_pr() {
   local failure_attempts invalid_attempts invalid_artifact ci_state ci_summary ci_failure_body
   local prompt_tmp review_worktree review_threads_json unresolved_bot_threads_json prompt_thread_handle_map_json
   local agy_err_tmp agy_started_at agy_review_status review verdict_line event review_body
-  local current_pr_json current_head_sha inline_comments_json scope_downgraded scoped_event
+  local current_pr_json current_head_sha inline_comments_json inline_comment_count scope_downgraded scoped_event
   local filtered_body thinking_trace_file trace_block formatted_body body
   local resolved_thread_handles still_open_thread_replies auto_resolve_threads auto_resolved_threads still_open_replied
   local review_check_conclusion
@@ -1019,7 +1049,7 @@ EOF
     fi
   fi
 
-  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body" "$review_worktree"); then
+  if ! inline_comments_json=$(review_inline_comments_json "$num" "$review_body" "$review_worktree" "$head_sha" "$REPO"); then
     rm -f "$prompt_tmp" "$agy_err_tmp"
     record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to resolve inline review anchors"
     return 0
@@ -1036,7 +1066,19 @@ EOF
   fi
   event="$scoped_event"
 
-  filtered_body=$(printf '%s\n' "$review_body" | review_body_without_promoted_sections "$inline_comments_json")
+  filtered_body=$(printf '%s\n' "$review_body" |
+    review_body_without_promoted_sections "$inline_comments_json" |
+    review_strip_dangling_finding_intro |
+    review_collapse_stacked_hr |
+    review_rewrite_snapshot_file_links "$head_sha" "$REPO" "$review_worktree")
+  inline_comment_count=$(printf '%s\n' "$inline_comments_json" | jq 'length') || {
+    rm -f "$prompt_tmp" "$agy_err_tmp"
+    record_review_failure_and_log "$num" "$head_sha" "PR #$num@$head_sha: failed to count resolved inline review comments"
+    return 0
+  }
+  if [ -z "$(printf '%s' "$filtered_body" | tr -d '[:space:]')" ] && [ "$inline_comment_count" -gt 0 ]; then
+    filtered_body=$(review_inline_summary_body "$event" "$inline_comment_count")
+  fi
   if [ "$scope_downgraded" -eq 1 ]; then
     filtered_body=$(cat <<EOF
 $filtered_body

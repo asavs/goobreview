@@ -47,6 +47,26 @@ review_body_before_verdict() {
   '
 }
 
+review_rewrite_snapshot_file_links() {
+  local head_sha="${1:-}"
+  local repo="${2:-}"
+  local worktree_dir="${3:-}"
+  local escaped_root escaped_repo escaped_head
+
+  if [ -z "$head_sha" ] || [ -z "$repo" ] || [ -z "$worktree_dir" ]; then
+    cat
+    return
+  fi
+
+  escaped_root=$(printf '%s' "$worktree_dir" | sed 's/[\\&|]/\\&/g')
+  escaped_repo=$(printf '%s' "$repo" | sed 's/[\\&|]/\\&/g')
+  escaped_head=$(printf '%s' "$head_sha" | sed 's/[\\&|]/\\&/g')
+  sed -E \
+    -e "s|file://${escaped_root}/([^[:space:])]+)#L([0-9]+)-L?([0-9]+)|https://github.com/${escaped_repo}/blob/${escaped_head}/\1#L\2-L\3|g" \
+    -e "s|file://${escaped_root}/([^[:space:])]+)#L([0-9]+)|https://github.com/${escaped_repo}/blob/${escaped_head}/\1#L\2|g" \
+    -e "s|file://${escaped_root}/([^#[:space:])]+)|https://github.com/${escaped_repo}/blob/${escaped_head}/\1|g"
+}
+
 review_demote_oversized_suggestions() {
   local max_lines="${SUGGESTION_MAX_LINES:-12}"
 
@@ -249,6 +269,30 @@ review_markdown_finding_sections() {
   '
 }
 
+review_inline_comment_post_body() {
+  awk '
+    function blank(s) { return s !~ /[^[:space:]]/ }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (!emitted && line ~ /^[[:space:]]*#{1,6}[[:space:]]+/) next
+      if (line ~ /^[[:space:]]*[Ll]ocation:[[:space:]]*[^[:space:]]/) next
+      if (!emitted && blank(line)) next
+      lines[++n] = $0
+      if (!blank(line)) emitted = 1
+    }
+    END {
+      while (n > 0) {
+        t = lines[n]
+        sub(/\r$/, "", t)
+        if (!blank(t)) break
+        n--
+      }
+      for (i = 1; i <= n; i++) print lines[i]
+    }
+  '
+}
+
 # Strip finding sections from the review body that were promoted to native
 # GitHub inline comments, so the same text does not appear twice in the posted
 # review (once anchored and once in the top-level prose).
@@ -263,7 +307,7 @@ review_body_without_promoted_sections() {
   fi
 
   promoted_headings_file=$(mktemp)
-  printf '%s' "$inline_json" | jq -r '.[].body | split("\n")[0]' >"$promoted_headings_file" 2>/dev/null || true
+  printf '%s' "$inline_json" | jq -r '.[] | (._goobreview_heading // (.body | split("\n")[0])) | select(. != "")' >"$promoted_headings_file" 2>/dev/null || true
 
   awk -v hf="$promoted_headings_file" '
     BEGIN {
@@ -280,6 +324,101 @@ review_body_without_promoted_sections() {
     !in_skip { print }
   '
   rm -f "$promoted_headings_file"
+}
+
+review_strip_dangling_finding_intro() {
+  awk '
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    {
+      lines[++n] = $0
+    }
+    END {
+      while (n > 0 && trim(lines[n]) == "") n--
+      last = trim(lines[n])
+      lower = tolower(last)
+      if (lower ~ /^here are .*(:|\.|-)?$/ ||
+          lower ~ /^here are the[[:alnum:] -]*$/ ||
+          lower ~ /^here is my review/ ||
+          lower ~ /^here is the review/ ||
+          lower ~ /^below are/ ||
+          lower ~ /^my findings are below/ ||
+          lower ~ /^these are .*(:|\.|-)?$/) {
+        n--
+        while (n > 0 && trim(lines[n]) == "") n--
+      }
+      for (i = 1; i <= n; i++) print lines[i]
+    }
+  '
+}
+
+review_collapse_stacked_hr() {
+  awk '
+    function flush_pending(    i) {
+      if (pending_count == 0) return
+      if (hr_count >= 2) {
+        # Pad the surviving rule with blank lines: a bare --- directly under a
+        # text line is a Markdown setext heading, not a horizontal rule.
+        print ""
+        print "---"
+        print ""
+      } else {
+        for (i = 1; i <= pending_count; i++) print pending[i]
+      }
+      pending_count = 0
+      hr_count = 0
+    }
+    function is_blank_or_hr(line,    s) {
+      s = line
+      sub(/\r$/, "", s)
+      if (s ~ /^[[:space:]]*$/) return 1
+      if (s ~ /^[[:space:]]*---+[[:space:]]*$/) return 1
+      return 0
+    }
+    function is_hr(line,    s) {
+      s = line
+      sub(/\r$/, "", s)
+      return (s ~ /^[[:space:]]*---+[[:space:]]*$/)
+    }
+    is_blank_or_hr($0) {
+      pending[++pending_count] = $0
+      if (is_hr($0)) hr_count++
+      next
+    }
+    {
+      flush_pending()
+      print
+    }
+    END {
+      flush_pending()
+    }
+  '
+}
+
+review_inline_summary_body() {
+  local event="$1"
+  local count="$2"
+  local noun="finding"
+  local pronoun="it"
+
+  if [ "$count" != "1" ]; then
+    noun="findings"
+    pronoun="them"
+  fi
+  case "$event" in
+    REQUEST_CHANGES)
+      printf 'I found %s merge-blocking %s and posted %s inline.\n' "$count" "$noun" "$pronoun"
+      ;;
+    APPROVE)
+      printf 'I left %s inline review %s, but found no merge-blocking issues.\n' "$count" "$noun"
+      ;;
+    *)
+      printf 'I left %s inline review %s.\n' "$count" "$noun"
+      ;;
+  esac
 }
 
 review_resolved_thread_handles() {

@@ -260,14 +260,15 @@ This does not exist."
 
   assert_eq "inline-comment parser emits verified anchors including context lines" "6" "$(printf '%s\n' "$comments" | jq 'length')"
   assert_eq "inline-comment parser prefers added side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[0].side')"
-  assert_eq "inline-comment parser preserves named finding body" "### Render stays stale" "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
+  assert_eq "inline-comment parser strips heading from posted inline body" "The line is read from a ref that does not schedule a render." "$(printf '%s\n' "$comments" | jq -r '.[0].body | split("\n")[0]')"
+  assert_not_contains "inline-comment parser strips Location lines from posted bodies" "Location:" <(printf '%s\n' "$comments" | jq -r '.[].body')
   assert_contains "inline-comment parser preserves valid suggestion fence" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 43) | .body')
-  assert_eq "inline-comment parser emits multi-line suggestion start_line" "42" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Suggest direct replacement")) | .start_line')"
-  assert_eq "inline-comment parser emits multi-line suggestion start_side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Suggest direct replacement")) | .start_side')"
+  assert_eq "inline-comment parser emits multi-line suggestion start_line" "42" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("schedule a render immediately")) | .start_line')"
+  assert_eq "inline-comment parser emits multi-line suggestion start_side" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("schedule a render immediately")) | .start_side')"
   assert_eq "inline-comment parser marks introduced findings as PR-scoped" "true" "$(printf '%s\n' "$comments" | jq -r '.[0]._goobreview_finding_introduced')"
-  assert_eq "inline-comment parser marks context-only findings as out of scope" "false" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Context-only line")) | ._goobreview_finding_introduced')"
-  assert_eq "inline-comment parser keeps old-symptom new-cause findings PR-scoped" "true" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Old symptom has new cause")) | ._goobreview_finding_introduced')"
-  assert_eq "inline-comment parser records old-symptom cause as introduced" "true" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Old symptom has new cause")) | ._goobreview_anchor_introduced')"
+  assert_eq "inline-comment parser marks context-only findings as out of scope" "false" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("This line is not itself changed.")) | ._goobreview_finding_introduced')"
+  assert_eq "inline-comment parser keeps old-symptom new-cause findings PR-scoped" "true" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("old symptom at")) | ._goobreview_finding_introduced')"
+  assert_eq "inline-comment parser records old-symptom cause as introduced" "true" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("old symptom at")) | ._goobreview_anchor_introduced')"
   assert_eq "inline-comment parser counts PR-scoped findings" "4" "$(printf '%s\n' "$comments" | review_inline_comments_pr_scoped_count)"
   assert_eq "scope guard preserves request changes with any PR-scoped finding" "REQUEST_CHANGES" "$(review_event_after_scope_guard REQUEST_CHANGES "$comments")"
   assert_eq "scope guard downgrades all out-of-scope blocking findings" "COMMENT" "$(review_event_after_scope_guard REQUEST_CHANGES '[{"_goobreview_finding_introduced":false}]')"
@@ -275,7 +276,7 @@ This does not exist."
   assert_not_contains "inline-comment parser omits malformed suggestion fence from native comments" "Malformed suggestion" <(printf '%s\n' "$comments" | jq -r '.[].body')
   assert_eq "inline-comment parser anchors deleted lines on the left" "LEFT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 10) | .side')"
   assert_eq "inline-comment parser anchors context lines on the right" "RIGHT" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.line == 40) | .side')"
-  assert_eq "inline-comment parser falls back to single-line anchor for incomplete ranges" "null" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Incomplete range")) | .start_line')"
+  assert_eq "inline-comment parser falls back to single-line anchor for incomplete ranges" "null" "$(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("starts on the diff")) | .start_line')"
 }
 
 test_suggestion_cap_demotes_oversized_blocks() {
@@ -338,9 +339,9 @@ render()
 notify()
 \`\`\`"
   comments=$(review_inline_comments_json 17 "$body")
-  assert_contains "inline suggestion cap preserves exact-limit suggestion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Exact cap inline")) | .body')
-  assert_not_contains "inline suggestion cap demotes oversized suggestion before promotion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Oversized inline")) | .body')
-  assert_contains "inline suggestion cap marker includes both counts" 'suggestion of 3 lines exceeds the 2-line cap' <(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Oversized inline")) | .body')
+  assert_contains "inline suggestion cap preserves exact-limit suggestion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(._goobreview_heading // "" | contains("Exact cap inline")) | .body')
+  assert_not_contains "inline suggestion cap demotes oversized suggestion before promotion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(._goobreview_heading // "" | contains("Oversized inline")) | .body')
+  assert_contains "inline suggestion cap marker includes both counts" 'suggestion of 3 lines exceeds the 2-line cap' <(printf '%s\n' "$comments" | jq -r '.[] | select(._goobreview_heading // "" | contains("Oversized inline")) | .body')
 
   if [ -n "$old_cap" ]; then
     SUGGESTION_MAX_LINES="$old_cap"

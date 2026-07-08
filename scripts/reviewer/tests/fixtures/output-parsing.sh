@@ -239,6 +239,83 @@ test_location_line_normalization() {
     "" "$url_only_loc"
 }
 
+test_review_post_body_cleanup() {
+  local anchored_linked bare_linked cleaned collapsed collapsed_blank legit stripped summary wrapped_linked
+
+  cleaned=$(printf '%s\n' \
+    '### Broken cleanup' \
+    'Location: client/src/hooks/useQaGameDebug.ts:58-69' \
+    '' \
+    'This cleanup deletes the active debug surface.' |
+    review_inline_comment_post_body)
+  assert_eq "inline post-body cleanup strips parser heading and location" \
+    'This cleanup deletes the active debug surface.' "$cleaned"
+
+  bare_linked=$(printf '%s\n' \
+    'file:///tmp/snap/client/src/hooks/useQaGameDebug.ts' |
+    review_rewrite_snapshot_file_links abc123 owner/repo /tmp/snap)
+  assert_contains "anchor-less file-url links are rewritten to GitHub blob links" \
+    'https://github.com/owner/repo/blob/abc123/client/src/hooks/useQaGameDebug.ts' \
+    <(printf '%s' "$bare_linked")
+  assert_not_contains "anchor-less file-url rewrite removes dead file scheme" 'file:///tmp/snap' <(printf '%s' "$bare_linked")
+
+  wrapped_linked=$(printf '%s\n' \
+    '[useQaGameDebug](file:///tmp/snap/client/src/hooks/useQaGameDebug.ts) is wrong.' |
+    review_rewrite_snapshot_file_links abc123 owner/repo /tmp/snap)
+  assert_contains "markdown-wrapped anchor-less file-url links keep the closing paren" \
+    '[useQaGameDebug](https://github.com/owner/repo/blob/abc123/client/src/hooks/useQaGameDebug.ts) is wrong.' \
+    <(printf '%s' "$wrapped_linked")
+  assert_not_contains "markdown-wrapped anchor-less file-url rewrite removes dead file scheme" 'file:///tmp/snap' <(printf '%s' "$wrapped_linked")
+
+  anchored_linked=$(printf '%s\n' \
+    '[useQaGameDebug](file:///tmp/snap/client/src/hooks/useQaGameDebug.ts#L58-L69) is wrong.' |
+    review_rewrite_snapshot_file_links abc123 owner/repo /tmp/snap)
+  assert_contains "file-url links are rewritten to GitHub blob links" \
+    'https://github.com/owner/repo/blob/abc123/client/src/hooks/useQaGameDebug.ts#L58-L69' \
+    <(printf '%s' "$anchored_linked")
+  assert_not_contains "file-url rewrite removes dead file scheme" 'file:///tmp/snap' <(printf '%s' "$anchored_linked")
+
+  stripped=$(printf '%s\n' \
+    'Seriously, this is broken.' \
+    '' \
+    'Here are the concrete issues that must be resolved before this can land:' |
+    review_strip_dangling_finding_intro)
+  assert_eq "dangling intro is stripped after inline promotion" 'Seriously, this is broken.' "$stripped"
+
+  stripped=$(printf '%s\n' \
+    'The auth flow still needs work.' \
+    '' \
+    'Here is my review. I am requesting changes because the auth check is missing.' |
+    review_strip_dangling_finding_intro)
+  assert_eq "here-is-my-review intro line is stripped after inline promotion" 'The auth flow still needs work.' "$stripped"
+
+  legit=$(printf '%s\n' \
+    'The bug is right here in this function.' |
+    review_strip_dangling_finding_intro)
+  assert_eq "legit prose containing here is not stripped" 'The bug is right here in this function.' "$legit"
+
+  collapsed=$(printf '%s\n' \
+    'Review prose.' \
+    '---' \
+    '---' \
+    '*footer text*' |
+    review_collapse_stacked_hr)
+  assert_eq "stacked horizontal rules collapse to one blank-padded rule" $'Review prose.\n\n---\n\n*footer text*' "$collapsed"
+
+  collapsed_blank=$(printf '%s\n' \
+    'Review prose.' \
+    '---' \
+    '' \
+    '---' \
+    '*footer text*' |
+    review_collapse_stacked_hr)
+  assert_eq "stacked horizontal rules with blank separator collapse to one blank-padded rule" $'Review prose.\n\n---\n\n*footer text*' "$collapsed_blank"
+
+  summary=$(review_inline_summary_body REQUEST_CHANGES 2)
+  assert_eq "inline-only request changes gets non-empty summary" \
+    'I found 2 merge-blocking findings and posted them inline.' "$summary"
+}
+
 test_review_body_dedup_filter() {
   local full_body promoted_json filtered
 

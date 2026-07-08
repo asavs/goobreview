@@ -788,6 +788,7 @@ test_reviewer_research_capture_posts_selected_review_only() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir config_dir status output
   local source_dir tarball review_payload reactions_file check_runs_file posted_body manifest research_dir dry_run_out dry_comments_json
   local manifest_latency dry_run_latency head_committed_at_fixture expected_review_worktree
+  local retry_once_state retry_once_marker retry_once_manifest retry_empty_state retry_empty_manifest
 
   head_committed_at_fixture="$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
   state_dir="$TMP_ROOT/research-state"
@@ -942,6 +943,13 @@ case "$agents_md_content" in
   *"Mauro, SHUT"*) printf 'linus review\nCOMMENT\n' ;;
   *"very angry senior engineer"*) printf 'angry review\nCOMMENT\n' ;;
   *)
+    if [ -n "${FIXTURE_COUNTERFACTUAL_ALWAYS_EMPTY:-}" ]; then
+      exit 0
+    fi
+    if [ -n "${FIXTURE_COUNTERFACTUAL_EMPTY_ONCE_FILE:-}" ] && [ ! -e "$FIXTURE_COUNTERFACTUAL_EMPTY_ONCE_FILE" ]; then
+      : > "$FIXTURE_COUNTERFACTUAL_EMPTY_ONCE_FILE"
+      exit 0
+    fi
     printf 'control review\nAPPROVE\n'
     ;;
 esac
@@ -999,6 +1007,7 @@ EOF
   assert_eq "manifest records counterfactual arm" "none" "$(jq -r '.counterfactual_arm' "$manifest")"
   assert_eq "manifest records posted arm event" "COMMENT" "$(jq -r '.posted_event' "$manifest")"
   assert_eq "manifest records counterfactual event" "APPROVE" "$(jq -r '.counterfactual_event' "$manifest")"
+  assert_eq "manifest records complete research pair" "true" "$(jq -r '.pair_complete' "$manifest")"
   assert_eq "manifest records posted transcript source" "stdout_fallback" "$(jq -r '.posted_transcript_source' "$manifest")"
   assert_eq "manifest records counterfactual transcript source" "stdout_fallback" "$(jq -r '.counterfactual_transcript_source' "$manifest")"
   assert_eq "manifest records public eligibility" "public-consented" "$(jq -r '.research_eligible' "$manifest")"
@@ -1030,6 +1039,43 @@ EOF
     "mounted read-only at: $expected_review_worktree" "$research_dir/angry/artifact.txt"
   assert_contains "counterfactual artifact agents.md captures the snapshot mount path" \
     "mounted read-only at: $expected_review_worktree" "$research_dir/none/artifact.txt"
+
+  retry_once_state="$TMP_ROOT/research-state-retry-once"
+  retry_once_marker="$TMP_ROOT/research-counterfactual-empty-once"
+  mkdir -p "$retry_once_state"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$retry_once_state" FIXTURE_COUNTERFACTUAL_EMPTY_ONCE_FILE="$retry_once_marker" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "research capture retry-once fixture exits successfully"
+  fi
+  pass "research capture retry-once fixture exits successfully"
+  retry_once_manifest=$(find "$retry_once_state/research-runs" -name manifest.json | head -n 1)
+  if [ -z "$retry_once_manifest" ]; then
+    fail "retry-once research manifest is written"
+  fi
+  pass "retry-once research manifest is written"
+  assert_eq "retrying empty counterfactual records retried verdict" "APPROVE" "$(jq -r '.counterfactual_event' "$retry_once_manifest")"
+  assert_eq "retrying empty counterfactual keeps pair complete" "true" "$(jq -r '.pair_complete' "$retry_once_manifest")"
+
+  retry_empty_state="$TMP_ROOT/research-state-retry-empty"
+  mkdir -p "$retry_empty_state"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$retry_empty_state" FIXTURE_COUNTERFACTUAL_ALWAYS_EMPTY=1 PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "research capture retry-empty fixture exits successfully"
+  fi
+  pass "research capture retry-empty fixture exits successfully"
+  retry_empty_manifest=$(find "$retry_empty_state/research-runs" -name manifest.json | head -n 1)
+  if [ -z "$retry_empty_manifest" ]; then
+    fail "retry-empty research manifest is written"
+  fi
+  pass "retry-empty research manifest is written"
+  assert_eq "double-empty counterfactual stays EMPTY_RESPONSE" "EMPTY_RESPONSE" "$(jq -r '.counterfactual_event' "$retry_empty_manifest")"
+  assert_eq "double-empty counterfactual marks pair incomplete" "false" "$(jq -r '.pair_complete' "$retry_empty_manifest")"
 
   dry_run_out="$TMP_ROOT/research-dry-run.txt"
   : > "$reactions_file"
