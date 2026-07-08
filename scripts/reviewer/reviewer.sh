@@ -402,6 +402,7 @@ capture_research_pair() {
   local posted_file counterfactual_file manifest_tmp counterfactual_err counterfactual_prompt_file
   local counterfactual_personality_file counterfactual_review counterfactual_event counterfactual_transcript_source
   local counterfactual_resolved_model_label=""
+  local counterfactual_pair_complete="true"
   local generated_at generated_at_epoch review_latency_seconds required_checks_sha256 posted_personality_file
 
   [ "$RESEARCH_CAPTURE_ENABLED" = "1" ] || return 0
@@ -441,7 +442,7 @@ capture_research_pair() {
     rm -f "$counterfactual_err" "$counterfactual_prompt_file"
     return 0
   fi
-  local counterfactual_started_at counterfactual_agy_s
+  local counterfactual_started_at counterfactual_agy_s counterfactual_retry_err
   counterfactual_started_at=$(date +%s)
   if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
     counterfactual_transcript_source=$(agy_transcript_source)
@@ -458,6 +459,27 @@ capture_research_pair() {
     cat "$counterfactual_err" >>"$LOG_FILE"
     counterfactual_event="AGY_FAILED"
     counterfactual_review=$(cat "$counterfactual_err")
+  fi
+  if [ "$counterfactual_event" = "EMPTY_RESPONSE" ]; then
+    counterfactual_retry_err=$(mktemp "$STATE_DIR/research-agy.$num.retry.err.XXXXXX")
+    if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_retry_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
+      counterfactual_transcript_source=$(agy_transcript_source)
+      counterfactual_resolved_model_label=$(agy_resolved_model_label)
+      cat "$counterfactual_retry_err" >>"$LOG_FILE"
+      if [ -z "${counterfactual_review// }" ]; then
+        counterfactual_event="EMPTY_RESPONSE"
+        counterfactual_pair_complete="false"
+      elif ! counterfactual_event=$(printf '%s' "$counterfactual_review" | review_verdict_event); then
+        counterfactual_event="INVALID"
+      fi
+    else
+      counterfactual_transcript_source=$(agy_transcript_source)
+      counterfactual_resolved_model_label=$(agy_resolved_model_label)
+      cat "$counterfactual_retry_err" >>"$LOG_FILE"
+      counterfactual_event="AGY_FAILED"
+      counterfactual_review=$(cat "$counterfactual_retry_err")
+    fi
+    rm -f "$counterfactual_retry_err"
   fi
   counterfactual_agy_s=$(( $(date +%s) - counterfactual_started_at ))
 
@@ -501,6 +523,7 @@ capture_research_pair() {
     --arg repo_visibility "$RESEARCH_REPO_VISIBILITY" \
     --arg research_eligible "$research_eligible" \
     --argjson required_checks "$EFFECTIVE_REQUIRED_CHECKS_JSON" \
+    --argjson pair_complete "$counterfactual_pair_complete" \
     '{
       repo: $repo,
       pr: ($pr | tonumber),
@@ -509,6 +532,7 @@ capture_research_pair() {
       posted_personality: $posted_personality,
       posted_arm: $posted_arm,
       counterfactual_arm: $counterfactual_arm,
+      pair_complete: $pair_complete,
       posted_event: $posted_event,
       counterfactual_event: $counterfactual_event,
       posted_artifact: $posted_artifact,
