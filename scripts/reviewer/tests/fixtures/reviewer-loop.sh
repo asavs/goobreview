@@ -84,6 +84,7 @@ EOF
 #!/usr/bin/env bash
 method=GET
 body_file=""
+data=""
 url="${*: -1}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -95,7 +96,11 @@ while [ "$#" -gt 0 ]; do
       body_file="$2"
       shift 2
       ;;
-    -D|-w|--data)
+    --data)
+      data="$2"
+      shift 2
+      ;;
+    -D|-w|-H)
       shift 2
       ;;
     *)
@@ -126,12 +131,12 @@ case "$method $url" in
     printf '201'
     ;;
   *'POST '*'repos/example/repo/check-runs')
-    printf 'create\n' >> "$CHECK_RUNS_FILE"
+    printf 'create\n%s\n' "$data" >> "$CHECK_RUNS_FILE"
     printf '%s\n' '{"id":77}' > "$body_file"
     printf '201'
     ;;
   *'PATCH '*'repos/example/repo/check-runs/77')
-    printf 'conclude\n' >> "$CHECK_RUNS_FILE"
+    printf 'conclude\n%s\n' "$data" >> "$CHECK_RUNS_FILE"
     printf '%s\n' '{"id":77}' > "$body_file"
     printf '200'
     ;;
@@ -212,10 +217,13 @@ EOF
   fi
   pass "reviewed SHA with re-request fixture exits successfully"
   assert_eq "re-requested review reaches CI gate" "1" "$(cat "$ci_count")"
-  assert_contains "re-requested review posts despite reviewed SHA" "post" "$posts_file"
+  assert_not_contains "CI-failure fast path posts no PR review" "post" "$posts_file"
   assert_contains "CI-failure fast path still signals review start" "reaction" "$reactions_file"
   assert_contains "CI-failure fast path opens a review check run" "create" "$check_runs_file"
   assert_contains "CI-failure fast path concludes the review check run" "conclude" "$check_runs_file"
+  assert_contains "CI-failure fast path concludes check run as failure" '"conclusion": "failure"' "$check_runs_file"
+  assert_contains "CI-failure fast path explains no model review ran" "did not invoke the reviewer model or post a PR review" "$check_runs_file"
+  assert_contains "CI-failure fast path logs no PR review" "Marked CI gate failure on PR #1@sha1 without posting a PR review" "$state_dir/log.txt"
   assert_contains "re-requested review logs bypass" "PR #1@sha1 already reviewed by goobreview[bot], but review was re-requested; reviewing again" "$state_dir/log.txt"
 }
 
