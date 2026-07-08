@@ -339,9 +339,9 @@ render()
 notify()
 \`\`\`"
   comments=$(review_inline_comments_json 17 "$body")
-  assert_contains "inline suggestion cap preserves exact-limit suggestion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Exact cap inline")) | .body')
-  assert_not_contains "inline suggestion cap demotes oversized suggestion before promotion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Oversized inline")) | .body')
-  assert_contains "inline suggestion cap marker includes both counts" 'suggestion of 3 lines exceeds the 2-line cap' <(printf '%s\n' "$comments" | jq -r '.[] | select(.body | contains("Oversized inline")) | .body')
+  assert_contains "inline suggestion cap preserves exact-limit suggestion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(._goobreview_heading // "" | contains("Exact cap inline")) | .body')
+  assert_not_contains "inline suggestion cap demotes oversized suggestion before promotion" '```suggestion' <(printf '%s\n' "$comments" | jq -r '.[] | select(._goobreview_heading // "" | contains("Oversized inline")) | .body')
+  assert_contains "inline suggestion cap marker includes both counts" 'suggestion of 3 lines exceeds the 2-line cap' <(printf '%s\n' "$comments" | jq -r '.[] | select(._goobreview_heading // "" | contains("Oversized inline")) | .body')
 
   if [ -n "$old_cap" ]; then
     SUGGESTION_MAX_LINES="$old_cap"
