@@ -735,16 +735,27 @@ EOF
   assert_eq "pending-CI render-only tick posts no queued check run" "0" "$(wc -l < "$posts_file" | tr -d ' ')"
 }
 
-test_reviewer_failure_cap_skips_poisoned_pr() {
+# A PR whose latest goobreview check run carries a fresh failed-attempt marker
+# must be skipped on the backoff ladder -- before the tick's attempt budget is
+# spent and before any GitHub side effects -- while other PRs proceed.
+test_reviewer_backoff_skips_recently_failed_pr() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir attempts_file status output
+  local sha1_checkruns recent_completed_at
 
-  state_dir="$TMP_ROOT/failure-cap-state"
-  runtime_dir="$TMP_ROOT/failure-cap-runtime"
-  test_reviewer="$TMP_ROOT/failure-cap-reviewer"
-  bin_dir="$TMP_ROOT/failure-cap-bin"
-  attempts_file="$TMP_ROOT/failure-cap-ci-attempts"
+  state_dir="$TMP_ROOT/failure-backoff-state"
+  runtime_dir="$TMP_ROOT/failure-backoff-runtime"
+  test_reviewer="$TMP_ROOT/failure-backoff-reviewer"
+  bin_dir="$TMP_ROOT/failure-backoff-bin"
+  attempts_file="$TMP_ROOT/failure-backoff-ci-attempts"
+  sha1_checkruns="$TMP_ROOT/failure-backoff-sha1-checkruns.json"
   mkdir -p "$state_dir" "$runtime_dir" "$bin_dir"
   cp -R "$REVIEWER_DIR" "$test_reviewer"
+
+  # sha1 failed 5 minutes ago at attempt 1 (15-minute tier): still backing off.
+  recent_completed_at="$(date -u -d '-5 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+  cat > "$sha1_checkruns" <<EOF
+{"total_count":1,"check_runs":[{"name":"goobreview","status":"completed","conclusion":"neutral","completed_at":"$recent_completed_at","output":{"summary":"agy failed. The daemon retries automatically once the backoff expires.\n\nattempt: 1 (reason: review-failure)"}}]}
+EOF
 
   cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -765,14 +776,14 @@ exit 1
 EOF
   chmod +x "$test_reviewer/check-ci.sh"
 
-  cat > "$bin_dir/curl" <<'EOF'
+  cat > "$bin_dir/curl" <<EOF
 #!/usr/bin/env bash
 body_file=""
-url="${*: -1}"
-while [ "$#" -gt 0 ]; do
-  case "$1" in
+url="\${*: -1}"
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
     -o)
-      body_file="$2"
+      body_file="\$2"
       shift 2
       ;;
     -D|-w)
@@ -783,17 +794,25 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
-case "$url" in
+case "\$url" in
   *'/repos/example/repo/pulls?state=open&per_page=100&page=1')
-    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"}},{"number":2,"draft":false,"user":{"login":"bob"},"head":{"sha":"sha2"}}]' > "$body_file"
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1"}},{"number":2,"draft":false,"user":{"login":"bob"},"head":{"sha":"sha2"}}]' > "\$body_file"
     printf '200'
     ;;
   *'/repos/example/repo/pulls/'*'/reviews?per_page=100&page=1')
-    printf '%s\n' '[]' > "$body_file"
+    printf '%s\n' '[]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/commits/sha1/check-runs?filter=latest'*)
+    cat "$sha1_checkruns" > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/commits/sha2/check-runs?filter=latest'*)
+    printf '%s\n' '{"total_count":0,"check_runs":[]}' > "\$body_file"
     printf '200'
     ;;
   *)
-    printf 'unexpected curl URL: %s\n' "$url" >&2
+    printf 'unexpected curl URL: %s\n' "\$url" >&2
     printf '000'
     exit 1
     ;;
@@ -813,16 +832,15 @@ exit 0
 EOF
   chmod +x "$bin_dir/gh"
 
-  key_file="$TMP_ROOT/failure-cap-key.pem"
+  key_file="$TMP_ROOT/failure-backoff-key.pem"
   printf 'key\n' > "$key_file"
   chmod 600 "$key_file"
 
-  printf '## Role\nReview.\n' > "$TMP_ROOT/failure-cap-personality.md"
-  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/failure-cap-engine.md"
-  printf '["ci"]\n' > "$TMP_ROOT/failure-cap-required.json"
-  printf '1\n' > "$state_dir/review-failure-1-sha1.count"
+  printf '## Role\nReview.\n' > "$TMP_ROOT/failure-backoff-personality.md"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/failure-backoff-engine.md"
+  printf '["ci"]\n' > "$TMP_ROOT/failure-backoff-required.json"
 
-  env_file="$TMP_ROOT/failure-cap.env"
+  env_file="$TMP_ROOT/failure-backoff.env"
   cat > "$env_file" <<EOF
 REVIEWER_REPO=example/repo
 REVIEWER_STATE=$state_dir
@@ -830,12 +848,11 @@ REVIEWER_RUNTIME_STATE=$runtime_dir
 REVIEWER_APP_ID=1
 REVIEWER_APP_INSTALLATION_ID=2
 REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
-REVIEWER_PERSONALITY_FILE=$TMP_ROOT/failure-cap-personality.md
-REVIEWER_PROMPT=$TMP_ROOT/failure-cap-engine.md
-REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/failure-cap-required.json
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/failure-backoff-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/failure-backoff-engine.md
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/failure-backoff-required.json
 REVIEWER_MAX_PRS=1
 REVIEWER_MAX_ATTEMPTS=1
-REVIEWER_FAILURE_MAX_ATTEMPTS=1
 EOF
 
   status=0
@@ -844,30 +861,38 @@ EOF
 
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
-    fail "failure cap fixture reviewer exits successfully"
+    fail "failure backoff fixture reviewer exits successfully"
   fi
-  pass "failure cap fixture reviewer exits successfully"
-  assert_eq "failure cap skips poisoned first PR and attempts second" "1" "$(cat "$attempts_file")"
-  assert_contains "failure cap skip is logged" "PR #1@sha1: review failures reached REVIEWER_FAILURE_MAX_ATTEMPTS=1; skipping until the PR head changes" "$state_dir/log.txt"
-  assert_contains "second PR failure is recorded" "PR #2@sha2: failed to read CI check-runs; reached failure cap (1/1), skipping until the PR head changes" "$state_dir/log.txt"
+  pass "failure backoff fixture reviewer exits successfully"
+  assert_eq "backed-off first PR is skipped before CI and second PR is attempted" "1" "$(cat "$attempts_file")"
+  assert_contains "backoff skip is logged with reason and attempt" "PR #1@sha1: backing off after review-failure attempt 1; next eligible at" "$state_dir/log.txt"
+  assert_contains "second PR failure is recorded without a cap" "PR #2@sha2: failed to read CI check-runs, will retry next tick" "$state_dir/log.txt"
 }
 
-# Regression for the queue livelock: a PR capped on invalid model output must
-# be skipped before the tick's attempt budget is spent and before any GitHub
-# side effects, or with REVIEWER_MAX_ATTEMPTS=1 it consumes every tick forever
-# and starves every PR sorted behind it.
-test_reviewer_invalid_output_cap_skips_before_attempt_budget() {
+# Regression for the queue livelock: a PR backing off on invalid model output
+# must be skipped before the tick's attempt budget is spent and before any
+# GitHub side effects, or with REVIEWER_MAX_ATTEMPTS=1 it consumes every tick
+# and starves every PR sorted behind it until its backoff expired.
+test_reviewer_invalid_output_backoff_skips_before_attempt_budget() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir attempts_file signals_file status output
+  local sha1_checkruns stale_completed_at
 
-  state_dir="$TMP_ROOT/invalid-cap-state"
-  runtime_dir="$TMP_ROOT/invalid-cap-runtime"
-  test_reviewer="$TMP_ROOT/invalid-cap-reviewer"
-  bin_dir="$TMP_ROOT/invalid-cap-bin"
-  attempts_file="$TMP_ROOT/invalid-cap-ci-attempts"
-  signals_file="$TMP_ROOT/invalid-cap-signals"
+  state_dir="$TMP_ROOT/invalid-backoff-state"
+  runtime_dir="$TMP_ROOT/invalid-backoff-runtime"
+  test_reviewer="$TMP_ROOT/invalid-backoff-reviewer"
+  bin_dir="$TMP_ROOT/invalid-backoff-bin"
+  attempts_file="$TMP_ROOT/invalid-backoff-ci-attempts"
+  signals_file="$TMP_ROOT/invalid-backoff-signals"
+  sha1_checkruns="$TMP_ROOT/invalid-backoff-sha1-checkruns.json"
   mkdir -p "$state_dir" "$runtime_dir" "$bin_dir"
   cp -R "$REVIEWER_DIR" "$test_reviewer"
   : > "$signals_file"
+
+  # sha1 failed 2 hours ago at attempt 3 (4-hour tier): still backing off.
+  stale_completed_at="$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)"
+  cat > "$sha1_checkruns" <<EOF
+{"total_count":1,"check_runs":[{"name":"goobreview","status":"completed","conclusion":"neutral","completed_at":"$stale_completed_at","output":{"summary":"Invalid reviewer output.\n\nattempt: 3 (reason: invalid-verdict)"}}]}
+EOF
 
   cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -915,6 +940,14 @@ case "\$url" in
     printf '%s\n' '[]' > "\$body_file"
     printf '200'
     ;;
+  *'/repos/example/repo/commits/sha1/check-runs?filter=latest'*)
+    cat "$sha1_checkruns" > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/commits/sha2/check-runs?filter=latest'*)
+    printf '%s\n' '{"total_count":0,"check_runs":[]}' > "\$body_file"
+    printf '200'
+    ;;
   *'/reactions'|*'/check-runs'*)
     printf '%s\n' "\$url" >> "$signals_file"
     printf '%s\n' '{"id":1}' > "\$body_file"
@@ -935,16 +968,15 @@ printf 'Looks good.\nAPPROVE\n'
 EOF
   chmod +x "$bin_dir/agy"
 
-  key_file="$TMP_ROOT/invalid-cap-key.pem"
+  key_file="$TMP_ROOT/invalid-backoff-key.pem"
   printf 'key\n' > "$key_file"
   chmod 600 "$key_file"
 
-  printf '## Role\nReview.\n' > "$TMP_ROOT/invalid-cap-personality.md"
-  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/invalid-cap-engine.md"
-  printf '["ci"]\n' > "$TMP_ROOT/invalid-cap-required.json"
-  printf '1\n' > "$state_dir/invalid-verdict-1-sha1.count"
+  printf '## Role\nReview.\n' > "$TMP_ROOT/invalid-backoff-personality.md"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/invalid-backoff-engine.md"
+  printf '["ci"]\n' > "$TMP_ROOT/invalid-backoff-required.json"
 
-  env_file="$TMP_ROOT/invalid-cap.env"
+  env_file="$TMP_ROOT/invalid-backoff.env"
   cat > "$env_file" <<EOF
 REVIEWER_REPO=example/repo
 REVIEWER_STATE=$state_dir
@@ -952,12 +984,11 @@ REVIEWER_RUNTIME_STATE=$runtime_dir
 REVIEWER_APP_ID=1
 REVIEWER_APP_INSTALLATION_ID=2
 REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
-REVIEWER_PERSONALITY_FILE=$TMP_ROOT/invalid-cap-personality.md
-REVIEWER_PROMPT=$TMP_ROOT/invalid-cap-engine.md
-REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/invalid-cap-required.json
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/invalid-backoff-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/invalid-backoff-engine.md
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/invalid-backoff-required.json
 REVIEWER_MAX_PRS=1
 REVIEWER_MAX_ATTEMPTS=1
-REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=1
 EOF
 
   status=0
@@ -966,17 +997,17 @@ EOF
 
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
-    fail "invalid-output cap fixture reviewer exits successfully"
+    fail "invalid-output backoff fixture reviewer exits successfully"
   fi
-  pass "invalid-output cap fixture reviewer exits successfully"
-  assert_contains "invalid-output cap skip is logged" "PR #1@sha1: invalid agy output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=1; skipping until the PR head changes" "$state_dir/log.txt"
-  assert_eq "invalid-output-capped PR does not consume the attempt budget" "1" "$(cat "$attempts_file")"
-  assert_not_contains "invalid-output-capped skip emits no GitHub signals" "repos" "$signals_file"
+  pass "invalid-output backoff fixture reviewer exits successfully"
+  assert_contains "invalid-output backoff skip is logged" "PR #1@sha1: backing off after invalid-verdict attempt 3; next eligible at" "$state_dir/log.txt"
+  assert_eq "backed-off PR does not consume the attempt budget" "1" "$(cat "$attempts_file")"
+  assert_not_contains "backed-off skip emits no GitHub signals" "repos" "$signals_file"
 }
 
 test_reviewer_agy_quota_failure_reacts_and_skips_failure_cap() {
   local state_dir runtime_dir test_reviewer env_file key_file bin_dir status output
-  local source_dir tarball reactions_file check_runs_file failure_count_file
+  local source_dir tarball reactions_file check_runs_file
 
   state_dir="$TMP_ROOT/quota-state"
   runtime_dir="$TMP_ROOT/quota-runtime"
@@ -986,7 +1017,6 @@ test_reviewer_agy_quota_failure_reacts_and_skips_failure_cap() {
   tarball="$TMP_ROOT/quota.tar.gz"
   reactions_file="$TMP_ROOT/quota-reactions"
   check_runs_file="$TMP_ROOT/quota-check-runs"
-  failure_count_file="$state_dir/review-failure-1-sha1.count"
   mkdir -p "$state_dir" "$runtime_dir" "$bin_dir" "$source_dir/repo-root"
   cp -R "$REVIEWER_DIR" "$test_reviewer"
   printf 'hello\n' > "$source_dir/repo-root/README.md"
@@ -1055,6 +1085,10 @@ case "\$url" in
     ;;
   *'/repos/example/repo/commits/sha1')
     printf '%s\n' '{"commit":{"committer":{"date":"2026-07-04T23:00:00Z"}}}' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/commits/sha1/check-runs?filter=latest'*)
+    printf '%s\n' '{"total_count":0,"check_runs":[]}' > "\$body_file"
     printf '200'
     ;;
   *'/graphql')
@@ -1127,14 +1161,13 @@ REVIEWER_PROMPT=$TMP_ROOT/quota-engine.md
 REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/quota-required.json
 REVIEWER_MAX_PRS=1
 REVIEWER_MAX_ATTEMPTS=1
-REVIEWER_FAILURE_MAX_ATTEMPTS=1
 REVIEWER_IGNORE_AGY_BACKOFF=1
 EOF
 
-  # Two ticks in a row, both hitting the quota-exhausted agy stub. With
-  # REVIEWER_FAILURE_MAX_ATTEMPTS=1, a non-quota failure would trip the
-  # failure cap and permanently skip this PR after the first tick; quota
-  # failures must not consume that budget, so the PR stays eligible.
+  # Two ticks in a row, both hitting the quota-exhausted agy stub. A non-quota
+  # failure would write a review-failure attempt marker and put this head on
+  # the backoff ladder; quota failures must not, so the PR stays eligible on
+  # every tick until the quota backoff clears.
   : > "$reactions_file"
   : > "$check_runs_file"
   status=0
@@ -1148,8 +1181,8 @@ EOF
   assert_contains "first quota failure posts confused reaction" '"content":"confused"' "$reactions_file"
   assert_contains "quota tick opens an in-progress review check run" '"status": "in_progress"' "$check_runs_file"
   assert_contains "quota failure concludes the review check run neutral" '"conclusion": "neutral"' "$check_runs_file"
-  assert_contains "first quota failure is exempted from the failure cap" "PR #1@sha1: agy quota exhausted; not counted toward the failure cap, will retry once backoff clears" "$state_dir/log.txt"
-  assert_eq "no failure-attempt file recorded after first quota failure" "0" "$( [ -f "$failure_count_file" ] && cat "$failure_count_file" || printf 0)"
+  assert_contains "first quota failure is exempted from the failure backoff" "PR #1@sha1: agy quota exhausted; not routed through the failure backoff, will retry once the quota backoff clears" "$state_dir/log.txt"
+  assert_not_contains "quota failure writes no attempt marker" "attempt:" "$check_runs_file"
 
   : > "$reactions_file"
   status=0
@@ -1161,8 +1194,238 @@ EOF
   fi
   pass "quota fixture second tick exits successfully"
   assert_contains "second quota failure posts confused reaction again" '"content":"confused"' "$reactions_file"
-  assert_not_contains "repeated quota failures never trip the failure cap" "review failures reached REVIEWER_FAILURE_MAX_ATTEMPTS" "$state_dir/log.txt"
-  assert_eq "no failure-attempt file recorded after second quota failure" "0" "$( [ -f "$failure_count_file" ] && cat "$failure_count_file" || printf 0)"
+  assert_not_contains "repeated quota failures never enter the failure backoff" "backing off after review-failure" "$state_dir/log.txt"
+  assert_not_contains "repeated quota failures write no attempt marker" "attempt:" "$check_runs_file"
+}
+
+# End-to-end backoff ladder: a non-quota agy failure writes an attempt marker
+# into the neutral goobreview check run; once its window expires the PR is
+# retried and a second failure escalates the marker; a success posts normally
+# no matter what markers the head's history carries. reason: review-failure is
+# exercised here; the invalid-verdict arm shares every code path except the
+# reason tag (its skip/parse behavior is covered by the other fixtures).
+test_reviewer_failure_backoff_escalates_and_never_blocks_success() {
+  local state_dir runtime_dir test_reviewer env_file key_file bin_dir status output
+  local source_dir tarball checkruns_body agy_mode check_runs_file reviews_file marker_completed_at
+
+  state_dir="$TMP_ROOT/escalate-state"
+  runtime_dir="$TMP_ROOT/escalate-runtime"
+  test_reviewer="$TMP_ROOT/escalate-reviewer"
+  bin_dir="$TMP_ROOT/escalate-bin"
+  source_dir="$TMP_ROOT/escalate-source"
+  tarball="$TMP_ROOT/escalate.tar.gz"
+  checkruns_body="$TMP_ROOT/escalate-checkruns.json"
+  agy_mode="$TMP_ROOT/escalate-agy-mode"
+  check_runs_file="$TMP_ROOT/escalate-check-runs"
+  reviews_file="$TMP_ROOT/escalate-reviews"
+  mkdir -p "$state_dir" "$runtime_dir" "$bin_dir" "$source_dir/repo-root"
+  cp -R "$REVIEWER_DIR" "$test_reviewer"
+  printf 'hello\n' > "$source_dir/repo-root/README.md"
+  tar -czf "$tarball" -C "$source_dir" repo-root
+
+  cat > "$test_reviewer/get-installation-token.sh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  token) printf 'test-token\n' ;;
+  slug)  printf 'goobreview\n' ;;
+  *)     exit 1 ;;
+esac
+EOF
+  chmod +x "$test_reviewer/get-installation-token.sh"
+
+  cat > "$test_reviewer/check-ci.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'success\n'
+EOF
+  chmod +x "$test_reviewer/check-ci.sh"
+
+  cat > "$bin_dir/curl" <<EOF
+#!/usr/bin/env bash
+body_file=""
+data_file=""
+url="\${*: -1}"
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    -o)
+      body_file="\$2"
+      shift 2
+      ;;
+    -d|--data|--data-binary)
+      data_file="\$2"
+      shift 2
+      ;;
+    -D|-w|-H|-X)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+case "\$url" in
+  *'/repos/example/repo/pulls?state=open&per_page=100&page=1')
+    printf '%s\n' '[{"number":1,"draft":false,"user":{"login":"alice"},"head":{"sha":"sha1","ref":"feature"},"base":{"ref":"main"},"title":"Backoff PR","body":"Please review","changed_files":1}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/reviews?per_page=100&page=1')
+    printf '%s\n' '[]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/reviews')
+    printf '%s\n' "\$data_file" >> "$reviews_file"
+    printf '%s\n' '{"id":7}' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/files?per_page=100&page=1')
+    printf '%s\n' '[{"filename":"README.md","status":"modified","additions":1,"deletions":0,"patch":"@@ -1,0 +1,1 @@\n+hello"}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1/commits?per_page=100&page=1')
+    printf '%s\n' '[{"commit":{"message":"Update README"}}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/pulls/1')
+    printf '%s\n' '{"number":1,"head":{"sha":"sha1"}}' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/commits/sha1')
+    printf '%s\n' '{"commit":{"committer":{"date":"2026-07-04T23:00:00Z"}}}' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/commits/sha1/check-runs?filter=latest'*)
+    cat "$checkruns_body" > "\$body_file"
+    printf '200'
+    ;;
+  *'/graphql')
+    printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/tarball/sha1')
+    cat "$tarball" > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/issues/1/reactions')
+    printf '%s\n' '{"id":1,"content":"eyes"}' > "\$body_file"
+    printf '201'
+    ;;
+  *'/repos/example/repo/check-runs')
+    printf '%s\n' "\$data_file" >> "$check_runs_file"
+    printf '%s\n' '{"id":88}' > "\$body_file"
+    printf '201'
+    ;;
+  *'/repos/example/repo/check-runs/88')
+    printf '%s\n' "\$data_file" >> "$check_runs_file"
+    printf '%s\n' '{"id":88}' > "\$body_file"
+    printf '200'
+    ;;
+  *)
+    printf 'unexpected curl URL: %s\n' "\$url" >&2
+    printf '000'
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$bin_dir/curl"
+
+  cat > "$bin_dir/timeout" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  --kill-after=*) shift ;;
+esac
+shift
+"$@"
+EOF
+  chmod +x "$bin_dir/timeout"
+
+  cat > "$bin_dir/agy" <<EOF
+#!/usr/bin/env bash
+if [ "\$(cat "$agy_mode" 2>/dev/null)" = "ok" ]; then
+  printf 'Looks good.\nAPPROVE\n'
+else
+  printf 'boom: agy exploded for an unrelated reason\n' >&2
+  exit 1
+fi
+EOF
+  chmod +x "$bin_dir/agy"
+
+  key_file="$TMP_ROOT/escalate-key.pem"
+  printf 'key\n' > "$key_file"
+  chmod 600 "$key_file"
+
+  printf '## Role\nReview.\n' > "$TMP_ROOT/escalate-personality.md"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$TMP_ROOT/escalate-engine.md"
+  printf '[]\n' > "$TMP_ROOT/escalate-required.json"
+
+  env_file="$TMP_ROOT/escalate.env"
+  cat > "$env_file" <<EOF
+REVIEWER_REPO=example/repo
+REVIEWER_STATE=$state_dir
+REVIEWER_RUNTIME_STATE=$runtime_dir
+REVIEWER_APP_ID=1
+REVIEWER_APP_INSTALLATION_ID=2
+REVIEWER_APP_PRIVATE_KEY_PATH=$key_file
+REVIEWER_PERSONALITY_FILE=$TMP_ROOT/escalate-personality.md
+REVIEWER_PROMPT=$TMP_ROOT/escalate-engine.md
+REVIEWER_REQUIRED_CHECKS_FILE=$TMP_ROOT/escalate-required.json
+REVIEWER_MAX_PRS=1
+REVIEWER_MAX_ATTEMPTS=1
+EOF
+
+  # Tick 1: no marker history, agy fails -> the neutral conclusion carries
+  # attempt 1.
+  printf '%s\n' '{"total_count":0,"check_runs":[]}' > "$checkruns_body"
+  printf 'fail\n' > "$agy_mode"
+  : > "$check_runs_file"
+  : > "$reviews_file"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "escalation fixture first tick exits successfully"
+  fi
+  pass "escalation fixture first tick exits successfully"
+  assert_contains "first failure concludes with attempt 1 marker" 'attempt: 1 (reason: review-failure)' "$check_runs_file"
+  assert_contains "first failure logs the backoff retry" "will retry after backoff (attempt 1)" "$state_dir/log.txt"
+
+  # Tick 2: attempt-1 marker completed 20 minutes ago (15-minute tier expired)
+  # -> eligible again; agy fails again -> the marker escalates to attempt 2.
+  marker_completed_at="$(date -u -d '-20 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+  cat > "$checkruns_body" <<EOF
+{"total_count":1,"check_runs":[{"name":"goobreview","status":"completed","conclusion":"neutral","completed_at":"$marker_completed_at","output":{"summary":"agy failed.\n\nattempt: 1 (reason: review-failure)"}}]}
+EOF
+  : > "$check_runs_file"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "escalation fixture second tick exits successfully"
+  fi
+  pass "escalation fixture second tick exits successfully"
+  assert_not_contains "expired backoff window does not skip the PR" "backing off after review-failure" "$state_dir/log.txt"
+  assert_contains "second failure escalates the marker to attempt 2" 'attempt: 2 (reason: review-failure)' "$check_runs_file"
+
+  # Tick 3: attempt-2 marker completed 2 hours ago (1-hour tier expired) ->
+  # eligible; agy now succeeds -> the review posts and the success conclusion
+  # carries no marker. No amount of failure history ever blocks a success.
+  marker_completed_at="$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)"
+  cat > "$checkruns_body" <<EOF
+{"total_count":1,"check_runs":[{"name":"goobreview","status":"completed","conclusion":"neutral","completed_at":"$marker_completed_at","output":{"summary":"agy failed.\n\nattempt: 2 (reason: review-failure)"}}]}
+EOF
+  printf 'ok\n' > "$agy_mode"
+  : > "$check_runs_file"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "escalation fixture third tick exits successfully"
+  fi
+  pass "escalation fixture third tick exits successfully"
+  assert_contains "expired backoff allows the review to post" '"event": "APPROVE"' "$reviews_file"
+  assert_contains "success concludes the check run as posted" "Review posted: APPROVE" "$check_runs_file"
+  assert_not_contains "success conclusion carries no attempt marker" "attempt:" "$check_runs_file"
 }
 
 test_reviewer_research_capture_posts_selected_review_only() {

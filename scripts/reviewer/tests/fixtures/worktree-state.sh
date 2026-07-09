@@ -90,39 +90,55 @@ test_worktree_cache_keeps_per_head_slots() {
 }
 
 test_invalid_verdict_state() {
-  local artifact count
+  local artifact runs_json
 
   STATE_DIR="$TMP_ROOT/invalid-state"
   mkdir -p "$STATE_DIR"
-
-  assert_eq "missing invalid verdict count is zero" "0" "$(review_attempts_count invalid-verdict 17 abc123)"
-  count=$(review_attempts_record invalid-verdict 17 abc123)
-  assert_eq "invalid verdict first attempt is recorded" "1" "$count"
-  count=$(review_attempts_record invalid-verdict 17 abc123)
-  assert_eq "invalid verdict attempts increment per head" "2" "$count"
-  assert_eq "different head has separate invalid verdict count" "0" "$(review_attempts_count invalid-verdict 17 def456)"
 
   artifact=$(write_invalid_verdict_artifact 17 abc123 INVALID_VERDICT $'NOPE\nbody')
   assert_contains "invalid artifact records PR" "PR: #17" "$artifact"
   assert_contains "invalid artifact records head SHA" "Head SHA: abc123" "$artifact"
   assert_contains "invalid artifact persists rejected output" "NOPE" "$artifact"
 
-  review_attempts_clear invalid-verdict 17 abc123
-  assert_eq "invalid verdict attempts clear after valid output" "0" "$(review_attempts_count invalid-verdict 17 abc123)"
+  # Backoff ladder: 15 min, 1 hour, then 4 hours for every later attempt.
+  assert_eq "backoff ladder attempt 1 is 15 minutes" "900" "$(review_backoff_seconds_for_attempt 1)"
+  assert_eq "backoff ladder attempt 2 is 1 hour" "3600" "$(review_backoff_seconds_for_attempt 2)"
+  assert_eq "backoff ladder attempt 3 is 4 hours" "14400" "$(review_backoff_seconds_for_attempt 3)"
+  assert_eq "backoff ladder caps at 4 hours" "14400" "$(review_backoff_seconds_for_attempt 9)"
 
-  assert_eq "missing review failure count is zero" "0" "$(review_attempts_count review-failure 17 abc123)"
-  count=$(review_attempts_record review-failure 17 abc123)
-  assert_eq "review failure first attempt is recorded" "1" "$count"
-  count=$(review_attempts_record review-failure 17 abc123)
-  assert_eq "review failure attempts increment per head" "2" "$count"
-  assert_eq "different head has separate review failure count" "0" "$(review_attempts_count review-failure 17 def456)"
+  # Attempt-marker parsing from check-runs JSON: the marker lives in the
+  # concluded neutral goobreview run's output summary, one counter per reason.
+  runs_json='{"check_runs":[
+    {"name":"goobreview","status":"completed","conclusion":"neutral","completed_at":"2026-07-01T10:00:00Z",
+     "output":{"summary":"agy failed.\n\nattempt: 1 (reason: review-failure)"}},
+    {"name":"goobreview","status":"completed","conclusion":"neutral","completed_at":"2026-07-01T12:00:00Z",
+     "output":{"summary":"agy failed again.\n\nattempt: 2 (reason: review-failure)"}},
+    {"name":"goobreview","status":"completed","conclusion":"neutral","completed_at":"2026-07-01T11:00:00Z",
+     "output":{"summary":"bad verdict.\n\nattempt: 5 (reason: invalid-verdict)"}},
+    {"name":"ci","status":"completed","conclusion":"neutral","completed_at":"2026-07-01T13:00:00Z",
+     "output":{"summary":"attempt: 9 (reason: review-failure)"}},
+    {"name":"goobreview","status":"completed","conclusion":"neutral","completed_at":"2026-07-01T14:00:00Z",
+     "output":{"summary":"The Antigravity model quota is exhausted."}}
+  ]}'
+  assert_eq "marker parser picks latest run per reason" "2 2026-07-01T12:00:00Z" \
+    "$(printf '%s\n' "$runs_json" | github_goobreview_attempt_marker review-failure)"
+  assert_eq "marker parser keeps reason counters independent" "5 2026-07-01T11:00:00Z" \
+    "$(printf '%s\n' "$runs_json" | github_goobreview_attempt_marker invalid-verdict)"
 
-  review_attempts_clear review-failure 17 abc123
-  assert_eq "review failure attempts clear after success" "0" "$(review_attempts_count review-failure 17 abc123)"
-
-  # The counter kinds share one file family; distinct kinds never collide.
-  review_attempts_record invalid-verdict 17 abc123 >/dev/null
-  assert_eq "counter kinds keep separate counts per head" "0" "$(review_attempts_count review-failure 17 abc123)"
+  # Garbled or absent markers fail the lookup, which callers treat as
+  # "eligible, attempt 1" -- degradation is fail-open, never a frozen PR.
+  runs_json='{"check_runs":[
+    {"name":"goobreview","status":"completed","conclusion":"neutral","completed_at":"2026-07-01T10:00:00Z",
+     "output":{"summary":"attempt: banana (reason: review-failure)"}}
+  ]}'
+  if printf '%s\n' "$runs_json" | github_goobreview_attempt_marker review-failure >/dev/null 2>&1; then
+    fail "garbled attempt marker is treated as no marker"
+  fi
+  pass "garbled attempt marker is treated as no marker"
+  if printf '%s\n' '{"check_runs":[]}' | github_goobreview_attempt_marker review-failure >/dev/null 2>&1; then
+    fail "empty check-run list yields no marker"
+  fi
+  pass "empty check-run list yields no marker"
 }
 
 test_artifact_secret_safety() {

@@ -221,6 +221,49 @@ github_check_runs_json() {
   rm -f "$pages_file"
 }
 
+# Extract the most recent failed-attempt marker for one failure kind from
+# check-runs JSON (github_check_runs_json shape) on stdin. Failure paths
+# conclude the "goobreview" check run neutral with a machine-readable
+# `attempt: N (reason: <tag>)` line in the output summary; this is the single
+# place that parses it back. Prints "N <completed_at>" for the latest matching
+# run, or fails when no parseable marker exists (callers treat that as
+# "eligible, attempt 1" -- the degradation rule is fail-open by design).
+github_goobreview_attempt_marker() {
+  local reason_tag="$1"
+  local marker
+
+  # capture errors on a non-matching string, and neutral goobreview runs
+  # without a marker are routine (Rate limited, Superseded), so the capture is
+  # guarded with `?` to skip markerless runs instead of failing the query.
+  marker=$(jq -r --arg reason "$reason_tag" '
+    [.check_runs[]?
+      | select(.name == "goobreview" and .status == "completed" and .conclusion == "neutral")
+      | select(.completed_at != null)
+      | {completed_at: .completed_at,
+         attempt: (((.output.summary // ""
+           | capture("(?m)^attempt: (?<n>[0-9]+) \\(reason: \($reason)\\)$").n
+           | tonumber)? // null))}
+      | select(.attempt != null)]
+    | sort_by(.completed_at)
+    | last // empty
+    | "\(.attempt) \(.completed_at)"
+  ') || return 1
+  [ -n "$marker" ] || return 1
+  printf '%s\n' "$marker"
+}
+
+# Fetch the check runs for a head SHA and extract the latest failed-attempt
+# marker for one failure kind. Prints "N <completed_at>"; fails when the
+# fetch fails or no marker exists.
+github_latest_goobreview_attempt() {
+  local head_sha="$1"
+  local reason_tag="$2"
+  local runs_json
+
+  runs_json=$(github_check_runs_json "$head_sha") || return 1
+  printf '%s\n' "$runs_json" | github_goobreview_attempt_marker "$reason_tag"
+}
+
 github_check_runs_summary() {
   local head_sha="$1"
   local limit="${REVIEWER_CHECK_RUN_SUMMARY_LIMIT:-200}"
