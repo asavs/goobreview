@@ -582,60 +582,20 @@ install_bounded_scanned_artifact() {
   return "$status"
 }
 
-# Per-PR-head retry counters, one file family per kind ("review-failure" for
-# expensive-step failures, "invalid-verdict" for unparseable model output).
-# The on-disk names ($STATE_DIR/<kind>-<num>-<sha>.count) predate this helper,
-# so deployed state directories keep counting across upgrades.
-review_attempts_file() {
-  local kind="$1"
-  local num="$2"
-  local head_sha="$3"
+# Backoff schedule for failed review attempts, keyed by the attempt number
+# carried in the concluded "goobreview" check run (GitHub is the state store;
+# the old on-disk .count files are gone and any survivors are ignored).
+# Attempt 1 -> 15 minutes, attempt 2 -> 1 hour, attempt 3 and beyond -> 4
+# hours. The deadline is always finite, so a repeatedly failing PR keeps
+# retrying at a low rate instead of silently freezing until its head changes.
+review_backoff_seconds_for_attempt() {
+  local attempt="$1"
 
-  case "$num" in
-    ''|*[!0-9]*) return 1 ;;
+  case "$attempt" in
+    1) printf '900\n' ;;
+    2) printf '3600\n' ;;
+    *) printf '14400\n' ;;
   esac
-  case "$head_sha" in
-    ''|*[!A-Za-z0-9._-]*) return 1 ;;
-  esac
-
-  printf '%s/%s-%s-%s.count\n' "$STATE_DIR" "$kind" "$num" "$head_sha"
-}
-
-review_attempts_count() {
-  local file count
-
-  if ! file=$(review_attempts_file "$1" "$2" "$3") || [ ! -f "$file" ]; then
-    printf '0\n'
-    return 0
-  fi
-
-  IFS= read -r count <"$file" || count=0
-  case "$count" in
-    ''|*[!0-9]*) count=0 ;;
-  esac
-  printf '%s\n' "$count"
-}
-
-review_attempts_record() {
-  local file tmp count
-
-  file=$(review_attempts_file "$1" "$2" "$3")
-  count=$(review_attempts_count "$1" "$2" "$3")
-  count=$((count + 1))
-
-  mkdir -p "$STATE_DIR"
-  tmp=$(mktemp "$STATE_DIR/attempt-counter.XXXXXX")
-  printf '%s\n' "$count" >"$tmp"
-  chmod 600 "$tmp" 2>/dev/null || true
-  mv "$tmp" "$file"
-  printf '%s\n' "$count"
-}
-
-review_attempts_clear() {
-  local file
-
-  file=$(review_attempts_file "$1" "$2" "$3") || return 0
-  rm -f "$file"
 }
 
 invalid_verdict_artifact_path() {

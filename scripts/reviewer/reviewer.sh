@@ -40,8 +40,6 @@ MAX_PRS="${REVIEWER_MAX_PRS:-1}"
 MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 AUTO_RESOLVE_BOT_THREADS="${REVIEWER_AUTO_RESOLVE_BOT_THREADS:-0}"
 CHECK_RUN_SIGNAL="${REVIEWER_CHECK_RUN_SIGNAL:-1}"
-FAILURE_MAX_ATTEMPTS="${REVIEWER_FAILURE_MAX_ATTEMPTS:-3}"
-INVALID_VERDICT_MAX_ATTEMPTS="${REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS:-3}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
 RUNTIME_OWNER="${USER:-$(id -u 2>/dev/null || printf user)}"
 # Snapshot extraction needs deterministic on-disk space, so default to /tmp
@@ -616,48 +614,94 @@ fi
 review_actions=0
 review_attempts=0
 
+# Next attempt number for one failure kind on this head SHA: 1 + whatever the
+# latest concluded goobreview check run's marker says. GitHub is the state
+# store, so a missing run, a fetch failure, or an unparseable marker all
+# degrade to attempt 1 (fail-open, never a permanent freeze).
+review_next_attempt_number() {
+  local head_sha="$1"
+  local reason_tag="$2"
+  local marker
+
+  if marker=$(github_latest_goobreview_attempt "$head_sha" "$reason_tag" 2>>"$LOG_FILE"); then
+    printf '%s\n' "$(( ${marker%% *} + 1 ))"
+  else
+    printf '1\n'
+  fi
+}
+
+# Backoff gate for one head SHA, checked independently for each failure kind.
+# Reads the latest concluded goobreview check run's attempt marker and compares
+# now against completed_at + the ladder for that attempt. Any degradation --
+# fetch failure, no marker, unparseable timestamp -- is treated as eligible
+# (fail-open): the worst case is an extra attempt, never a frozen PR.
+review_backoff_eligible() {
+  local num="$1"
+  local head_sha="$2"
+  local runs_json reason_tag marker attempt_n completed_at completed_epoch deadline now
+
+  # One check-runs fetch serves both reason kinds.
+  runs_json=$(github_check_runs_json "$head_sha" 2>>"$LOG_FILE") || return 0
+  now=$(date -u +%s)
+  for reason_tag in review-failure invalid-verdict; do
+    marker=$(printf '%s\n' "$runs_json" | github_goobreview_attempt_marker "$reason_tag") || continue
+    attempt_n=${marker%% *}
+    completed_at=${marker#* }
+    completed_epoch=$(date -u -d "$completed_at" +%s 2>>"$LOG_FILE") || continue
+    deadline=$((completed_epoch + $(review_backoff_seconds_for_attempt "$attempt_n")))
+    if [ "$now" -lt "$deadline" ]; then
+      log "PR #$num@$head_sha: backing off after $reason_tag attempt $attempt_n; next eligible at $(date -u -d "@$deadline" +%Y-%m-%dT%H:%M:%SZ)"
+      return 1
+    fi
+  done
+  return 0
+}
+
 record_review_failure_and_log() {
   local num="$1"
   local head_sha="$2"
   local message="$3"
-  local attempts
+  local attempt_n
 
-  conclude_review_check_run_signal neutral "Review attempt failed" \
-    "$message. The daemon will retry on a later tick."
-  if [ -z "$DRY_RUN" ] && [ -z "$RENDER_PROMPT_ONLY" ]; then
-    attempts=$(review_attempts_record review-failure "$num" "$head_sha")
-    if [ "$FAILURE_MAX_ATTEMPTS" -eq 0 ]; then
-      log "$message, will retry next tick (failure cap disabled)"
-    elif [ "$attempts" -ge "$FAILURE_MAX_ATTEMPTS" ]; then
-      log "$message; reached failure cap ($attempts/$FAILURE_MAX_ATTEMPTS), skipping until the PR head changes"
-    else
-      log "$message, will retry next tick ($attempts/$FAILURE_MAX_ATTEMPTS)"
-    fi
+  # The attempt marker in the neutral conclusion is what the next tick's
+  # backoff gate reads back, so it is only written when a check run is open
+  # to conclude (live tick, past begin_review_check_run_signal). Earlier
+  # failures conclude nothing and simply retry next tick, as before.
+  if [ -z "$DRY_RUN" ] && [ -z "$RENDER_PROMPT_ONLY" ] && [ -n "${REVIEW_CHECK_RUN_ID:-}" ]; then
+    attempt_n=$(review_next_attempt_number "$head_sha" review-failure)
+    conclude_review_check_run_signal neutral "Review attempt failed" \
+      "$message. The daemon retries automatically once the backoff expires.
+
+attempt: $attempt_n (reason: review-failure)"
+    log "$message, will retry after backoff (attempt $attempt_n)"
   else
+    conclude_review_check_run_signal neutral "Review attempt failed" \
+      "$message. The daemon will retry on a later tick."
     log "$message, will retry next tick"
   fi
 }
 
 # Shared tail for model output that cannot be posted (an empty response or a
-# missing/invalid final review event): record the capped invalid-output
-# attempt on a live tick and log one line whose suffix reflects the cap state.
+# missing/invalid final review event): conclude the check run neutral with the
+# attempt marker the next tick's backoff gate reads back, and log one line.
 record_invalid_output_and_log() {
   local num="$1"
   local head_sha="$2"
   local message="$3"
   local invalid_artifact="$4"
-  local invalid_attempts
+  local check_title="$5"
+  local check_summary="$6"
+  local attempt_n
 
-  if [ -z "$DRY_RUN" ]; then
-    invalid_attempts=$(review_attempts_record invalid-verdict "$num" "$head_sha")
-    if [ "$INVALID_VERDICT_MAX_ATTEMPTS" -eq 0 ]; then
-      log "$message; wrote $invalid_artifact; will retry next tick (invalid-output cap disabled)"
-    elif [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
-      log "$message; wrote $invalid_artifact; reached invalid-output cap ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
-    else
-      log "$message; wrote $invalid_artifact; will retry next tick ($invalid_attempts/$INVALID_VERDICT_MAX_ATTEMPTS)"
-    fi
+  if [ -z "$DRY_RUN" ] && [ -n "${REVIEW_CHECK_RUN_ID:-}" ]; then
+    attempt_n=$(review_next_attempt_number "$head_sha" invalid-verdict)
+    conclude_review_check_run_signal neutral "$check_title" \
+      "$check_summary
+
+attempt: $attempt_n (reason: invalid-verdict)"
+    log "$message; wrote $invalid_artifact; will retry after backoff (attempt $attempt_n)"
   else
+    conclude_review_check_run_signal neutral "$check_title" "$check_summary"
     log "$message; wrote $invalid_artifact; will retry next tick"
   fi
 }
@@ -829,22 +873,14 @@ review_one_pr() {
     return 10
   fi
 
-  # Both per-head caps must be checked here -- before the attempt budget is
-  # spent and before any GitHub side effects (eyes reaction, check run).
-  # A capped PR skipped after the increment would consume REVIEWER_MAX_ATTEMPTS
-  # every tick and starve every PR sorted behind it until its head changed.
-  if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$FAILURE_MAX_ATTEMPTS" -gt 0 ]; then
-    failure_attempts=$(review_attempts_count review-failure "$num" "$head_sha")
-    if [ "$failure_attempts" -ge "$FAILURE_MAX_ATTEMPTS" ]; then
-      log "PR #$num@$head_sha: review failures reached REVIEWER_FAILURE_MAX_ATTEMPTS=$FAILURE_MAX_ATTEMPTS; skipping until the PR head changes"
-      return 0
-    fi
-  fi
-  if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ] && [ "$INVALID_VERDICT_MAX_ATTEMPTS" -gt 0 ]; then
-    invalid_attempts=$(review_attempts_count invalid-verdict "$num" "$head_sha")
-    if [ "$invalid_attempts" -ge "$INVALID_VERDICT_MAX_ATTEMPTS" ]; then
-      invalid_artifact=$(invalid_verdict_artifact_path "$num" || true)
-      log "PR #$num@$head_sha: invalid agy output reached REVIEWER_INVALID_VERDICT_MAX_ATTEMPTS=$INVALID_VERDICT_MAX_ATTEMPTS; skipping until the PR head changes (last artifact: ${invalid_artifact:-unavailable})"
+  # The backoff gate must run here -- before the attempt budget is spent and
+  # before any GitHub side effects (eyes reaction, check run). A backed-off PR
+  # skipped after the increment would consume REVIEWER_MAX_ATTEMPTS every tick
+  # and starve every PR sorted behind it until its backoff expired.
+  # Dry-run/render-only ticks never write check runs, so they treat every PR
+  # as eligible.
+  if [ -z "$RENDER_PROMPT_ONLY" ] && [ -z "$DRY_RUN" ]; then
+    if ! review_backoff_eligible "$num" "$head_sha"; then
       return 0
     fi
   fi
@@ -905,7 +941,6 @@ EOF
         post_review_started_reaction "$num"
         begin_review_check_run_signal "$num" "$head_sha"
         if post_review "$num" "REQUEST_CHANGES" "$ci_failure_body" "$head_sha" '[]'; then
-          review_attempts_clear review-failure "$num" "$head_sha"
           log "Posted REQUEST_CHANGES (CI failure) on PR #$num@$head_sha"
           conclude_review_check_run_signal failure "Review posted: REQUEST_CHANGES" \
             "Required CI checks were failing at review time, so changes were requested without invoking the reviewer model. A new head SHA gets a fresh review."
@@ -996,15 +1031,14 @@ EOF
       # A quota-exhausted agy call is not a broken PR or a broken prompt --
       # it is expected to succeed once the backoff clears, so it must not
       # spend the same failure-attempt budget as a genuine agy error. Left
-      # uncapped, a rate limit that outlasts a few backoff cycles would hit
-      # REVIEWER_FAILURE_MAX_ATTEMPTS and the daemon would silently abandon
-      # that head SHA forever -- no review posted, no further retries until
-      # the author happens to push again, at which point the review would
-      # cover both the missed push and the new one at once.
+      # routed through the failure ladder, a long-lived rate limit would
+      # push this head to the 4-hour backoff tier for no reason -- the agy
+      # quota backoff is its own, shorter-fused mechanism, so no attempt
+      # marker is written here.
       [ -n "$DRY_RUN" ] || post_agy_backoff_reaction "$num"
       conclude_review_check_run_signal neutral "Rate limited" \
         "The Antigravity model quota is exhausted. The review is queued and retries automatically once the backoff clears."
-      log "PR #$num@$head_sha: agy quota exhausted; not counted toward the failure cap, will retry once backoff clears"
+      log "PR #$num@$head_sha: agy quota exhausted; not routed through the failure backoff, will retry once the quota backoff clears"
     else
       record_review_failure_and_log "$num" "$head_sha" "agy failed for PR #$num@$head_sha"
     fi
@@ -1017,22 +1051,22 @@ EOF
     if set_agy_quota_backoff "$agy_err_tmp"; then
       # agy can hit quota exhaustion, retry internally, and still exit 0 with
       # an empty body -- this is the same transient condition the non-zero-exit
-      # quota path handles below, so it must not spend the invalid-verdict
-      # budget either (see the rationale on the exit-status branch above).
+      # quota path handles above, so it must not write an invalid-verdict
+      # attempt marker either (see the rationale on the exit-status branch).
       write_dry_run_artifact "$num" "$head_sha" "AGY_QUOTA" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
       [ -n "$DRY_RUN" ] || post_agy_backoff_reaction "$num"
       conclude_review_check_run_signal neutral "Rate limited" \
         "The Antigravity model quota is exhausted. The review is queued and retries automatically once the backoff clears."
-      log "PR #$num@$head_sha: agy quota exhausted (empty response); not counted toward the failure cap, will retry once backoff clears"
+      log "PR #$num@$head_sha: agy quota exhausted (empty response); not routed through the failure backoff, will retry once the quota backoff clears"
       rm -f "$prompt_tmp" "$agy_err_tmp"
       return 0
     fi
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$review")
     write_dry_run_artifact "$num" "$head_sha" "EMPTY_RESPONSE" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
     rm -f "$prompt_tmp" "$agy_err_tmp"
-    conclude_review_check_run_signal neutral "Empty reviewer output" \
-      "The reviewer model returned an empty response. The daemon will retry on a later tick."
-    record_invalid_output_and_log "$num" "$head_sha" "agy returned empty for PR #$num@$head_sha" "$invalid_artifact"
+    record_invalid_output_and_log "$num" "$head_sha" "agy returned empty for PR #$num@$head_sha" "$invalid_artifact" \
+      "Empty reviewer output" \
+      "The reviewer model returned an empty response. The daemon retries automatically once the backoff expires."
     return 0
   fi
 
@@ -1040,14 +1074,11 @@ EOF
     invalid_artifact=$(write_invalid_verdict_artifact "$num" "$head_sha" "INVALID_VERDICT" "$review")
     write_dry_run_artifact "$num" "$head_sha" "INVALID" "$prompt_tmp" "$review" '[]' 0 "$agy_err_tmp" "$review_worktree" "$ci_state" "$transcript_source"
     rm -f "$prompt_tmp" "$agy_err_tmp"
-    conclude_review_check_run_signal neutral "Invalid reviewer output" \
-      "The reviewer model did not emit a valid final review event. The daemon will retry on a later tick."
     verdict_line=$(printf '%s' "$review" | review_last_nonempty_line)
-    record_invalid_output_and_log "$num" "$head_sha" "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line)" "$invalid_artifact"
+    record_invalid_output_and_log "$num" "$head_sha" "PR #$num@$head_sha: agy did not emit a valid final GitHub review event (got: $verdict_line)" "$invalid_artifact" \
+      "Invalid reviewer output" \
+      "The reviewer model did not emit a valid final review event. The daemon retries automatically once the backoff expires."
     return 0
-  fi
-  if [ -z "$DRY_RUN" ]; then
-    review_attempts_clear invalid-verdict "$num" "$head_sha"
   fi
 
   review_body=$(printf '%s' "$review" | review_body_before_verdict | review_demote_oversized_suggestions)
@@ -1151,7 +1182,6 @@ EOF
   fi
 
   if post_review "$num" "$event" "$body" "$head_sha" "$inline_comments_json"; then
-    review_attempts_clear review-failure "$num" "$head_sha"
     review_check_conclusion=$(review_check_run_conclusion_for_event "$event") || review_check_conclusion=neutral
     conclude_review_check_run_signal "$review_check_conclusion" "Review posted: $event" \
       "GoobReview posted a $event review on this head SHA."
