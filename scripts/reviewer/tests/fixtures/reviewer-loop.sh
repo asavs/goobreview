@@ -1104,6 +1104,15 @@ case "\$url" in
     printf '%s\n' '{"id":1,"content":"confused"}' > "\$body_file"
     printf '201'
     ;;
+  *'/repos/example/repo/issues/1/comments?per_page=100&page=1')
+    printf '%s\n' '[{"id":555,"body":"any update?"}]' > "\$body_file"
+    printf '200'
+    ;;
+  *'/repos/example/repo/issues/comments/555/reactions')
+    printf 'comment-555 %s\n' "\$data_file" >> "$reactions_file"
+    printf '%s\n' '{"id":2,"content":"confused"}' > "\$body_file"
+    printf '201'
+    ;;
   *'/repos/example/repo/check-runs')
     printf '%s\n' "\$data_file" >> "$check_runs_file"
     printf '%s\n' '{"id":88}' > "\$body_file"
@@ -1179,6 +1188,8 @@ EOF
   fi
   pass "quota fixture first tick exits successfully"
   assert_contains "first quota failure posts confused reaction" '"content":"confused"' "$reactions_file"
+  assert_contains "quota failure also reacts on the newest issue comment" 'comment-555 {"content":"confused"}' "$reactions_file"
+  assert_contains "comment acknowledgment is logged" "Signaled with confused reaction on newest comment 555 of PR #1" "$state_dir/log.txt"
   assert_contains "quota tick opens an in-progress review check run" '"status": "in_progress"' "$check_runs_file"
   assert_contains "quota failure concludes the review check run neutral" '"conclusion": "neutral"' "$check_runs_file"
   assert_contains "first quota failure is exempted from the failure backoff" "PR #1@sha1: agy quota exhausted; not routed through the failure backoff, will retry once the quota backoff clears" "$state_dir/log.txt"
@@ -1307,6 +1318,10 @@ case "\$url" in
   *'/repos/example/repo/issues/1/reactions')
     printf '%s\n' '{"id":1,"content":"eyes"}' > "\$body_file"
     printf '201'
+    ;;
+  *'/repos/example/repo/issues/1/comments?per_page=100&page=1')
+    printf '%s\n' '[]' > "\$body_file"
+    printf '200'
     ;;
   *'/repos/example/repo/check-runs')
     printf '%s\n' "\$data_file" >> "$check_runs_file"
@@ -1538,6 +1553,10 @@ case "\$url" in
     printf '%s\n' "\$data_file" >> "$reactions_file"
     printf '%s\n' '{"id":1,"content":"eyes"}' > "\$body_file"
     printf '201'
+    ;;
+  *'/repos/example/repo/issues/1/comments?per_page=100&page=1')
+    printf '%s\n' '[]' > "\$body_file"
+    printf '200'
     ;;
   *'/repos/example/repo/check-runs')
     printf '%s\n' "\$data_file" >> "$check_runs_file"

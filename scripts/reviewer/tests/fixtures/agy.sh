@@ -327,6 +327,7 @@ test_agy_quota_backoff_detection() {
   AGY_BACKOFF_FILE="$TMP_ROOT/quota-detect-backoff"
   AGY_QUOTA_DEFAULT_BACKOFF=3600
   AGY_QUOTA_BACKOFF_PADDING=300
+  AGY_QUOTA_MAX_BACKOFF=3600
   err_file="$TMP_ROOT/quota-detect.err"
 
   # retryDelayMs wins when present, converted to whole seconds (rounded up).
@@ -374,6 +375,29 @@ test_agy_quota_backoff_detection() {
   rm -f "$AGY_BACKOFF_FILE"
   printf 'a completely unrelated stderr line\n' > "$err_file"
   if set_agy_quota_backoff "$err_file"; then fail "unrelated stderr is not treated as quota exhaustion"; else pass "unrelated stderr is not treated as quota exhaustion"; fi
+
+  # Every branch clamps to AGY_QUOTA_MAX_BACKOFF: the API's reset estimates
+  # have been observed wrong in both directions (a "Resets in 20h26m" quota
+  # came back within the hour), so no single wait may exceed the ceiling.
+  AGY_QUOTA_MAX_BACKOFF=600
+  rm -f "$AGY_BACKOFF_FILE"
+  printf 'upstream error: retryDelayMs: 9000000\n' > "$err_file"
+  set_agy_quota_backoff "$err_file" || fail "huge retryDelayMs is still detected as quota exhaustion"
+  now=$(date +%s)
+  until_epoch=$(cat "$AGY_BACKOFF_FILE")
+  delay=$((until_epoch - now - AGY_QUOTA_BACKOFF_PADDING))
+  assert_eq "huge retryDelayMs clamps to the backoff ceiling" "600" "$delay"
+
+  # The hours-scale reset format ("Resets in 20h26m23s") does not match the
+  # m/s parser, so it falls to the default backoff -- which also clamps.
+  rm -f "$AGY_BACKOFF_FILE"
+  printf 'RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 20h26m23s.\n' > "$err_file"
+  set_agy_quota_backoff "$err_file" || fail "hours-scale reset message is still detected as quota exhaustion"
+  now=$(date +%s)
+  until_epoch=$(cat "$AGY_BACKOFF_FILE")
+  delay=$((until_epoch - now - AGY_QUOTA_BACKOFF_PADDING))
+  assert_eq "hours-scale reset message clamps to the backoff ceiling" "600" "$delay"
+  AGY_QUOTA_MAX_BACKOFF=3600
 }
 
 # Regression for the PR #186 live incident: Antigravity's print-mode can hit

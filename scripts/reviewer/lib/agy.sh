@@ -52,6 +52,13 @@ set_agy_quota_backoff() {
     return 1
   fi
 
+  # Clamp to the ceiling regardless of which branch produced the delay: the
+  # error body's reset estimates are untrustworthy, and the cost of retrying
+  # too early is a single failed agy call.
+  if [ "$delay_seconds" -gt "$AGY_QUOTA_MAX_BACKOFF" ]; then
+    delay_seconds="$AGY_QUOTA_MAX_BACKOFF"
+  fi
+
   until=$(($(date +%s) + delay_seconds + AGY_QUOTA_BACKOFF_PADDING))
   printf '%s\n' "$until" > "$AGY_BACKOFF_FILE"
   log "Antigravity quota exhausted; backing off until $(format_epoch_utc "$until")"
