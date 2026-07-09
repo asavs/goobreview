@@ -15,8 +15,13 @@ PROMPT_OUT="${REVIEWER_PROMPT_OUT:-}"
 IGNORE_AGY_BACKOFF="${REVIEWER_IGNORE_AGY_BACKOFF:-}"
 AGY_TIMEOUT="${REVIEWER_AGY_TIMEOUT:-600}"
 AGY_MODEL="${REVIEWER_AGY_MODEL:-auto}"
-AGY_QUOTA_DEFAULT_BACKOFF="${REVIEWER_AGY_QUOTA_DEFAULT_BACKOFF:-3600}"
-AGY_QUOTA_BACKOFF_PADDING="${REVIEWER_AGY_QUOTA_BACKOFF_PADDING:-300}"
+AGY_QUOTA_DEFAULT_BACKOFF="${REVIEWER_AGY_QUOTA_DEFAULT_BACKOFF:-600}"
+AGY_QUOTA_BACKOFF_PADDING="${REVIEWER_AGY_QUOTA_BACKOFF_PADDING:-60}"
+# Ceiling on any single quota backoff, whatever the 429 body claims. The
+# API's own reset estimates have been observed wrong in both directions
+# (a "Resets in 20h26m" quota came back within the hour), so long waits
+# only delay discovering a recovered quota. Retrying is one cheap agy call.
+AGY_QUOTA_MAX_BACKOFF="${REVIEWER_AGY_QUOTA_MAX_BACKOFF:-600}"
 MAX_PROMPT_BYTES="${REVIEWER_MAX_PROMPT_BYTES:-240000}"
 MAX_ARTIFACT_BYTES="${REVIEWER_MAX_ARTIFACT_BYTES:-1000000}"
 DIFF_MAX_BYTES="${REVIEWER_DIFF_MAX_BYTES:-120000}"
@@ -706,6 +711,39 @@ attempt: $attempt_n (reason: invalid-verdict)"
   fi
 }
 
+# The PR-body reaction is idempotent per user+emoji, so once the daemon has
+# reacted to a PR it can never signal "I saw your NEW comment" that way. To
+# make acknowledgment track activity, each signal also lands the same
+# reaction on the PR's newest issue comment (a fresh comment is a fresh
+# reaction target). Prints the newest comment id, or fails when the PR has
+# no comments or the fetch fails -- callers treat that as "PR body only".
+latest_issue_comment_id() {
+  local num="$1"
+  local comment_id
+
+  # github_api_paginate_array emits one object per line, so slurp before
+  # taking the last (newest) comment -- the API returns ascending by id.
+  comment_id=$(github_api_paginate_array "repos/$REPO/issues/$num/comments" 2>>"$LOG_FILE" |
+    jq -rs 'last.id // empty') || return 1
+  [ -n "$comment_id" ] || return 1
+  printf '%s\n' "$comment_id"
+}
+
+# Best-effort reaction on the PR's newest issue comment; silent no-op when
+# the PR has no comments. Failures are logged and never block the caller.
+post_reaction_on_latest_comment() {
+  local num="$1"
+  local content="$2"
+  local comment_id
+
+  comment_id=$(latest_issue_comment_id "$num") || return 0
+  if github_api_post_json "repos/$REPO/issues/comments/$comment_id/reactions" "{\"content\":\"$content\"}" >/dev/null 2>>"$LOG_FILE"; then
+    log "Signaled with $content reaction on newest comment $comment_id of PR #$num"
+  else
+    log "Failed to add $content reaction on newest comment of PR #$num (continuing)"
+  fi
+}
+
 # Post an "eyes" reaction to signal the daemon has started working this PR, so a
 # PR author can tell "not reached yet" from "in progress". Reactions are silent
 # (no watcher notifications) and idempotent per user+emoji, so re-posting on a
@@ -720,6 +758,7 @@ post_review_started_reaction() {
   else
     log "Failed to add review-started reaction on PR #$num (continuing)"
   fi
+  post_reaction_on_latest_comment "$num" eyes
 }
 
 # Post a "confused" reaction to signal the daemon hit an Antigravity rate
@@ -736,6 +775,7 @@ post_agy_backoff_reaction() {
   else
     log "Failed to add rate-limit reaction on PR #$num (continuing)"
   fi
+  post_reaction_on_latest_comment "$num" confused
 }
 
 # Open the daemon's own "goobreview" check run on the PR head as the daemon
