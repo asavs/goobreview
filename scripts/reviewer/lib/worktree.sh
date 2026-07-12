@@ -74,3 +74,32 @@ prepare_review_worktree() {
   rm -rf "$tmp"
   printf '%s\n' "$dir"
 }
+
+# Bound the PR-head snapshot cache: delete cached snapshots whose SHA is no
+# longer the head of any open PR. Called once per tick with the live head SHA
+# set, so the cache is bounded by the open-PR working set instead of growing
+# without eviction. Snapshots are chmod a-w at creation, so restore write first.
+prune_stale_review_worktrees() {
+  local slug parent heads_dir dir sha
+  local -A keep=()
+
+  slug=$(review_worktree_slug)
+  parent="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/worktrees/$slug"
+  heads_dir="$parent/heads"
+  [ -d "$heads_dir" ] || return 0
+
+  for sha in "$@"; do
+    [ -n "$sha" ] && keep["$sha"]=1
+  done
+
+  for dir in "$heads_dir"/*; do
+    [ -d "$dir" ] || continue
+    sha=$(basename "$dir")
+    if [ -z "${keep[$sha]:-}" ]; then
+      chmod -R u+w "$dir" 2>>"$LOG_FILE" || true
+      if rm -rf "$dir" 2>>"$LOG_FILE"; then
+        log "Evicted stale PR-head snapshot $sha"
+      fi
+    fi
+  done
+}
