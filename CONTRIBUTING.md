@@ -30,6 +30,9 @@ it is not installed. The fixture runner covers reviewer-core parser, prompt,
 and CI-gate behavior without GitHub credentials, Antigravity CLI auth, or network
 access. Run the shell checks from Linux or a working WSL environment; a
 Windows host with no WSL distribution is not authoritative for Bash syntax.
+Git Bash / MSYS / Cygwin are not supported for fixtures (the runner exits
+non-zero rather than soft-skipping). Optional local probe for missing GNU
+tools: `bash scripts/dev-env-check.sh`.
 
 ## Forks And Reviewer Personalities
 

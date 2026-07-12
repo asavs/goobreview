@@ -40,7 +40,12 @@ Bootstrap flow (Cloud Shell path): `scripts/bootstrap-gcp.sh` creates a GCE VM, 
 
 ## Common Commands
 
+**Dev/test runtime is GNU/Linux (Ubuntu).** On Windows, run the commands below under WSL Ubuntu (or another Linux host), not Git Bash or PowerShell. The fixture suite fails loud without `flock` / on MSYS. Optional: `bash scripts/dev-env-check.sh` before fixtures.
+
 ```bash
+# Optional: confirm GNU/Linux host tooling before a long fixture run
+bash scripts/dev-env-check.sh
+
 # Syntax-check all shell scripts and run the fixture test suite
 mapfile -t shell_files < <(git ls-files '*.sh')
 bash -n "${shell_files[@]}"
