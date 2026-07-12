@@ -6,9 +6,18 @@
 # shellcheck disable=SC2034,SC2317,SC2329
 set -euo pipefail
 
+# Fail loud: a soft skip looked green on hosts without util-linux (e.g. Git
+# Bash) and gave false confidence. Target is Ubuntu/WSL; see CONTRIBUTING.md
+# and scripts/dev-env-check.sh.
+if [ -n "${MSYSTEM:-}" ] || [ "${OSTYPE:-}" = "msys" ] || [ "${OSTYPE:-}" = "cygwin" ]; then
+  printf 'FAIL: reviewer fixtures require GNU/Linux (Ubuntu or WSL), not MSYS/Cygwin/Git Bash.\n' >&2
+  printf 'Run under WSL Ubuntu or a Linux host. Optional: bash scripts/dev-env-check.sh\n' >&2
+  exit 1
+fi
 if ! command -v flock >/dev/null 2>&1; then
-  printf 'SKIP: reviewer fixture suite needs flock (util-linux).\n'
-  exit 0
+  printf 'FAIL: reviewer fixture suite needs flock (util-linux).\n' >&2
+  printf 'Install util-linux (Ubuntu/WSL) or run on a Linux host. Optional: bash scripts/dev-env-check.sh\n' >&2
+  exit 1
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
