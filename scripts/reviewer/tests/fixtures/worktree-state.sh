@@ -89,6 +89,70 @@ test_worktree_cache_keeps_per_head_slots() {
   pass "worktree prep strips .agents from PR-head snapshot"
 }
 
+test_prune_stale_review_worktrees() {
+  local source_dir tarball state_dir runtime_dir heads_dir kept evicted also_kept
+
+  source_dir="$TMP_ROOT/worktree-prune-source"
+  tarball="$TMP_ROOT/worktree-prune.tar.gz"
+  state_dir="$TMP_ROOT/worktree-prune-state"
+  runtime_dir="$TMP_ROOT/worktree-prune-runtime"
+  mkdir -p "$source_dir/repo-root" "$state_dir" "$runtime_dir"
+  printf 'prunable\n' > "$source_dir/repo-root/README.md"
+  tar -czf "$tarball" -C "$source_dir" repo-root
+
+  REPO="example/repo"
+  STATE_DIR="$state_dir"
+  RUNTIME_STATE_DIR="$runtime_dir"
+  LOG_FILE="$TMP_ROOT/worktree-prune.log"
+  : > "$LOG_FILE"
+
+  # shellcheck disable=SC2317 # Mocked API helper is invoked indirectly by prepare_review_worktree.
+  github_api_get() {
+    case "${1:-}" in
+      repos/example/repo/tarball/*) cat "$tarball" ;;
+      *) return 1 ;;
+    esac
+  }
+
+  # prepare_review_worktree leaves every snapshot chmod -R a-w, so pruning the
+  # trees below exercises the restore-write-then-delete path against the real
+  # on-disk state.
+  kept=$(prepare_review_worktree sha1)
+  evicted=$(prepare_review_worktree sha2)
+  also_kept=$(prepare_review_worktree sha3)
+  heads_dir="$runtime_dir/worktrees/$(review_worktree_slug)/heads"
+
+  prune_stale_review_worktrees sha1 "" sha3
+
+  if [ ! -d "$kept" ]; then
+    fail "prune keeps snapshots for live head SHAs"
+  fi
+  pass "prune keeps snapshots for live head SHAs"
+  if [ ! -d "$also_kept" ]; then
+    fail "prune keeps every SHA in the keep-set"
+  fi
+  pass "prune keeps every SHA in the keep-set"
+  if [ -e "$evicted" ]; then
+    fail "prune deletes read-only snapshots for stale head SHAs"
+  fi
+  pass "prune deletes read-only snapshots for stale head SHAs"
+  assert_contains "prune logs the evicted SHA" "Evicted stale PR-head snapshot sha2" "$LOG_FILE"
+  assert_not_contains "prune does not evict kept SHAs" "Evicted stale PR-head snapshot sha1" "$LOG_FILE"
+
+  # No open PRs means an empty keep-set, which evicts the whole cache.
+  prune_stale_review_worktrees
+  if [ -n "$(ls -A "$heads_dir" 2>/dev/null)" ]; then
+    fail "prune with an empty keep-set evicts every snapshot"
+  fi
+  pass "prune with an empty keep-set evicts every snapshot"
+
+  rm -rf "$runtime_dir/worktrees"
+  if ! prune_stale_review_worktrees sha1; then
+    fail "prune is a no-op when no snapshot cache exists"
+  fi
+  pass "prune is a no-op when no snapshot cache exists"
+}
+
 test_invalid_verdict_state() {
   local artifact runs_json
 

@@ -46,7 +46,10 @@ MAX_ATTEMPTS="${REVIEWER_MAX_ATTEMPTS:-$MAX_PRS}"
 AUTO_RESOLVE_BOT_THREADS="${REVIEWER_AUTO_RESOLVE_BOT_THREADS:-0}"
 CHECK_RUN_SIGNAL="${REVIEWER_CHECK_RUN_SIGNAL:-1}"
 STATE_DIR="${REVIEWER_STATE:-$HOME/.goobreview}"
-RUNTIME_OWNER="${USER:-$(id -u 2>/dev/null || printf user)}"
+# Pin the runtime-dir suffix to the uid (not $USER): cron runs with $USER
+# unset while interactive shells set it, and letting the suffix flip between
+# the two grows a second, never-pruned copy of the snapshot cache.
+RUNTIME_OWNER="$(id -u 2>/dev/null || printf '%s' "${USER:-user}")"
 # Snapshot extraction needs deterministic on-disk space, so default to /tmp
 # rather than XDG_RUNTIME_DIR (commonly a tmpfs capped near 10% of RAM, ~96 MB
 # on a 1 GB e2-micro -- too small to unpack a PR-head snapshot). The dir is
@@ -1259,3 +1262,14 @@ while IFS=$'\t' read -r num author head_sha draft pr_json_b64; do
     break
   fi
 done <<< "$PRS"
+
+# Bound the snapshot cache to the current open-PR heads. The keep-set is
+# parsed from $PRS rather than accumulated inside the loop above: the loop can
+# break early on the attempt budget, and a PR it never reached this tick still
+# owns its snapshot. Skipped in the single-PR paths (ONLY_PR / DRY_RUN /
+# RENDER_PROMPT_ONLY can populate $PRS with one PR, so pruning there would
+# wrongly evict every other open PR's cache).
+if [ -z "$ONLY_PR" ] && [ -z "$DRY_RUN" ] && [ -z "$RENDER_PROMPT_ONLY" ]; then
+  mapfile -t live_head_shas < <(printf '%s\n' "$PRS" | cut -f3)
+  prune_stale_review_worktrees "${live_head_shas[@]}"
+fi
