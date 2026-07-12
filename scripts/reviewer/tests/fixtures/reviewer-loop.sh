@@ -495,6 +495,11 @@ EOF
 
   cat > "$bin_dir/agy" <<EOF
 #!/usr/bin/env bash
+# Version probe (once per tick) must not count as a review invocation.
+if [ "\${1:-}" = "--version" ]; then
+  printf 'agy 0.0.0-fixture\n'
+  exit 0
+fi
 printf '%s\n' "\${FIXTURE_SCENARIO:-unknown}" >> "$agy_file"
 if [ "\${FIXTURE_SCENARIO:-}" = "success-success" ]; then
   printf 'fixture agy failure\n' >&2
@@ -1673,6 +1678,8 @@ EOF
   assert_eq "manifest records complete research pair" "true" "$(jq -r '.pair_complete' "$manifest")"
   assert_eq "manifest records posted transcript source" "stdout_fallback" "$(jq -r '.posted_transcript_source' "$manifest")"
   assert_eq "manifest records counterfactual transcript source" "stdout_fallback" "$(jq -r '.counterfactual_transcript_source' "$manifest")"
+  assert_eq "manifest records agy CLI version field" "true" "$(jq -r 'has("agy_cli_version")' "$manifest")"
+  assert_eq "manifest records engine_release_tag field" "true" "$(jq -r 'has("engine_release_tag")' "$manifest")"
   assert_eq "manifest records public eligibility" "public-consented" "$(jq -r '.research_eligible' "$manifest")"
   assert_eq "manifest records head pushed-at timestamp" "$head_committed_at_fixture" "$(jq -r '.head_pushed_at' "$manifest")"
   manifest_latency=$(jq -r '.review_latency_seconds' "$manifest")

@@ -562,17 +562,47 @@ test_trace_to_details() {
 }
 
 test_review_footer_note() {
+  local release_repo release_sha
+
   assert_eq "zero duration formats as seconds" "0s" "$(format_agy_duration 0)"
   assert_eq "sub-minute duration formats as seconds" "59s" "$(format_agy_duration 59)"
   assert_eq "minute duration formats with zero-padded seconds" "4m12s" "$(format_agy_duration 252)"
   assert_eq "non-numeric duration degrades to zero" "0s" "$(format_agy_duration bogus)"
 
-  # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
-  assert_eq "footer carries model, duration, and linked engine sha" \
-    '*Drafted autonomously by gemini-3-pro in 4m12s via goobreview antigravity-cli [`abc1234`](https://github.com/asavs/goobreview/commit/abc1234).*' \
-    "$(review_footer_note "gemini-3-pro" 252 "abc1234")"
-  # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
-  assert_eq "footer omits engine link when sha is unknown" \
-    '*Drafted autonomously by auto in 0s via goobreview antigravity-cli.*' \
-    "$(review_footer_note "auto" 0 "unknown")"
+  assert_eq "footer carries model, linked agy version, duration, and linked engine sha" \
+    '*gemini-3-pro in [agy 1.0.16](https://github.com/google-antigravity/antigravity-cli/releases/tag/1.0.16) took 4m12s via [goobreview abc1234](https://github.com/asavs/goobreview/commit/abc1234).*' \
+    "$(review_footer_note "gemini-3-pro" 252 "abc1234" "" "agy 1.0.16")"
+  assert_eq "footer omits engine when sha is unknown and omits unavailable agy version" \
+    '*auto took 0s.*' \
+    "$(review_footer_note "auto" 0 "unknown" "" "unavailable")"
+  assert_eq "footer links goobreview release notes when engine is a release tag" \
+    '*gemini-3-pro in [agy 1.0.16](https://github.com/google-antigravity/antigravity-cli/releases/tag/1.0.16) took 4m12s via [goobreview v2.2.0](https://github.com/asavs/goobreview/releases/tag/v2.2.0).*' \
+    "$(review_footer_note "gemini-3-pro" 252 "abc1234" "v2.2.0" "1.0.16")"
+  assert_eq "footer_agy_cli_version strips leading agy prefix" "1.0.16" "$(footer_agy_cli_version "agy 1.0.16")"
+  assert_eq "footer_agy_cli_version is empty for unavailable" "" "$(footer_agy_cli_version "unavailable")"
+  assert_eq "footer_agy_release_url links clean semver" \
+    "https://github.com/google-antigravity/antigravity-cli/releases/tag/1.0.16" \
+    "$(footer_agy_release_url "1.0.16")"
+  assert_eq "footer_agy_release_url skips non-version probes" "" "$(footer_agy_release_url "dev-build")"
+  assert_eq "footer leaves agy unlinked when version is not a release tag" \
+    '*auto in agy weird!build took 1s.*' \
+    "$(review_footer_note "auto" 1 "unknown" "" "weird!build")"
+
+  release_repo="$TMP_ROOT/engine-release-tag-repo"
+  rm -rf "$release_repo"
+  mkdir -p "$release_repo"
+  git -C "$release_repo" init -q
+  git -C "$release_repo" config user.email "fixture@example.com"
+  git -C "$release_repo" config user.name "fixture"
+  printf 'release tip\n' >"$release_repo/README"
+  git -C "$release_repo" add README
+  git -C "$release_repo" commit -qm "release tip"
+  git -C "$release_repo" tag v9.9.9
+  release_sha=$(git -C "$release_repo" rev-parse --short HEAD)
+  assert_eq "resolve_engine_release_tag finds v* tag on HEAD" "v9.9.9" "$(resolve_engine_release_tag "$release_repo")"
+  assert_eq "footer prefers release notes over commit when tag is resolved" \
+    "*auto in [agy 1.0.16](https://github.com/google-antigravity/antigravity-cli/releases/tag/1.0.16) took 1s via [goobreview v9.9.9](https://github.com/asavs/goobreview/releases/tag/v9.9.9).*" \
+    "$(review_footer_note "auto" 1 "$release_sha" "$(resolve_engine_release_tag "$release_repo")" "1.0.16")"
+  git -C "$release_repo" commit --allow-empty -qm "after release"
+  assert_eq "resolve_engine_release_tag is empty off a release tip" "" "$(resolve_engine_release_tag "$release_repo")"
 }

@@ -318,6 +318,45 @@ EOF
   HOME="$saved_home"
 }
 
+test_probe_agy_cli_version() {
+  local bin_dir saved_path saved_probed saved_version saved_state
+
+  bin_dir="$TMP_ROOT/agy-version-bin"
+  mkdir -p "$bin_dir"
+  cat >"$bin_dir/agy" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then
+  printf 'agy 1.0.16 (fixture)\n'
+  exit 0
+fi
+printf 'unexpected\n' >&2
+exit 1
+EOF
+  chmod 755 "$bin_dir/agy"
+
+  saved_path="$PATH"
+  saved_probed="${AGY_CLI_VERSION_PROBED:-}"
+  saved_version="${AGY_CLI_VERSION:-}"
+  saved_state="${STATE_DIR:-}"
+  STATE_DIR="$TMP_ROOT/agy-version-state"
+  mkdir -p "$STATE_DIR"
+  unset AGY_CLI_VERSION_PROBED AGY_CLI_VERSION
+  PATH="$bin_dir:$PATH"
+  assert_eq "probe_agy_cli_version reads agy --version" "agy 1.0.16 (fixture)" "$(probe_agy_cli_version)"
+  # Second call uses process cache (no re-exec needed); still returns same.
+  assert_eq "probe_agy_cli_version is cached per process" "agy 1.0.16 (fixture)" "$(probe_agy_cli_version)"
+  if [ -f "$STATE_DIR/agy_cli_version.cache" ]; then
+    pass "probe_agy_cli_version writes mtime cache under STATE_DIR"
+  else
+    fail "probe_agy_cli_version writes mtime cache under STATE_DIR"
+  fi
+
+  PATH="$saved_path"
+  STATE_DIR="$saved_state"
+  if [ -n "$saved_probed" ]; then AGY_CLI_VERSION_PROBED="$saved_probed"; else unset AGY_CLI_VERSION_PROBED; fi
+  if [ -n "$saved_version" ]; then AGY_CLI_VERSION="$saved_version"; else unset AGY_CLI_VERSION; fi
+}
+
 # Direct unit coverage for set_agy_quota_backoff's matching/parsing: no
 # reviewer.sh integration needed since the function only reads an err-file
 # path and STATE_DIR-scoped globals.

@@ -99,6 +99,9 @@ ALLOW_REQUIRED_CHECKS_OVERRIDE="${REVIEWER_ALLOW_REQUIRED_CHECKS_OVERRIDE:-0}"
 # Provenance for the review footer and research/dry-run artifacts. sync-worktree
 # pins the checkout to a SHA each tick, so this identifies the engine exactly.
 ENGINE_SHA="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+# When HEAD is exactly a release tag tip (v*), the footer links release notes
+# instead of the raw commit. Empty when the tip is not a tagged release.
+ENGINE_RELEASE_TAG="$(resolve_engine_release_tag "$REPO_DIR")"
 
 if [ "${REVIEWER_LOCK_HELD:-0}" = "1" ]; then
   flock -n 9 || fatal "REVIEWER_LOCK_HELD=1 but reviewer lock fd 9 is not held"
@@ -109,6 +112,15 @@ fi
 
 validate_reviewer_config
 load_effective_required_checks_json >/dev/null
+# Once per tick (mtime-cached): CLI binary identity for research comparability.
+# Model labels alone do not catch silent agy upgrades.
+AGY_CLI_VERSION="$(probe_agy_cli_version)"
+if [ -z "$RENDER_PROMPT_ONLY" ]; then
+  log "Antigravity CLI version: $AGY_CLI_VERSION"
+  if [ -n "$ENGINE_RELEASE_TAG" ]; then
+    log "Engine release tag: $ENGINE_RELEASE_TAG (sha $ENGINE_SHA)"
+  fi
+fi
 
 write_dry_run_artifact() {
   local num="$1"
@@ -136,7 +148,8 @@ write_dry_run_artifact() {
   inline_comment_count=$(printf '%s' "$inline_comments_json" | jq -r 'length') || fatal "invalid resolved inline-comments JSON"
   runtime_dir="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime"
   agy_path=$(command -v agy 2>/dev/null || printf 'not found')
-  agy_version="not probed (avoids a second agy invocation)"
+  # Prefer the tick-level probe (mtime-cached); fall back if unset in tests.
+  agy_version="${AGY_CLI_VERSION:-$(probe_agy_cli_version)}"
   prompt_bytes=$(wc -c <"$prompt_file" | tr -d ' ')
   prompt_sha=$(sha256sum "$prompt_file" | awk '{print $1}')
   response_bytes=$(printf '%s' "$review_body" | wc -c | tr -d ' ')
@@ -185,11 +198,12 @@ write_dry_run_artifact() {
     printf 'Requested model (--model): %s\n' "$AGY_MODEL"
     printf 'Resolved model label: %s\n' "${resolved_model_label:-unavailable}"
     printf 'Engine commit: %s\n' "$ENGINE_SHA"
+    printf 'Engine release tag: %s\n' "${ENGINE_RELEASE_TAG:-none}"
     printf 'Agy wall-clock seconds: %s\n' "${agy_elapsed_s:-unavailable}"
     printf 'Head pushed at: %s\n' "${head_committed_at:-unavailable}"
     printf 'Review latency seconds: %s\n' "${review_latency_seconds:-unavailable}"
     printf 'Antigravity CLI path: %s\n' "$agy_path"
-    printf 'Antigravity CLI version probe: %s\n' "$agy_version"
+    printf 'Antigravity CLI version: %s\n' "$agy_version"
     printf 'Runtime cwd: %s\n' "$runtime_dir"
     printf 'Home-directory agy context files (auto-loaded; security issue #106): %s\n' "$home_agy_context"
     printf 'PR-head snapshot path: %s\n' "${worktree_dir:-unavailable}"
@@ -241,6 +255,8 @@ write_dry_run_artifact() {
     --arg posted_personality "$POSTED_PERSONALITY" \
     --arg personality_file "$PERSONALITY_FILE" \
     --arg engine_sha "$ENGINE_SHA" \
+    --arg engine_release_tag "${ENGINE_RELEASE_TAG:-}" \
+    --arg agy_cli_version "${agy_version}" \
     --arg transcript_source "$transcript_source" \
     --arg agy_seconds "${agy_elapsed_s:-}" \
     --arg head_committed_at "${head_committed_at:-}" \
@@ -267,6 +283,8 @@ write_dry_run_artifact() {
       posted_personality: $posted_personality,
       personality_file: $personality_file,
       engine_sha: $engine_sha,
+      engine_release_tag: (if $engine_release_tag == "" then null else $engine_release_tag end),
+      agy_cli_version: $agy_cli_version,
       transcript_source: $transcript_source,
       agy_seconds: (if $agy_seconds == "" then null else ($agy_seconds | tonumber) end),
       head_pushed_at: (if $head_committed_at == "" then null else $head_committed_at end),
@@ -525,6 +543,8 @@ capture_research_pair() {
     --arg posted_resolved_model_label "$posted_resolved_model_label" \
     --arg counterfactual_resolved_model_label "$counterfactual_resolved_model_label" \
     --arg engine_sha "$ENGINE_SHA" \
+    --arg engine_release_tag "${ENGINE_RELEASE_TAG:-}" \
+    --arg agy_cli_version "${AGY_CLI_VERSION:-unavailable}" \
     --arg posted_transcript_source "$posted_transcript_source" \
     --arg counterfactual_transcript_source "$counterfactual_transcript_source" \
     --arg posted_agy_seconds "${agy_elapsed_s:-}" \
@@ -559,6 +579,8 @@ capture_research_pair() {
         counterfactual: (if $counterfactual_resolved_model_label == "" then null else $counterfactual_resolved_model_label end)
       },
       engine_sha: $engine_sha,
+      engine_release_tag: (if $engine_release_tag == "" then null else $engine_release_tag end),
+      agy_cli_version: $agy_cli_version,
       posted_transcript_source: $posted_transcript_source,
       counterfactual_transcript_source: $counterfactual_transcript_source,
       posted_agy_seconds: (if $posted_agy_seconds == "" then null else ($posted_agy_seconds | tonumber) end),
@@ -1200,7 +1222,7 @@ EOF
 $formatted_body
 
 ---
-$(review_footer_note "${resolved_model_label:-$AGY_MODEL}" "${agy_elapsed_s:-0}" "$ENGINE_SHA")
+$(review_footer_note "${resolved_model_label:-$AGY_MODEL}" "${agy_elapsed_s:-0}" "$ENGINE_SHA" "${ENGINE_RELEASE_TAG:-}" "${AGY_CLI_VERSION:-}")
 EOF
 )
 
