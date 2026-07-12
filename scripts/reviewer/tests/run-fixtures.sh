@@ -192,9 +192,9 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-# 591 after footer shape A; +2 session sidecars; +6 archive helper; +3 research
-# transcript fields (thinking semantics, session_id, transcript_archive) → 602.
-EXPECTED_ASSERTIONS=602
+# 602 after #157 helpers; research e2e: -2 shape-only +9 strong archive/session;
+# +8 stdout_fallback null-archive path → 617 (includes footer shape A +3).
+EXPECTED_ASSERTIONS=617
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

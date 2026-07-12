@@ -1453,6 +1453,7 @@ test_reviewer_research_capture_posts_selected_review_only() {
   local source_dir tarball review_payload reactions_file check_runs_file posted_body manifest research_dir dry_run_out dry_comments_json
   local manifest_latency dry_run_latency head_committed_at_fixture expected_review_worktree
   local retry_once_state retry_once_marker retry_once_manifest retry_empty_state retry_empty_manifest
+  local fixture_home posted_archive cf_archive fallback_state fallback_manifest
 
   head_committed_at_fixture="$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
   state_dir="$TMP_ROOT/research-state"
@@ -1599,17 +1600,47 @@ shift
 EOF
   chmod +x "$bin_dir/timeout"
 
+  # Plant a brain-session transcript when FIXTURE_NO_TRANSCRIPT is unset so the
+  # research path exercises session_id + gzip archive (#157), not only stdout_fallback.
   cat > "$bin_dir/agy" <<'EOF'
 #!/usr/bin/env bash
 printf 'fake agy stderr trace\n' >&2
+
+# Write a timestamped planner transcript under $HOME so run_agy_review can find
+# it via latest_agy_transcript_file (-newer than the pre-agy marker).
+plant_transcript() {
+  local session_id="$1" content="$2" thinking="${3:-fixture paraphrase only}"
+  local dir logs
+  [ -n "${HOME:-}" ] || return 0
+  dir="$HOME/.gemini/antigravity-cli/brain/$session_id/.system_generated/logs"
+  mkdir -p "$dir"
+  logs="$dir/transcript_full.jsonl"
+  # Distinct mtime from the pre-agy marker (second resolution on some FS).
+  sleep 0.05 2>/dev/null || true
+  printf '%s\n' "$(jq -nc --arg t "$thinking" --arg c "$content" \
+    '{type:"PLANNER_RESPONSE",thinking:$t,content:$c}')" >"$logs"
+}
+
 agents_md_content="$(cat AGENTS.md 2>/dev/null || true)"
 if [ -n "${REVIEWER_DRY_RUN:-}" ]; then
-  printf '### README location\nLocation: README.md:1\nThis needs review.\nAPPROVE\n'
+  body=$'### README location\nLocation: README.md:1\nThis needs review.\nAPPROVE'
+  if [ -z "${FIXTURE_NO_TRANSCRIPT:-}" ]; then
+    plant_transcript "session-dry-run" "$body"
+  fi
+  printf '%s\n' "$body"
   exit 0
 fi
 case "$agents_md_content" in
-  *"Mauro, SHUT"*) printf 'linus review\nCOMMENT\n' ;;
-  *"very angry senior engineer"*) printf 'angry review\nCOMMENT\n' ;;
+  *"Mauro, SHUT"*)
+    body=$'linus review\nCOMMENT'
+    [ -z "${FIXTURE_NO_TRANSCRIPT:-}" ] && plant_transcript "session-linus" "$body"
+    printf '%s\n' "$body"
+    ;;
+  *"very angry senior engineer"*)
+    body=$'angry review\nCOMMENT'
+    [ -z "${FIXTURE_NO_TRANSCRIPT:-}" ] && plant_transcript "session-posted-angry" "$body"
+    printf '%s\n' "$body"
+    ;;
   *)
     if [ -n "${FIXTURE_COUNTERFACTUAL_ALWAYS_EMPTY:-}" ]; then
       exit 0
@@ -1618,7 +1649,9 @@ case "$agents_md_content" in
       : > "$FIXTURE_COUNTERFACTUAL_EMPTY_ONCE_FILE"
       exit 0
     fi
-    printf 'control review\nAPPROVE\n'
+    body=$'control review\nAPPROVE'
+    [ -z "${FIXTURE_NO_TRANSCRIPT:-}" ] && plant_transcript "session-cf-none" "$body"
+    printf '%s\n' "$body"
     ;;
 esac
 EOF
@@ -1628,6 +1661,10 @@ EOF
   printf 'key\n' > "$key_file"
   chmod 600 "$key_file"
   printf '[]\n' > "$TMP_ROOT/research-required.json"
+
+  # Isolate brain transcripts under a fixture HOME (never the real user home).
+  fixture_home="$TMP_ROOT/research-home"
+  mkdir -p "$fixture_home"
 
   env_file="$TMP_ROOT/research.env"
   cat > "$env_file" <<EOF
@@ -1649,7 +1686,7 @@ EOF
   : > "$check_runs_file"
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
-  output=$(set -a; . "$env_file"; set +a; PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  output=$(set -a; . "$env_file"; set +a; HOME="$fixture_home" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
 
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
@@ -1676,15 +1713,45 @@ EOF
   assert_eq "manifest records posted arm event" "COMMENT" "$(jq -r '.posted_event' "$manifest")"
   assert_eq "manifest records counterfactual event" "APPROVE" "$(jq -r '.counterfactual_event' "$manifest")"
   assert_eq "manifest records complete research pair" "true" "$(jq -r '.pair_complete' "$manifest")"
-  assert_eq "manifest records posted transcript source" "stdout_fallback" "$(jq -r '.posted_transcript_source' "$manifest")"
-  assert_eq "manifest records counterfactual transcript source" "stdout_fallback" "$(jq -r '.counterfactual_transcript_source' "$manifest")"
+  assert_eq "manifest records posted transcript source" "transcript" "$(jq -r '.posted_transcript_source' "$manifest")"
+  assert_eq "manifest records counterfactual transcript source" "transcript" "$(jq -r '.counterfactual_transcript_source' "$manifest")"
   assert_eq "manifest records agy CLI version field" "true" "$(jq -r 'has("agy_cli_version")' "$manifest")"
   assert_eq "manifest records engine_release_tag field" "true" "$(jq -r 'has("engine_release_tag")' "$manifest")"
   assert_eq "manifest records transcript thinking semantics" \
     "model-paraphrased summaries; not verbatim reasoning; reasoning is not a measured quantity" \
     "$(jq -r '.transcript_thinking_semantics' "$manifest")"
-  assert_eq "manifest records session_id object" "true" "$(jq -r '.session_id | type == "object"' "$manifest")"
-  assert_eq "manifest records transcript_archive object" "true" "$(jq -r '.transcript_archive | type == "object"' "$manifest")"
+  # #157 end-to-end: distinct session ids + gzip archives per arm (not mere object shape).
+  assert_eq "manifest records posted session id from brain path" "session-posted-angry" "$(jq -r '.session_id.posted' "$manifest")"
+  assert_eq "manifest records counterfactual session id from brain path" "session-cf-none" "$(jq -r '.session_id.counterfactual' "$manifest")"
+  posted_archive=$(jq -r '.transcript_archive.posted' "$manifest")
+  cf_archive=$(jq -r '.transcript_archive.counterfactual' "$manifest")
+  assert_contains "manifest posted archive path is under the angry arm" "/angry/transcript_full.jsonl.gz" <(printf '%s\n' "$posted_archive")
+  assert_contains "manifest counterfactual archive path is under the none arm" "/none/transcript_full.jsonl.gz" <(printf '%s\n' "$cf_archive")
+  if [ -f "$posted_archive" ]; then
+    pass "posted transcript archive exists on disk"
+  else
+    fail "posted transcript archive exists on disk"
+  fi
+  if [ -f "$cf_archive" ]; then
+    pass "counterfactual transcript archive exists on disk"
+  else
+    fail "counterfactual transcript archive exists on disk"
+  fi
+  if gzip -dc "$posted_archive" 2>/dev/null | grep -q 'angry review'; then
+    pass "posted archive gunzips to angry planner content"
+  else
+    fail "posted archive gunzips to angry planner content"
+  fi
+  if gzip -dc "$cf_archive" 2>/dev/null | grep -q 'control review'; then
+    pass "counterfactual archive gunzips to control planner content"
+  else
+    fail "counterfactual archive gunzips to control planner content"
+  fi
+  if [ ! -f "${posted_archive}.truncated" ] && [ ! -f "${cf_archive}.truncated" ]; then
+    pass "default-size transcripts write no truncation marker"
+  else
+    fail "default-size transcripts write no truncation marker"
+  fi
   assert_eq "manifest records public eligibility" "public-consented" "$(jq -r '.research_eligible' "$manifest")"
   assert_eq "manifest records head pushed-at timestamp" "$head_committed_at_fixture" "$(jq -r '.head_pushed_at' "$manifest")"
   manifest_latency=$(jq -r '.review_latency_seconds' "$manifest")
@@ -1715,12 +1782,36 @@ EOF
   assert_contains "counterfactual artifact agents.md captures the snapshot mount path" \
     "mounted read-only at: $expected_review_worktree" "$research_dir/none/artifact.txt"
 
+  # stdout_fallback path: no brain transcript → null session/archive, tick still succeeds.
+  fallback_state="$TMP_ROOT/research-state-no-transcript"
+  mkdir -p "$fallback_state"
+  rm -rf "$fixture_home/.gemini"
+  status=0
+  # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$fallback_state" HOME="$fixture_home" FIXTURE_NO_TRANSCRIPT=1 PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    fail "research capture without transcript exits successfully"
+  fi
+  pass "research capture without transcript exits successfully"
+  fallback_manifest=$(find "$fallback_state/research-runs" -name manifest.json | head -n 1)
+  if [ -z "$fallback_manifest" ]; then
+    fail "no-transcript research manifest is written"
+  fi
+  pass "no-transcript research manifest is written"
+  assert_eq "no-transcript manifest uses stdout_fallback for posted arm" "stdout_fallback" "$(jq -r '.posted_transcript_source' "$fallback_manifest")"
+  assert_eq "no-transcript manifest uses stdout_fallback for counterfactual arm" "stdout_fallback" "$(jq -r '.counterfactual_transcript_source' "$fallback_manifest")"
+  assert_eq "no-transcript manifest has null posted session_id" "null" "$(jq -r '.session_id.posted' "$fallback_manifest")"
+  assert_eq "no-transcript manifest has null counterfactual session_id" "null" "$(jq -r '.session_id.counterfactual' "$fallback_manifest")"
+  assert_eq "no-transcript manifest has null posted transcript_archive" "null" "$(jq -r '.transcript_archive.posted' "$fallback_manifest")"
+  assert_eq "no-transcript manifest has null counterfactual transcript_archive" "null" "$(jq -r '.transcript_archive.counterfactual' "$fallback_manifest")"
+
   retry_once_state="$TMP_ROOT/research-state-retry-once"
   retry_once_marker="$TMP_ROOT/research-counterfactual-empty-once"
   mkdir -p "$retry_once_state"
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
-  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$retry_once_state" FIXTURE_COUNTERFACTUAL_EMPTY_ONCE_FILE="$retry_once_marker" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$retry_once_state" HOME="$fixture_home" FIXTURE_COUNTERFACTUAL_EMPTY_ONCE_FILE="$retry_once_marker" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
     fail "research capture retry-once fixture exits successfully"
@@ -1738,7 +1829,7 @@ EOF
   mkdir -p "$retry_empty_state"
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
-  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$retry_empty_state" FIXTURE_COUNTERFACTUAL_ALWAYS_EMPTY=1 PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$retry_empty_state" HOME="$fixture_home" FIXTURE_COUNTERFACTUAL_ALWAYS_EMPTY=1 PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
     fail "research capture retry-empty fixture exits successfully"
@@ -1757,7 +1848,7 @@ EOF
   : > "$check_runs_file"
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
-  output=$(set -a; . "$env_file"; set +a; REVIEWER_DRY_RUN=1 REVIEWER_DRY_RUN_OUT="$dry_run_out" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_DRY_RUN=1 REVIEWER_DRY_RUN_OUT="$dry_run_out" HOME="$fixture_home" PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
     fail "dry-run inline-comment fixture reviewer exits successfully"
@@ -1780,7 +1871,7 @@ EOF
   assert_not_contains "dry-run artifact does not mark review latency unavailable" "Review latency seconds: unavailable" "$dry_run_out"
   assert_contains "dry-run artifact includes agents.md section" "===== AGY AGENTS.MD START =====" "$dry_run_out"
   assert_eq "dry-run launch json records head pushed-at timestamp" "$head_committed_at_fixture" "$(jq -r '.head_pushed_at' "$dry_run_out.launch.json")"
-  assert_eq "dry-run launch json records transcript source" "stdout_fallback" "$(jq -r '.transcript_source' "$dry_run_out.launch.json")"
+  assert_eq "dry-run launch json records transcript source" "transcript" "$(jq -r '.transcript_source' "$dry_run_out.launch.json")"
   dry_run_latency=$(jq -r '.review_latency_seconds' "$dry_run_out.launch.json")
   if [ "$dry_run_latency" -ge 0 ] 2>/dev/null && [ "$dry_run_latency" -lt 86400 ] 2>/dev/null; then
     pass "dry-run launch json records a sane non-negative review latency"
@@ -1824,7 +1915,7 @@ EOF
 
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
-  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$priv_state_off" FIXTURE_REPO_PRIVATE=true PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$priv_state_off" HOME="$fixture_home" FIXTURE_REPO_PRIVATE=true PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
     fail "private-repo capture fixture without opt-in exits successfully"
@@ -1837,7 +1928,7 @@ EOF
 
   status=0
   # shellcheck disable=SC1090 # Fixture env file is created dynamically above.
-  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$priv_state_on" REVIEWER_RESEARCH_ALLOW_PRIVATE=1 FIXTURE_REPO_PRIVATE=true PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
+  output=$(set -a; . "$env_file"; set +a; REVIEWER_STATE="$priv_state_on" HOME="$fixture_home" REVIEWER_RESEARCH_ALLOW_PRIVATE=1 FIXTURE_REPO_PRIVATE=true PATH="$bin_dir:$PATH" bash "$test_reviewer/reviewer.sh" 2>&1) || status=$?
   if [ "$status" -ne 0 ]; then
     printf '%s\n' "$output" >&2
     fail "private-repo capture fixture with opt-in exits successfully"
