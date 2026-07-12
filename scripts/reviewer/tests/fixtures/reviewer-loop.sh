@@ -1680,6 +1680,11 @@ EOF
   assert_eq "manifest records counterfactual transcript source" "stdout_fallback" "$(jq -r '.counterfactual_transcript_source' "$manifest")"
   assert_eq "manifest records agy CLI version field" "true" "$(jq -r 'has("agy_cli_version")' "$manifest")"
   assert_eq "manifest records engine_release_tag field" "true" "$(jq -r 'has("engine_release_tag")' "$manifest")"
+  assert_eq "manifest records transcript thinking semantics" \
+    "model-paraphrased summaries; not verbatim reasoning; reasoning is not a measured quantity" \
+    "$(jq -r '.transcript_thinking_semantics' "$manifest")"
+  assert_eq "manifest records session_id object" "true" "$(jq -r '.session_id | type == "object"' "$manifest")"
+  assert_eq "manifest records transcript_archive object" "true" "$(jq -r '.transcript_archive | type == "object"' "$manifest")"
   assert_eq "manifest records public eligibility" "public-consented" "$(jq -r '.research_eligible' "$manifest")"
   assert_eq "manifest records head pushed-at timestamp" "$head_committed_at_fixture" "$(jq -r '.head_pushed_at' "$manifest")"
   manifest_latency=$(jq -r '.review_latency_seconds' "$manifest")
