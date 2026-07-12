@@ -199,6 +199,8 @@ EOF
   assert_not_contains "agy sidecar skips earlier planner turns" "older trace" "$trace_file"
   assert_not_contains "agy sidecar skips trailing verdict-less turns" "wrap-up chatter" "$trace_file"
   assert_eq "agy records transcript as the source when parsing succeeds" "transcript" "$(agy_transcript_source)"
+  assert_eq "agy records brain session id from transcript path" "run-1" "$(agy_session_id)"
+  assert_contains "agy records absolute transcript path" "transcript_full.jsonl" <(agy_transcript_path)
 
   # With no verdict-bearing turn at all, extraction falls back to the literal
   # last turn so the failure surfaces through the invalid-verdict path.
@@ -316,6 +318,55 @@ EOF
   assert_eq "agy resolved model label is empty when no cli.log exists" "" "$(agy_resolved_model_label)"
 
   HOME="$saved_home"
+}
+
+test_agy_records_session_and_archives_transcript() {
+  local archive_dir runtime_dir transcript_file
+
+  STATE_DIR="$TMP_ROOT/agy-session-archive-state"
+  RUNTIME_STATE_DIR="$TMP_ROOT/agy-session-archive-runtime"
+  runtime_dir="$RUNTIME_STATE_DIR/agy-runtime"
+  archive_dir="$TMP_ROOT/agy-session-archive-out"
+  mkdir -p "$STATE_DIR" "$runtime_dir" "$archive_dir"
+
+  transcript_file="$TMP_ROOT/agy-session-archive-home/.gemini/antigravity-cli/brain/session-abc123/.system_generated/logs/transcript_full.jsonl"
+  mkdir -p "$(dirname "$transcript_file")"
+  cat >"$transcript_file" <<'EOF'
+{"type":"PLANNER_RESPONSE","thinking":"paraphrase only","content":"Looks good.\nAPPROVE"}
+EOF
+  # Simulate what run_agy_review writes after locating a transcript (#157).
+  printf '%s\n' "$transcript_file" >"$runtime_dir/transcript_path"
+  printf 'session-abc123\n' >"$runtime_dir/session_id"
+
+  assert_eq "agy_session_id reads the sidecar" "session-abc123" "$(agy_session_id)"
+  assert_eq "agy_transcript_path reads the sidecar" "$transcript_file" "$(agy_transcript_path)"
+
+  if ! archive_research_transcript "$archive_dir"; then
+    fail "archive_research_transcript succeeds for a present transcript"
+  else
+    pass "archive_research_transcript succeeds for a present transcript"
+  fi
+  if [ -f "$archive_dir/transcript_full.jsonl.gz" ]; then
+    pass "archive_research_transcript writes gzip next to the arm"
+  else
+    fail "archive_research_transcript writes gzip next to the arm"
+  fi
+  if gzip -dc "$archive_dir/transcript_full.jsonl.gz" 2>/dev/null | grep -q 'PLANNER_RESPONSE'; then
+    pass "archived transcript gunzips to original planner content"
+  else
+    fail "archived transcript gunzips to original planner content"
+  fi
+
+  # Oversize path writes truncation marker.
+  MAX_TRANSCRIPT_BYTES=20
+  rm -f "$archive_dir/transcript_full.jsonl.gz" "$archive_dir/transcript_full.jsonl.gz.truncated"
+  archive_research_transcript "$archive_dir" || true
+  if [ -f "$archive_dir/transcript_full.jsonl.gz.truncated" ]; then
+    pass "oversize transcript writes truncation marker"
+  else
+    fail "oversize transcript writes truncation marker"
+  fi
+  MAX_TRANSCRIPT_BYTES=10485760
 }
 
 test_probe_agy_cli_version() {

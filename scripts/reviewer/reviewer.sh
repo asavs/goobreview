@@ -24,6 +24,8 @@ AGY_QUOTA_BACKOFF_PADDING="${REVIEWER_AGY_QUOTA_BACKOFF_PADDING:-60}"
 AGY_QUOTA_MAX_BACKOFF="${REVIEWER_AGY_QUOTA_MAX_BACKOFF:-600}"
 MAX_PROMPT_BYTES="${REVIEWER_MAX_PROMPT_BYTES:-240000}"
 MAX_ARTIFACT_BYTES="${REVIEWER_MAX_ARTIFACT_BYTES:-1000000}"
+# Cap for archived research transcripts (gzip source size before compress).
+MAX_TRANSCRIPT_BYTES="${REVIEWER_MAX_TRANSCRIPT_BYTES:-10485760}"
 DIFF_MAX_BYTES="${REVIEWER_DIFF_MAX_BYTES:-120000}"
 DIFF_FILE_MAX_BYTES="${REVIEWER_DIFF_FILE_MAX_BYTES:-40000}"
 DESCRIPTION_MAX_BYTES="${REVIEWER_DESCRIPTION_MAX_BYTES:-12000}"
@@ -258,6 +260,7 @@ write_dry_run_artifact() {
     --arg engine_release_tag "${ENGINE_RELEASE_TAG:-}" \
     --arg agy_cli_version "${agy_version}" \
     --arg transcript_source "$transcript_source" \
+    --arg session_id "$(agy_session_id)" \
     --arg agy_seconds "${agy_elapsed_s:-}" \
     --arg head_committed_at "${head_committed_at:-}" \
     --arg review_latency_seconds "$review_latency_seconds" \
@@ -286,6 +289,7 @@ write_dry_run_artifact() {
       engine_release_tag: (if $engine_release_tag == "" then null else $engine_release_tag end),
       agy_cli_version: $agy_cli_version,
       transcript_source: $transcript_source,
+      session_id: (if $session_id == "" then null else $session_id end),
       agy_seconds: (if $agy_seconds == "" then null else ($agy_seconds | tonumber) end),
       head_pushed_at: (if $head_committed_at == "" then null else $head_committed_at end),
       review_latency_seconds: (if $review_latency_seconds == "" then null else ($review_latency_seconds | tonumber) end),
@@ -428,6 +432,10 @@ capture_research_pair() {
   local counterfactual_resolved_model_label=""
   local counterfactual_pair_complete="true"
   local generated_at generated_at_epoch review_latency_seconds required_checks_sha256 posted_personality_file
+  local posted_session_id counterfactual_session_id=""
+  local posted_transcript_archive="" counterfactual_transcript_archive=""
+  # Fixed epistemic note: transcript "thinking" is model paraphrase, not CoT.
+  local transcript_thinking_semantics="model-paraphrased summaries; not verbatim reasoning; reasoning is not a measured quantity"
 
   [ "$RESEARCH_CAPTURE_ENABLED" = "1" ] || return 0
 
@@ -454,6 +462,16 @@ capture_research_pair() {
   posted_personality_file="$PERSONALITY_FILE"
   counterfactual_personality_file="$(research_personality_file_for_arm "$counterfactual_arm")" || return 0
 
+  # Capture posted-arm session/transcript BEFORE the counterfactual agy run
+  # overwrites the shared agy-runtime sidecars (#157).
+  posted_session_id=$(agy_session_id)
+  mkdir -p "$posted_dir"
+  if archive_research_transcript "$posted_dir"; then
+    [ -f "$posted_dir/transcript_full.jsonl.gz" ] && posted_transcript_archive="$posted_dir/transcript_full.jsonl.gz"
+  else
+    log "PR #$num@$head_sha: failed to archive posted-arm transcript (continuing)"
+  fi
+
   if ! with_prompt_personality "$posted_arm" write_research_review_artifact "$posted_file" "$num" "$head_sha" "$posted_arm" "$posted_personality_file" "posted" "$posted_event" "$posted_prompt_file" "$posted_review" "$ci_state" "$review_worktree"; then
     log "PR #$num@$head_sha: failed to write posted research artifact"
     return 0
@@ -471,6 +489,7 @@ capture_research_pair() {
   if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
     counterfactual_transcript_source=$(agy_transcript_source)
     counterfactual_resolved_model_label=$(agy_resolved_model_label)
+    counterfactual_session_id=$(agy_session_id)
     cat "$counterfactual_err" >>"$LOG_FILE"
     if [ -z "${counterfactual_review// }" ]; then
       counterfactual_event="EMPTY_RESPONSE"
@@ -480,6 +499,7 @@ capture_research_pair() {
   else
     counterfactual_transcript_source=$(agy_transcript_source)
     counterfactual_resolved_model_label=$(agy_resolved_model_label)
+    counterfactual_session_id=$(agy_session_id)
     cat "$counterfactual_err" >>"$LOG_FILE"
     counterfactual_event="AGY_FAILED"
     counterfactual_review=$(cat "$counterfactual_err")
@@ -489,6 +509,7 @@ capture_research_pair() {
     if counterfactual_review=$(run_agy_review "$counterfactual_prompt_file" "$counterfactual_retry_err" "$review_worktree" "$counterfactual_personality_file" "$ci_state" "$head_sha" "$counterfactual_arm"); then
       counterfactual_transcript_source=$(agy_transcript_source)
       counterfactual_resolved_model_label=$(agy_resolved_model_label)
+      counterfactual_session_id=$(agy_session_id)
       cat "$counterfactual_retry_err" >>"$LOG_FILE"
       if [ -z "${counterfactual_review// }" ]; then
         counterfactual_event="EMPTY_RESPONSE"
@@ -498,6 +519,7 @@ capture_research_pair() {
     else
       counterfactual_transcript_source=$(agy_transcript_source)
       counterfactual_resolved_model_label=$(agy_resolved_model_label)
+      counterfactual_session_id=$(agy_session_id)
       cat "$counterfactual_retry_err" >>"$LOG_FILE"
       counterfactual_event="AGY_FAILED"
       counterfactual_review=$(cat "$counterfactual_retry_err")
@@ -512,6 +534,13 @@ capture_research_pair() {
     *) counterfactual_pair_complete="false" ;;
   esac
   counterfactual_agy_s=$(( $(date +%s) - counterfactual_started_at ))
+
+  mkdir -p "$counterfactual_dir"
+  if archive_research_transcript "$counterfactual_dir"; then
+    [ -f "$counterfactual_dir/transcript_full.jsonl.gz" ] && counterfactual_transcript_archive="$counterfactual_dir/transcript_full.jsonl.gz"
+  else
+    log "PR #$num@$head_sha: failed to archive counterfactual-arm transcript (continuing)"
+  fi
 
   if ! with_prompt_personality "$counterfactual_arm" write_research_review_artifact "$counterfactual_file" "$num" "$head_sha" "$counterfactual_arm" "$counterfactual_personality_file" "counterfactual" "$counterfactual_event" "$counterfactual_prompt_file" "$counterfactual_review" "$ci_state" "$review_worktree"; then
     log "PR #$num@$head_sha: failed to write counterfactual research artifact"
@@ -547,6 +576,11 @@ capture_research_pair() {
     --arg agy_cli_version "${AGY_CLI_VERSION:-unavailable}" \
     --arg posted_transcript_source "$posted_transcript_source" \
     --arg counterfactual_transcript_source "$counterfactual_transcript_source" \
+    --arg posted_session_id "$posted_session_id" \
+    --arg counterfactual_session_id "$counterfactual_session_id" \
+    --arg posted_transcript_archive "$posted_transcript_archive" \
+    --arg counterfactual_transcript_archive "$counterfactual_transcript_archive" \
+    --arg transcript_thinking_semantics "$transcript_thinking_semantics" \
     --arg posted_agy_seconds "${agy_elapsed_s:-}" \
     --arg counterfactual_agy_seconds "$counterfactual_agy_s" \
     --arg ci_state "$ci_state" \
@@ -583,6 +617,15 @@ capture_research_pair() {
       agy_cli_version: $agy_cli_version,
       posted_transcript_source: $posted_transcript_source,
       counterfactual_transcript_source: $counterfactual_transcript_source,
+      session_id: {
+        posted: (if $posted_session_id == "" then null else $posted_session_id end),
+        counterfactual: (if $counterfactual_session_id == "" then null else $counterfactual_session_id end)
+      },
+      transcript_archive: {
+        posted: (if $posted_transcript_archive == "" then null else $posted_transcript_archive end),
+        counterfactual: (if $counterfactual_transcript_archive == "" then null else $counterfactual_transcript_archive end)
+      },
+      transcript_thinking_semantics: $transcript_thinking_semantics,
       posted_agy_seconds: (if $posted_agy_seconds == "" then null else ($posted_agy_seconds | tonumber) end),
       counterfactual_agy_seconds: ($counterfactual_agy_seconds | tonumber),
       head_pushed_at: (if $head_committed_at == "" then null else $head_committed_at end),
