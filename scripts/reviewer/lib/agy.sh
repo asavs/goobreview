@@ -341,6 +341,11 @@ run_agy_review() {
   local head_sha="${6:-}"
   local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
   local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count cli_log resolved_model_file resolved_model_label artifact_tmp
+  # NOTE: do not name a local `session_dir` here. Fixture timeout() mocks close
+  # over their own session_dir via bash dynamic scope; shadowing that name
+  # inside run_agy_review makes mocks write transcripts to an empty path and
+  # every transcript/artifact test falls back to stdout.
+  local transcript_path_file session_id_file recorded_session_dir
   local -a add_dir_args agy_argv
 
   # Cleared unconditionally, before the runtime dir necessarily exists, so a
@@ -353,7 +358,10 @@ run_agy_review() {
   # run for the dry-run artifact / footer to misreport as this run's.
   invocation_record="$runtime_dir/last-invocation.cmd"
   resolved_model_file="$runtime_dir/resolved_model_label"
-  rm -f "$transcript_source_file" "$invocation_record" "$resolved_model_file"
+  transcript_path_file="$runtime_dir/transcript_path"
+  session_id_file="$runtime_dir/session_id"
+  rm -f "$transcript_source_file" "$invocation_record" "$resolved_model_file" \
+    "$transcript_path_file" "$session_id_file"
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
     log "Refusing to invoke agy with symlinks present in PR-head snapshot: $worktree_dir"
@@ -455,6 +463,13 @@ run_agy_review() {
   fi
 
   transcript_file=$(latest_agy_transcript_file "$transcript_marker" || true)
+  if [ -n "$transcript_file" ] && [ -f "$transcript_file" ]; then
+    printf '%s\n' "$transcript_file" >"$transcript_path_file"
+    recorded_session_dir=$(agy_session_dir_for_transcript "$transcript_file" || true)
+    if [ -n "${recorded_session_dir:-}" ]; then
+      basename "$recorded_session_dir" >"$session_id_file"
+    fi
+  fi
   artifact_tmp=$(mktemp "$runtime_dir/agy-artifact.XXXXXX")
   if [ -n "$transcript_file" ] && extract_last_agy_planner_response "$transcript_file" "$content_tmp" "$thinking_file" && [ -s "$content_tmp" ]; then
     if review_verdict_event <"$content_tmp" >/dev/null; then
@@ -521,4 +536,109 @@ agy_resolved_model_label() {
   if [ -s "$file" ]; then
     tr -d '\n' <"$file"
   fi
+}
+
+# Absolute path of the transcript_full.jsonl that the immediately preceding
+# run_agy_review used, or empty when none was found. Same overwrite contract
+# as agy_transcript_source.
+agy_transcript_path() {
+  local file
+  file="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime/transcript_path"
+  if [ -s "$file" ]; then
+    tr -d '\n' <"$file"
+  fi
+}
+
+# Basename of the brain session directory for the preceding run, or empty.
+# Same overwrite contract as agy_transcript_source.
+agy_session_id() {
+  local file
+  file="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime/session_id"
+  if [ -s "$file" ]; then
+    tr -d '\n' <"$file"
+  fi
+}
+
+# Probe `agy --version` once per process (and cache by binary mtime under
+# STATE_DIR so a long-lived shell or rapid ticks don't re-invoke). Research
+# manifests and dry-run artifacts need the CLI binary identity; model labels
+# alone do not catch silent agy upgrades. Empty/fail → "unavailable".
+probe_agy_cli_version() {
+  local agy_path mtime cache_file cached_mtime cached_version line
+
+  if [ -n "${AGY_CLI_VERSION_PROBED:-}" ]; then
+    printf '%s' "${AGY_CLI_VERSION:-unavailable}"
+    return 0
+  fi
+  AGY_CLI_VERSION_PROBED=1
+  AGY_CLI_VERSION="unavailable"
+
+  agy_path=$(command -v agy 2>/dev/null || true)
+  if [ -z "$agy_path" ] || [ ! -e "$agy_path" ]; then
+    printf '%s' "$AGY_CLI_VERSION"
+    return 0
+  fi
+
+  mtime=$(stat -c '%Y' "$agy_path" 2>/dev/null || stat -f '%m' "$agy_path" 2>/dev/null || printf '0')
+  cache_file="${STATE_DIR:-/tmp}/agy_cli_version.cache"
+  if [ -f "$cache_file" ]; then
+    IFS='|' read -r cached_mtime cached_version <"$cache_file" || true
+    if [ "$cached_mtime" = "$mtime" ] && [ -n "$cached_version" ]; then
+      AGY_CLI_VERSION="$cached_version"
+      printf '%s' "$AGY_CLI_VERSION"
+      return 0
+    fi
+  fi
+
+  # timeout + closed stdin: agy --version has been observed to hang or want a
+  # TTY in some installs; never block a review tick on the probe.
+  # `command timeout` so fixture suites that shadow timeout() for run_agy_review
+  # cannot intercept this probe.
+  line=$(command timeout 15 agy --version </dev/null 2>/dev/null | head -n 1 | tr -d '\r' || true)
+  if [ -n "$line" ]; then
+    AGY_CLI_VERSION="$line"
+    printf '%s|%s\n' "$mtime" "$AGY_CLI_VERSION" >"$cache_file" 2>/dev/null || true
+    chmod 600 "$cache_file" 2>/dev/null || true
+  fi
+  printf '%s' "$AGY_CLI_VERSION"
+}
+
+# Gzip the preceding run's transcript into dest_dir for research capture.
+# Caps source size at REVIEWER_MAX_TRANSCRIPT_BYTES (default 10 MiB); oversize
+# sources write a .truncated marker alongside the partial gzip. Best-effort:
+# missing transcript is not an error (stdout_fallback / agy_failed paths).
+archive_research_transcript() {
+  local dest_dir="$1"
+  local transcript_file max_bytes src_bytes tmp_gz marker
+
+  transcript_file=$(agy_transcript_path)
+  [ -n "$transcript_file" ] && [ -f "$transcript_file" ] || return 0
+
+  max_bytes="${MAX_TRANSCRIPT_BYTES:-${REVIEWER_MAX_TRANSCRIPT_BYTES:-10485760}}"
+  mkdir -p "$dest_dir" || return 1
+  chmod 700 "$dest_dir" 2>/dev/null || true
+  tmp_gz=$(mktemp "${STATE_DIR:-/tmp}/research-transcript.XXXXXX.gz")
+  src_bytes=$(wc -c <"$transcript_file" | tr -d ' ')
+
+  if [ "$src_bytes" -gt "$max_bytes" ]; then
+    if ! head -c "$max_bytes" "$transcript_file" | gzip -c >"$tmp_gz"; then
+      rm -f "$tmp_gz"
+      return 1
+    fi
+    marker="$dest_dir/transcript_full.jsonl.gz.truncated"
+    printf 'truncated_at_bytes=%s source_bytes=%s\n' "$max_bytes" "$src_bytes" >"$marker"
+    chmod 600 "$marker" 2>/dev/null || true
+  else
+    if ! gzip -c "$transcript_file" >"$tmp_gz"; then
+      rm -f "$tmp_gz"
+      return 1
+    fi
+  fi
+
+  if ! secure_install_file "$tmp_gz" "$dest_dir/transcript_full.jsonl.gz"; then
+    rm -f "$tmp_gz"
+    return 1
+  fi
+  rm -f "$tmp_gz"
+  return 0
 }

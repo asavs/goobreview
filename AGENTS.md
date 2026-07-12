@@ -2,6 +2,10 @@
 
 This repository is a template for setting up a VM-side automated GitHub PR reviewer.
 
+## Dev / test runtime
+
+**Shell validation and fixtures target GNU/Linux (Ubuntu).** The daemon runs on Ubuntu LTS; CI is `ubuntu-latest`. On a Windows checkout, run shell syntax checks and `scripts/reviewer/tests/run-fixtures.sh` under WSL Ubuntu (or another Linux host)—not Git Bash or PowerShell. GNU-only utilities (`flock`, `sort -V`, GNU `sed -E`, `find -printf`, `stat -c`) are intentional. Optional local probe: `bash scripts/dev-env-check.sh` (fails loud when the host is wrong; does not install anything).
+
 When helping a user install it:
 
 - Treat setup as operations work. Confirm before linking billing, creating projects or public repositories, storing persistent credentials, or enabling the scheduler. The free-tier VM may be created with announced defaults — say what and where, create it, report it.

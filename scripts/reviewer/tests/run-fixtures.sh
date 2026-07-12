@@ -6,9 +6,18 @@
 # shellcheck disable=SC2034,SC2317,SC2329
 set -euo pipefail
 
+# Fail loud: a soft skip looked green on hosts without util-linux (e.g. Git
+# Bash) and gave false confidence. Target is Ubuntu/WSL; see CONTRIBUTING.md
+# and scripts/dev-env-check.sh.
+if [ -n "${MSYSTEM:-}" ] || [ "${OSTYPE:-}" = "msys" ] || [ "${OSTYPE:-}" = "cygwin" ]; then
+  printf 'FAIL: reviewer fixtures require GNU/Linux (Ubuntu or WSL), not MSYS/Cygwin/Git Bash.\n' >&2
+  printf 'Run under WSL Ubuntu or a Linux host. Optional: bash scripts/dev-env-check.sh\n' >&2
+  exit 1
+fi
 if ! command -v flock >/dev/null 2>&1; then
-  printf 'SKIP: reviewer fixture suite needs flock (util-linux).\n'
-  exit 0
+  printf 'FAIL: reviewer fixture suite needs flock (util-linux).\n' >&2
+  printf 'Install util-linux (Ubuntu/WSL) or run on a Linux host. Optional: bash scripts/dev-env-check.sh\n' >&2
+  exit 1
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -153,6 +162,8 @@ test_agy_invocation_closes_lock_fd
 test_agy_invocation_denies_build_tools
 test_agy_uses_structured_transcript_when_available
 test_agy_records_resolved_model_label
+test_agy_records_session_and_archives_transcript
+test_probe_agy_cli_version
 test_agy_quota_backoff_detection
 test_agy_surfaces_quota_exhaustion_from_cli_log_on_empty_response
 test_agy_reads_review_from_referenced_artifact
@@ -190,7 +201,9 @@ test_reviewer_research_capture_posts_selected_review_only
 # only the first runs and the rest become ignored arguments) lowers the total
 # without ever turning the run red. Pin the count and bump it deliberately when
 # you add or remove assertions.
-EXPECTED_ASSERTIONS=577
+# 602 after #157 helpers; research e2e: -2 shape-only +9 strong archive/session;
+# +8 stdout_fallback null-archive path → 617 (includes footer shape A +3).
+EXPECTED_ASSERTIONS=617
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2
