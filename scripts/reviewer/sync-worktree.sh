@@ -32,7 +32,13 @@ fi
 
 log "sync start repo=$repo_root remote=$REMOTE branch=$BRANCH"
 
-git -C "$repo_root" fetch --prune "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" >> "$LOG_FILE" 2>&1
+# Fetch the tracking branch tip and v* release tags. Tags are needed so the
+# review footer / research manifest can link release notes when HEAD is exactly
+# a release commit (resolve_engine_release_tag); without this fetch, VMs that
+# only ever pulled the branch ref would never see tags after the initial clone.
+git -C "$repo_root" fetch --prune "$REMOTE" \
+  "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" \
+  "+refs/tags/v*:refs/tags/v*" >> "$LOG_FILE" 2>&1
 
 target_ref="refs/remotes/$REMOTE/$BRANCH"
 target_sha=$(git -C "$repo_root" rev-parse --verify "$target_ref^{commit}") || {

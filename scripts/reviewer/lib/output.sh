@@ -884,17 +884,91 @@ format_agy_duration() {
   fi
 }
 
-# Provenance footer appended to every posted review body. The engine segment
-# is omitted when the checkout SHA is unavailable (e.g. non-git test copies).
+# If HEAD is exactly a release tag tip (v*), return that tag; else empty.
+# Requires tags to be present locally (sync-worktree fetches refs/tags/v*).
+# sort -V is GNU coreutils (Ubuntu daemon + WSL/CI); not portable to BSD.
+resolve_engine_release_tag() {
+  local repo_dir="${1:-${REPO_DIR:-}}"
+  local tag=""
+
+  [ -n "$repo_dir" ] || return 0
+  git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  # Prefer the highest v* semver tag pointing at HEAD when several exist.
+  tag=$(git -C "$repo_dir" tag --points-at HEAD --list 'v*' 2>/dev/null | sort -V | tail -n 1 || true)
+  if [ -z "$tag" ]; then
+    tag=$(git -C "$repo_dir" describe --exact-match --tags --match 'v*' HEAD 2>/dev/null || true)
+  fi
+  printf '%s' "$tag"
+}
+
+# Compact an `agy --version` probe to a bare version for the footer, e.g.
+# "agy 1.0.16" / "1.0.16 (fixture)" → "1.0.16". Empty / unavailable → empty.
+# sed -E with //I is GNU sed (Ubuntu daemon + WSL/CI); not portable to BSD.
+footer_agy_cli_version() {
+  local raw="${1:-}" compact
+  case "$raw" in
+    ''|unavailable) return 0 ;;
+  esac
+  compact=$(printf '%s' "$raw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/^agy[[:space:]]+//I; s/^version[[:space:]]+//I')
+  [ -n "$compact" ] || return 0
+  # First whitespace-delimited field: drop trailing build metadata like "(foo)".
+  compact=$(printf '%s' "$compact" | awk '{print $1}')
+  # Strip a trailing parenthetical glued without space: "1.0.16(fixture)".
+  compact=$(printf '%s' "$compact" | sed -E 's/\(.*$//')
+  [ -n "$compact" ] || return 0
+  printf '%s' "$compact"
+}
+
+# Release notes URL for a clean agy version tag, or empty when the probe is not
+# a plausible release tag (avoid inventing 404 links from messy probe strings).
+# Upstream tags are bare semver (1.0.16), not v-prefixed.
+footer_agy_release_url() {
+  local ver="${1:-}"
+  case "$ver" in
+    ''|*[!A-Za-z0-9._-]*) return 0 ;;
+  esac
+  # Require at least N.N so "dev" / "unknown" never link.
+  printf '%s' "$ver" | grep -Eq '^[0-9]+(\.[0-9]+)+([.-][A-Za-z0-9.]+)?$' || return 0
+  printf 'https://github.com/google-antigravity/antigravity-cli/releases/tag/%s' "$ver"
+}
+
+# Provenance footer appended to every posted review body.
+# Shape:
+#   *{model} in [agy]({agy_release_url}) took {dur} via [goobreview]({engine_url}).*
+# Link labels stay bare ("agy" / "goobreview"); versions live only in the URL
+# (release tag or commit). "in agy …" is omitted when the version probe is
+# unavailable; "via goobreview …" is omitted when the checkout SHA is unknown.
+# Engine links release notes when HEAD is a v* tag tip, else the commit. agy
+# links its release when the probe is a clean version tag; otherwise plain
+# "in agy {ver}" with no link (version kept only when unlinked).
 review_footer_note() {
   local model="$1" elapsed_s="$2" engine_sha="$3"
-  local engine=""
-  if [ -n "$engine_sha" ] && [ "$engine_sha" != "unknown" ]; then
-    engine=" [\`$engine_sha\`](https://github.com/asavs/goobreview/commit/$engine_sha)"
+  local release_tag="${4:-${ENGINE_RELEASE_TAG:-}}"
+  local agy_ver="${5:-${AGY_CLI_VERSION:-}}"
+  local dur cli_ver agy_url agy_seg="" engine_url engine_seg=""
+
+  [ -n "$model" ] || model="auto"
+  dur=$(format_agy_duration "$elapsed_s")
+
+  cli_ver=$(footer_agy_cli_version "$agy_ver")
+  if [ -n "$cli_ver" ]; then
+    agy_url=$(footer_agy_release_url "$cli_ver")
+    if [ -n "$agy_url" ]; then
+      agy_seg=$(printf ' in [agy](%s)' "$agy_url")
+    else
+      agy_seg=$(printf ' in agy %s' "$cli_ver")
+    fi
   fi
-  # shellcheck disable=SC2016 # Backticks are literal Markdown in the footer.
-  printf '*Drafted autonomously by %s in %s via goobreview antigravity-cli%s.*\n' \
-    "$model" "$(format_agy_duration "$elapsed_s")" "$engine"
+
+  if [ -n "$release_tag" ]; then
+    engine_url="https://github.com/asavs/goobreview/releases/tag/$release_tag"
+    engine_seg=$(printf ' via [goobreview](%s)' "$engine_url")
+  elif [ -n "$engine_sha" ] && [ "$engine_sha" != "unknown" ]; then
+    engine_url="https://github.com/asavs/goobreview/commit/$engine_sha"
+    engine_seg=$(printf ' via [goobreview](%s)' "$engine_url")
+  fi
+
+  printf '*%s%s took %s%s.*\n' "$model" "$agy_seg" "$dur" "$engine_seg"
 }
 
 reviewer_pr_skip_reason() {

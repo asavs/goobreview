@@ -522,3 +522,47 @@ agy_resolved_model_label() {
     tr -d '\n' <"$file"
   fi
 }
+
+# Probe `agy --version` once per process (and cache by binary mtime under
+# STATE_DIR so a long-lived shell or rapid ticks don't re-invoke). Research
+# manifests and dry-run artifacts need the CLI binary identity; model labels
+# alone do not catch silent agy upgrades. Empty/fail → "unavailable".
+probe_agy_cli_version() {
+  local agy_path mtime cache_file cached_mtime cached_version line
+
+  if [ -n "${AGY_CLI_VERSION_PROBED:-}" ]; then
+    printf '%s' "${AGY_CLI_VERSION:-unavailable}"
+    return 0
+  fi
+  AGY_CLI_VERSION_PROBED=1
+  AGY_CLI_VERSION="unavailable"
+
+  agy_path=$(command -v agy 2>/dev/null || true)
+  if [ -z "$agy_path" ] || [ ! -e "$agy_path" ]; then
+    printf '%s' "$AGY_CLI_VERSION"
+    return 0
+  fi
+
+  mtime=$(stat -c '%Y' "$agy_path" 2>/dev/null || stat -f '%m' "$agy_path" 2>/dev/null || printf '0')
+  cache_file="${STATE_DIR:-/tmp}/agy_cli_version.cache"
+  if [ -f "$cache_file" ]; then
+    IFS='|' read -r cached_mtime cached_version <"$cache_file" || true
+    if [ "$cached_mtime" = "$mtime" ] && [ -n "$cached_version" ]; then
+      AGY_CLI_VERSION="$cached_version"
+      printf '%s' "$AGY_CLI_VERSION"
+      return 0
+    fi
+  fi
+
+  # timeout + closed stdin: agy --version has been observed to hang or want a
+  # TTY in some installs; never block a review tick on the probe.
+  # `command timeout` so fixture suites that shadow timeout() for run_agy_review
+  # cannot intercept this probe.
+  line=$(command timeout 15 agy --version </dev/null 2>/dev/null | head -n 1 | tr -d '\r' || true)
+  if [ -n "$line" ]; then
+    AGY_CLI_VERSION="$line"
+    printf '%s|%s\n' "$mtime" "$AGY_CLI_VERSION" >"$cache_file" 2>/dev/null || true
+    chmod 600 "$cache_file" 2>/dev/null || true
+  fi
+  printf '%s' "$AGY_CLI_VERSION"
+}
