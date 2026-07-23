@@ -4,8 +4,53 @@
 # runner's registration list controls execution order.
 # shellcheck disable=SC2034,SC2154,SC2317,SC2329
 
+# The angry personality's narrative "prefill" is reunified only here: the
+# interruption/"User:" prefix already live in prompt_file (build_review_prompt's
+# argv-file output, covered by prompt.sh's fixtures); run_agy_review must
+# append the diff pointer and, for the angry arm, the tail -- in that order --
+# to the actual --print argv value, since that final string is the only place
+# these pieces come back together as one continuous scene the model reads
+# immediately before generating.
+# shellcheck disable=SC2317 # Mocked timeout command is invoked indirectly.
+test_agy_angry_narrative_reunified_in_print_arg() {
+  local prompt_file diff_file err_file output output_file worktree_dir
+
+  STATE_DIR="$TMP_ROOT/angry-narrative-state"
+  RUNTIME_STATE_DIR="$TMP_ROOT/angry-narrative-runtime"
+  AGY_TIMEOUT=60
+  AGY_MODEL=auto
+  mkdir -p "$STATE_DIR"
+  worktree_dir="$TMP_ROOT/angry-narrative-worktree"
+  mkdir -p "$worktree_dir"
+  prompt_file="$TMP_ROOT/angry-narrative-prompt.md"
+  diff_file="$TMP_ROOT/angry-narrative-diff.md"
+  err_file="$TMP_ROOT/angry-narrative-agy.err"
+  output_file="$TMP_ROOT/angry-narrative-output.txt"
+  # Simulates build_review_prompt's angry-arm argv-file output: interruption,
+  # then the "User:" turn marker, then PR data.
+  printf 'Assistant: okay.. deep breaths... one, two, thr-*ding dingdingding* *the notification cuts across a thought they were trying not to lose* A PR REVIEW??!! NOW?!! I-\nUser:\nTitle: Fix bug\n' > "$prompt_file"
+  printf 'diff --git a/x b/x\n+fix\n' > "$diff_file"
+  PERSONALITY_FILE="$TMP_ROOT/angry-narrative-personality.md"
+  PROMPT_FILE="$TMP_ROOT/angry-narrative-engine.md"
+  printf 'You are a very angry senior engineer.\n' > "$PERSONALITY_FILE"
+  printf 'Final non-empty line: APPROVE, REQUEST_CHANGES, or COMMENT.\n' > "$PROMPT_FILE"
+  POSTED_PERSONALITY=angry
+
+  timeout() { printf 'args=%s\n' "$*"; }
+
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  printf '%s\n' "$output" > "$output_file"
+  assert_order "reunified print-arg keeps interruption, user turn, diff pointer, and tail in narrative order" "$output_file" \
+    "A PR REVIEW??!! NOW?!! I-" \
+    "Title: Fix bug" \
+    "REVIEW_DIFF.md" \
+    "Right. Fine. The "
+
+  unset POSTED_PERSONALITY
+}
+
 test_agy_invocation_isolates_review_context() {
-  local prompt_file err_file output worktree_dir workspace_dir no_wt_output add_dir_count
+  local prompt_file diff_file err_file output worktree_dir workspace_dir task_dir no_wt_output add_dir_count
 
   STATE_DIR="$TMP_ROOT/state"
   RUNTIME_STATE_DIR="$TMP_ROOT/runtime-state"
@@ -15,9 +60,12 @@ test_agy_invocation_isolates_review_context() {
   worktree_dir="$TMP_ROOT/worktree"
   mkdir -p "$worktree_dir"
   workspace_dir="$RUNTIME_STATE_DIR/agy-runtime/workspace"
+  task_dir="$RUNTIME_STATE_DIR/agy-runtime/task"
   prompt_file="$TMP_ROOT/prompt-for-agy.md"
+  diff_file="$TMP_ROOT/diff-for-agy.md"
   err_file="$TMP_ROOT/agy.err"
   printf 'APPROVE\n' > "$prompt_file"
+  printf 'diff --git a/x b/x\n' > "$diff_file"
   PERSONALITY_FILE="$TMP_ROOT/agy-isolation-personality.md"
   PROMPT_FILE="$TMP_ROOT/agy-isolation-engine.md"
   printf '## Role\nIsolation test reviewer.\n' > "$PERSONALITY_FILE"
@@ -42,26 +90,32 @@ test_agy_invocation_isolates_review_context() {
   mkdir -p "$workspace_dir"
   printf 'stale prompt for a different PR\n' > "$workspace_dir/stray-prompt.md"
 
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_contains "agy cwd is the trusted workspace matching an added dir" "cwd=$workspace_dir" <(printf '%s\n' "$output")
   assert_contains "agy child gets no gh token" "gh_token=unset" <(printf '%s\n' "$output")
   assert_contains "agy child gets no github token" "github_token=unset" <(printf '%s\n' "$output")
   assert_contains "agy child gets no app key path" "key_path=unset" <(printf '%s\n' "$output")
   assert_contains "agy uses native sandbox" "--sandbox" <(printf '%s\n' "$output")
   assert_contains "agy attaches the trusted workspace via --add-dir" "--add-dir $workspace_dir" <(printf '%s\n' "$output")
+  assert_contains "agy attaches the untrusted task dir via --add-dir" "--add-dir $task_dir" <(printf '%s\n' "$output")
   assert_contains "agy attaches the PR-head snapshot via --add-dir" "--add-dir $worktree_dir" <(printf '%s\n' "$output")
   assert_contains "agy workspace has AGENTS.md with personality" "Isolation test reviewer" "$workspace_dir/AGENTS.md"
   assert_contains "agy workspace AGENTS.md has CI status" "Required-check gate: success" "$workspace_dir/AGENTS.md"
   assert_contains "agy workspace AGENTS.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$workspace_dir/AGENTS.md"
   assert_contains "agy workspace AGENTS.md forbids executing snapshot code" "Inspection means reading files, never executing them" "$workspace_dir/AGENTS.md"
   assert_eq "agy workspace holds only AGENTS.md at invocation time" "AGENTS.md" "$(ls -A "$workspace_dir")"
+  assert_eq "agy task dir holds only REVIEW_DIFF.md at invocation time" "REVIEW_DIFF.md" "$(ls -A "$task_dir")"
+  assert_contains "agy task dir REVIEW_DIFF.md holds the diff content" "diff --git a/x b/x" "$task_dir/REVIEW_DIFF.md"
+  assert_contains "agy's --print argv is a real prompt pointing at the diff file" "$task_dir/REVIEW_DIFF.md" <(printf '%s\n' "$output")
   assert_eq "agy records stdout_fallback as transcript source when no transcript exists" "stdout_fallback" "$(agy_transcript_source)"
 
-  # With no PR-head snapshot supplied, only the trusted workspace is attached.
-  no_wt_output=$(run_agy_review "$prompt_file" "$err_file" "" "$PERSONALITY_FILE" success abc123)
+  # With no PR-head snapshot supplied, the trusted workspace and task dir are
+  # still attached (both always exist regardless of a snapshot).
+  no_wt_output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "" "$PERSONALITY_FILE" success abc123)
   assert_contains "agy attaches the workspace even without a snapshot" "--add-dir $workspace_dir" <(printf '%s\n' "$no_wt_output")
+  assert_contains "agy attaches the task dir even without a snapshot" "--add-dir $task_dir" <(printf '%s\n' "$no_wt_output")
   add_dir_count=$(printf '%s\n' "$no_wt_output" | grep '^args=' | grep -o -- '--add-dir' | wc -l | tr -d ' ')
-  assert_eq "agy adds no snapshot dir when none is supplied" "1" "$add_dir_count"
+  assert_eq "agy adds no snapshot dir when none is supplied" "2" "$add_dir_count"
 }
 
 # The dry-run artifact must report the argv agy actually ran, not a static
@@ -70,7 +124,7 @@ test_agy_invocation_isolates_review_context() {
 # print_recorded_agy_invocation formats it for the artifact.
 # shellcheck disable=SC2317 # Mocked timeout command is invoked indirectly.
 test_agy_records_actual_invocation() {
-  local prompt_file err_file worktree_dir runtime_dir record_file output expected_bytes
+  local prompt_file diff_file err_file worktree_dir runtime_dir record_file output expected_bytes
 
   STATE_DIR="$TMP_ROOT/invrec-state"
   RUNTIME_STATE_DIR="$TMP_ROOT/invrec-runtime"
@@ -80,9 +134,11 @@ test_agy_records_actual_invocation() {
   worktree_dir="$TMP_ROOT/invrec-worktree"
   mkdir -p "$worktree_dir"
   prompt_file="$TMP_ROOT/invrec-prompt.md"
+  diff_file="$TMP_ROOT/invrec-diff.md"
   err_file="$TMP_ROOT/invrec-agy.err"
   # A distinctive prompt body so we can prove it is elided from the record.
   printf 'UNIQUE_PROMPT_SENTINEL_9137\nAPPROVE\n' > "$prompt_file"
+  printf 'UNIQUE_DIFF_SENTINEL_4821\n' > "$diff_file"
   PERSONALITY_FILE="$TMP_ROOT/invrec-personality.md"
   PROMPT_FILE="$TMP_ROOT/invrec-engine.md"
   printf '## Role\nInvocation-record reviewer.\n' > "$PERSONALITY_FILE"
@@ -90,7 +146,7 @@ test_agy_records_actual_invocation() {
 
   timeout() { printf 'done\n'; }
 
-  run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123 >/dev/null
+  run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123 >/dev/null
 
   runtime_dir="$RUNTIME_STATE_DIR/agy-runtime"
   record_file="$runtime_dir/last-invocation.cmd"
@@ -104,10 +160,17 @@ test_agy_records_actual_invocation() {
   assert_contains "recorded invocation attaches the PR-head snapshot" "$worktree_dir" "$record_file"
   assert_contains "recorded invocation elides the prompt to a byte count" "bytes>" "$record_file"
   assert_not_contains "recorded invocation omits the prompt text" "UNIQUE_PROMPT_SENTINEL_9137" "$record_file"
+  assert_not_contains "recorded invocation omits the diff text" "UNIQUE_DIFF_SENTINEL_4821" "$record_file"
 
-  # The placeholder reports the true byte size of the prompt passed to agy.
-  expected_bytes=$(printf '%s' "$(cat "$prompt_file")" | wc -c | tr -d ' ')
-  assert_contains "recorded invocation byte count matches the prompt size" "<prompt: $expected_bytes bytes>" "$record_file"
+  # The reunified --print argv value (real prompt content + diff pointer, no
+  # tail for the control arm) is what actually ran; its byte count is what the
+  # record's placeholder must match -- not the raw prompt_file's own size,
+  # which is now only one ingredient of the assembled argv.
+  expected_bytes=$(wc -c <"$runtime_dir/final-print-arg" | tr -d ' ')
+  assert_contains "recorded invocation byte count matches the assembled argv size" "<prompt: $expected_bytes bytes>" "$record_file"
+  assert_contains "final-print-arg sidecar carries the real prompt content" "UNIQUE_PROMPT_SENTINEL_9137" "$runtime_dir/final-print-arg"
+  assert_contains "final-print-arg sidecar points at the staged diff file" "REVIEW_DIFF.md" "$runtime_dir/final-print-arg"
+  assert_eq "agy_final_print_arg accessor matches the sidecar" "$(cat "$runtime_dir/final-print-arg")" "$(agy_final_print_arg)"
 
   # Artifact-side formatter prints the recorded line under a clear header.
   output=$(print_recorded_agy_invocation "$record_file")
@@ -124,7 +187,7 @@ test_agy_records_actual_invocation() {
 # inherit the lock and deadlock every subsequent tick until killed by hand.
 # shellcheck disable=SC2317 # Mocked timeout command is invoked indirectly.
 test_agy_invocation_closes_lock_fd() {
-  local prompt_file err_file output worktree_dir
+  local prompt_file diff_file err_file output worktree_dir
 
   STATE_DIR="$TMP_ROOT/lockfd-state"
   RUNTIME_STATE_DIR="$TMP_ROOT/lockfd-runtime"
@@ -134,8 +197,10 @@ test_agy_invocation_closes_lock_fd() {
   worktree_dir="$TMP_ROOT/lockfd-worktree"
   mkdir -p "$worktree_dir"
   prompt_file="$TMP_ROOT/lockfd-prompt.md"
+  diff_file="$TMP_ROOT/lockfd-diff.md"
   err_file="$TMP_ROOT/lockfd-agy.err"
   printf 'APPROVE\n' > "$prompt_file"
+  printf 'diff\n' > "$diff_file"
   PERSONALITY_FILE="$TMP_ROOT/lockfd-personality.md"
   PROMPT_FILE="$TMP_ROOT/lockfd-engine.md"
   printf '## Role\nLock fd test reviewer.\n' > "$PERSONALITY_FILE"
@@ -151,14 +216,14 @@ test_agy_invocation_closes_lock_fd() {
 
   output=$(
     exec 9>"$TMP_ROOT/lockfd-lock"
-    run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123
+    run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123
   )
   assert_contains "agy invocation closes the inherited reviewer lock fd" "lock_fd=closed" <(printf '%s\n' "$output")
 }
 
 # shellcheck disable=SC2016,SC2317 # Fixtures intentionally use literal Markdown backticks and a mocked timeout command.
 test_agy_uses_structured_transcript_when_available() {
-  local saved_home="${HOME:-}" prompt_file err_file output worktree_dir home transcript_dir trace_file
+  local saved_home="${HOME:-}" prompt_file diff_file err_file output worktree_dir home transcript_dir trace_file
 
   STATE_DIR="$TMP_ROOT/transcript-state"
   RUNTIME_STATE_DIR="$TMP_ROOT/transcript-runtime"
@@ -168,8 +233,10 @@ test_agy_uses_structured_transcript_when_available() {
   worktree_dir="$TMP_ROOT/transcript-worktree"
   mkdir -p "$worktree_dir"
   prompt_file="$TMP_ROOT/transcript-prompt.md"
+  diff_file="$TMP_ROOT/transcript-diff.md"
   err_file="$TMP_ROOT/transcript-agy.err"
   printf 'prompt\n' > "$prompt_file"
+  printf 'diff\n' > "$diff_file"
   PERSONALITY_FILE="$TMP_ROOT/transcript-personality.md"
   PROMPT_FILE="$TMP_ROOT/transcript-engine.md"
   printf '## Role\nTranscript reviewer.\n' > "$PERSONALITY_FILE"
@@ -192,7 +259,7 @@ EOF
     printf 'raw merged trace\nraw merged body\nCOMMENT\n'
   }
 
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   trace_file="$RUNTIME_STATE_DIR/agy-runtime/thinking.trace"
   assert_eq "agy returns the last verdict-bearing planner turn" $'Structured body\nAPPROVE' "$output"
   assert_contains "agy writes planner thinking sidecar" 'I will inspect `src/main.ts`.' "$trace_file"
@@ -212,7 +279,7 @@ EOF
     printf 'raw merged fallback\n'
   }
 
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "verdict-less transcript falls back to the literal last turn" "Still working on the build." "$output"
 
   HOME="$saved_home"
@@ -224,7 +291,7 @@ EOF
 # shims; interpreters like node stay unshimmed because agy itself runs on node.
 # shellcheck disable=SC2317 # Mocked timeout command is invoked indirectly.
 test_agy_invocation_denies_build_tools() {
-  local prompt_file err_file output worktree_dir
+  local prompt_file diff_file err_file output worktree_dir
 
   STATE_DIR="$TMP_ROOT/deny-tools-state"
   RUNTIME_STATE_DIR="$TMP_ROOT/deny-tools-runtime"
@@ -234,8 +301,10 @@ test_agy_invocation_denies_build_tools() {
   worktree_dir="$TMP_ROOT/deny-tools-worktree"
   mkdir -p "$worktree_dir"
   prompt_file="$TMP_ROOT/deny-tools-prompt.md"
+  diff_file="$TMP_ROOT/deny-tools-diff.md"
   err_file="$TMP_ROOT/deny-tools-agy.err"
   printf 'APPROVE\n' > "$prompt_file"
+  printf 'diff\n' > "$diff_file"
   PERSONALITY_FILE="$TMP_ROOT/deny-tools-personality.md"
   PROMPT_FILE="$TMP_ROOT/deny-tools-engine.md"
   printf '## Role\nDeny-tools reviewer.\n' > "$PERSONALITY_FILE"
@@ -249,7 +318,7 @@ test_agy_invocation_denies_build_tools() {
     vitest run 2>/dev/null || true
   }
 
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_contains "agy PATH resolves npm to the refusal shim" "deny-bin/npm" <(printf '%s\n' "$output")
   assert_not_contains "node stays unshimmed for agy itself" "deny-bin/node" <(printf '%s\n' "$output")
   assert_eq "denied build tool exits nonzero" "npm_exit=2" "$(printf '%s\n' "$output" | grep '^npm_exit=')"
@@ -264,7 +333,7 @@ test_agy_invocation_denies_build_tools() {
 # the log is absent or its format is unrecognized.
 # shellcheck disable=SC2016,SC2317 # Literal Go-log text; mocked timeout invoked indirectly.
 test_agy_records_resolved_model_label() {
-  local saved_home="${HOME:-}" prompt_file err_file output worktree_dir home log_dir parse_log
+  local saved_home="${HOME:-}" prompt_file diff_file err_file output worktree_dir home log_dir parse_log
 
   STATE_DIR="$TMP_ROOT/model-label-state"
   RUNTIME_STATE_DIR="$TMP_ROOT/model-label-runtime"
@@ -274,8 +343,10 @@ test_agy_records_resolved_model_label() {
   worktree_dir="$TMP_ROOT/model-label-worktree"
   mkdir -p "$worktree_dir"
   prompt_file="$TMP_ROOT/model-label-prompt.md"
+  diff_file="$TMP_ROOT/model-label-diff.md"
   err_file="$TMP_ROOT/model-label-agy.err"
   printf 'prompt\n' > "$prompt_file"
+  printf 'diff\n' > "$diff_file"
   PERSONALITY_FILE="$TMP_ROOT/model-label-personality.md"
   PROMPT_FILE="$TMP_ROOT/model-label-engine.md"
   printf '## Role\nModel-label reviewer.\n' > "$PERSONALITY_FILE"
@@ -306,7 +377,7 @@ I0706 21:02:08 model_config_manager.go:157] Propagating selected model override 
 EOF
     printf 'Body\nAPPROVE\n'
   }
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "run_agy_review returns the stdout review" $'Body\nAPPROVE' "$output"
   assert_eq "agy exposes the resolved model label from cli.log" "Gemini 3.5 Flash (Medium)" "$(agy_resolved_model_label)"
 
@@ -314,7 +385,7 @@ EOF
   # requested --model alias.
   rm -f "$log_dir/"cli-*.log
   timeout() { printf 'Body\nAPPROVE\n'; }
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "agy resolved model label is empty when no cli.log exists" "" "$(agy_resolved_model_label)"
 
   HOME="$saved_home"
@@ -499,7 +570,7 @@ test_agy_quota_backoff_detection() {
 # it instead of spending the invalid-verdict budget on a transient rate limit.
 # shellcheck disable=SC2317 # Mocked timeout command is invoked indirectly.
 test_agy_surfaces_quota_exhaustion_from_cli_log_on_empty_response() {
-  local saved_home="${HOME:-}" prompt_file err_file output worktree_dir home log_dir
+  local saved_home="${HOME:-}" prompt_file diff_file err_file output worktree_dir home log_dir
 
   STATE_DIR="$TMP_ROOT/quota-cli-log-state"
   RUNTIME_STATE_DIR="$TMP_ROOT/quota-cli-log-runtime"
@@ -509,8 +580,10 @@ test_agy_surfaces_quota_exhaustion_from_cli_log_on_empty_response() {
   worktree_dir="$TMP_ROOT/quota-cli-log-worktree"
   mkdir -p "$worktree_dir"
   prompt_file="$TMP_ROOT/quota-cli-log-prompt.md"
+  diff_file="$TMP_ROOT/quota-cli-log-diff.md"
   err_file="$TMP_ROOT/quota-cli-log-agy.err"
   printf 'prompt\n' > "$prompt_file"
+  printf 'diff\n' > "$diff_file"
   PERSONALITY_FILE="$TMP_ROOT/quota-cli-log-personality.md"
   PROMPT_FILE="$TMP_ROOT/quota-cli-log-engine.md"
   printf '## Role\nQuota reviewer.\n' > "$PERSONALITY_FILE"
@@ -529,7 +602,7 @@ EOF
     printf ''
   }
 
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "empty planner turn returns an empty review body" "" "$output"
   assert_contains "quota text from cli.log reaches err_file despite the empty body" "RESOURCE_EXHAUSTED" "$err_file"
 
@@ -554,7 +627,7 @@ EOF
 # shellcheck disable=SC2016,SC2317 # Literal Markdown backticks; mocked timeout invoked indirectly.
 test_agy_reads_review_from_referenced_artifact() {
   local saved_home="${HOME:-}" saved_max_artifact="${MAX_ARTIFACT_BYTES:-}"
-  local prompt_file err_file output worktree_dir home session_dir
+  local prompt_file diff_file err_file output worktree_dir home session_dir
 
   STATE_DIR="$TMP_ROOT/artifact-state"
   RUNTIME_STATE_DIR="$TMP_ROOT/artifact-runtime"
@@ -565,8 +638,10 @@ test_agy_reads_review_from_referenced_artifact() {
   worktree_dir="$TMP_ROOT/artifact-worktree"
   mkdir -p "$worktree_dir"
   prompt_file="$TMP_ROOT/artifact-prompt.md"
+  diff_file="$TMP_ROOT/artifact-diff.md"
   err_file="$TMP_ROOT/artifact-agy.err"
   printf 'prompt\n' > "$prompt_file"
+  printf 'diff\n' > "$diff_file"
   PERSONALITY_FILE="$TMP_ROOT/artifact-personality.md"
   PROMPT_FILE="$TMP_ROOT/artifact-engine.md"
   printf '## Role\nArtifact reviewer.\n' > "$PERSONALITY_FILE"
@@ -589,7 +664,7 @@ EOF
   }
   printf '## Findings\n\nArtifact body.\n\nAPPROVE\n' > "$session_dir/pr_review_report.md"
 
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "verdict-less pointer message reads the review from the referenced artifact" $'## Findings\n\nArtifact body.\n\nAPPROVE' "$output"
   assert_eq "artifact-sourced review records artifact as the transcript source" "artifact" "$(agy_transcript_source)"
   assert_contains "artifact selection is logged with the referenced path" "Review sourced from session artifact referenced by the final message: pr_review_report.md" "$LOG_FILE"
@@ -602,7 +677,7 @@ EOF
 EOF
     printf 'unused\n'
   }
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "verdict-bearing planner turn outranks the referenced artifact" $'Inline body\nREQUEST_CHANGES' "$output"
   assert_eq "inline verdict keeps transcript as the source" "transcript" "$(agy_transcript_source)"
 
@@ -617,7 +692,7 @@ EOF
 EOF
     printf 'unused\n'
   }
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "reference outside the session directory falls through to the pointer turn" "Saved the review to $home/.gemini/app_token.md and ../../../app_token.md for convenience." "$output"
   assert_eq "rejected outside reference keeps transcript as the source" "transcript" "$(agy_transcript_source)"
   assert_contains "outside reference rejection is logged" "outside the session brain directory" "$LOG_FILE"
@@ -631,7 +706,7 @@ EOF
 EOF
     printf 'unused\n'
   }
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "symlinked artifact reference falls through to the pointer turn" "Saved the review to link_review.md in my workspace." "$output"
   assert_contains "symlink rejection is logged" "Rejecting symlinked review artifact reference" "$LOG_FILE"
 
@@ -645,19 +720,19 @@ EOF
 EOF
     printf 'unused\n'
   }
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "verdict-less artifact falls through to the pointer turn" "Saved the review to pr_review_report.md as requested." "$output"
 
   # High-confidence secret material blocks the artifact from becoming a review.
   printf 'GH_TOKEN=ghp_exfiltrated12345\nAPPROVE\n' > "$session_dir/pr_review_report.md"
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "secret-bearing artifact falls through to the pointer turn" "Saved the review to pr_review_report.md as requested." "$output"
   assert_contains "secret rejection is logged with the scan reason" "Rejecting review artifact containing high-confidence secret material" "$LOG_FILE"
 
   # Size cap: an artifact over MAX_ARTIFACT_BYTES is rejected.
   MAX_ARTIFACT_BYTES=32
   printf 'This body is comfortably longer than the byte cap.\nAPPROVE\n' > "$session_dir/pr_review_report.md"
-  output=$(run_agy_review "$prompt_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
+  output=$(run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" "$PERSONALITY_FILE" success abc123)
   assert_eq "oversized artifact falls through to the pointer turn" "Saved the review to pr_review_report.md as requested." "$output"
   assert_contains "oversize rejection is logged" "Rejecting oversized review artifact" "$LOG_FILE"
 

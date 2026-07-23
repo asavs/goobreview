@@ -157,6 +157,7 @@ test_state_and_output_permissions
 test_pr_queue_skip_reasons
 test_reviewer_re_requested_review_bypasses_reviewed_sha_skip
 test_agy_invocation_isolates_review_context
+test_agy_angry_narrative_reunified_in_print_arg
 test_agy_records_actual_invocation
 test_agy_invocation_closes_lock_fd
 test_agy_invocation_denies_build_tools
@@ -203,7 +204,10 @@ test_reviewer_research_capture_posts_selected_review_only
 # you add or remove assertions.
 # 602 after #157 helpers; research e2e: -2 shape-only +9 strong archive/session;
 # +8 stdout_fallback null-archive path → 617 (includes footer shape A +3).
-EXPECTED_ASSERTIONS=617
+# 617 → 633 for the agy prompt-delivery redesign: AGENTS.md/argv/diff-file
+# split, CI-coverage-context self-serve pointer replacing raw inlining, and
+# the angry narrative reunified into the literal --print argv value.
+EXPECTED_ASSERTIONS=633
 if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
   printf 'not ok - assertion-count tripwire: expected %s, ran %s\n' "$EXPECTED_ASSERTIONS" "$pass_count" >&2
   printf 'If you intentionally changed the number of assertions, update EXPECTED_ASSERTIONS.\n' >&2

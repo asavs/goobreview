@@ -5,11 +5,12 @@
 # shellcheck disable=SC2034,SC2154,SC2317,SC2329
 
 test_symlink_snapshot_safety() {
-  local worktree_dir outside_file prompt_file output err_file
+  local worktree_dir outside_file prompt_file diff_file output err_file
 
   worktree_dir="$TMP_ROOT/worktree-symlink"
   outside_file="$TMP_ROOT/outside-secret.txt"
   prompt_file="$TMP_ROOT/prompt-symlink.md"
+  diff_file="$TMP_ROOT/diff-symlink.md"
   err_file="$TMP_ROOT/agy-symlink.err"
   mkdir -p "$worktree_dir/docs"
   printf 'outside secret should not appear\n' > "$outside_file"
@@ -22,7 +23,8 @@ test_symlink_snapshot_safety() {
   AGY_MODEL=auto
   mkdir -p "$STATE_DIR"
   printf 'APPROVE\n' > "$prompt_file"
-  if run_agy_review "$prompt_file" "$err_file" "$worktree_dir" >/dev/null; then
+  printf 'diff content\n' > "$diff_file"
+  if run_agy_review "$prompt_file" "$diff_file" "$err_file" "$worktree_dir" >/dev/null; then
     fail "agy refuses snapshot containing symlinks"
   fi
   pass "agy refuses snapshot containing symlinks"
