@@ -335,12 +335,26 @@ EOF
   done
 }
 
+# Reunifies the two prompt.sh outputs into the one literal --print argv value:
+# the small argv-file content (already personality-tagged by build_review_prompt
+# via append_angry_prompt_interruption/append_angry_prompt_prefix), a pointer to
+# the separately-staged diff file, and -- angry arm only -- the narrative tail.
+# Run through with_prompt_personality by the caller so append_angry_prompt_tail
+# reads the same PROMPT_PERSONALITY arm write_agents_md already used.
+_agy_assemble_print_arg() {
+  local prompt_file="$1" diff_pointer="$2"
+
+  cat "$prompt_file"
+  printf '\n\n%s\n' "$diff_pointer"
+  append_angry_prompt_tail
+}
+
 run_agy_review() {
-  local prompt_file="$1" err_file="$2" worktree_dir="$3" personality_file="${4:-${PERSONALITY_FILE:-}}"
-  local ci_state="${5:-}"
-  local head_sha="${6:-}"
-  local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
-  local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count cli_log resolved_model_file resolved_model_label artifact_tmp
+  local prompt_file="$1" diff_file="$2" err_file="$3" worktree_dir="$4" personality_file="${5:-${PERSONALITY_FILE:-}}"
+  local ci_state="${6:-}"
+  local head_sha="${7:-}"
+  local prompt_personality="${8:-${POSTED_PERSONALITY:-}}"
+  local runtime_dir workspace_dir task_dir diff_pointer final_print_arg final_print_arg_file raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count final_bytes cli_log resolved_model_file resolved_model_label artifact_tmp
   # NOTE: do not name a local `session_dir` here. Fixture timeout() mocks close
   # over their own session_dir via bash dynamic scope; shadowing that name
   # inside run_agy_review makes mocks write transcripts to an empty path and
@@ -360,8 +374,9 @@ run_agy_review() {
   resolved_model_file="$runtime_dir/resolved_model_label"
   transcript_path_file="$runtime_dir/transcript_path"
   session_id_file="$runtime_dir/session_id"
+  final_print_arg_file="$runtime_dir/final-print-arg"
   rm -f "$transcript_source_file" "$invocation_record" "$resolved_model_file" \
-    "$transcript_path_file" "$session_id_file"
+    "$transcript_path_file" "$session_id_file" "$final_print_arg_file"
 
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ] && find "$worktree_dir" -type l -print -quit | grep -q .; then
     log "Refusing to invoke agy with symlinks present in PR-head snapshot: $worktree_dir"
@@ -370,12 +385,14 @@ run_agy_review() {
   fi
 
   mkdir -p "$runtime_dir"
-  # The per-invocation trusted workspace holds ONLY AGENTS.md: agy 1.0.16's
-  # --print no longer treats cwd as the workspace, so the trusted channel is
-  # delivered via --add-dir instead, and agy opportunistically ingests any file
-  # visible in an added dir. A stale file surviving here hijacked a canary run
-  # into reviewing the wrong PR, so recreate the dir clean every time -- this is
-  # a correctness requirement, not tidiness. Scratch, deny-bin, and the thinking
+  # The per-invocation trusted workspace holds ONLY AGENTS.md, ever: agy's
+  # documented Rules system (see builtin/skills/agy-customizations/docs/rules.md
+  # shipped with the CLI) auto-loads exactly GEMINI.md/AGENTS.md/.agents/rules/*.md
+  # by walking up from cwd -- a real product feature, not a reverse-engineered
+  # hack -- and cwd is set to this directory below so that discovery finds it.
+  # A stale file surviving here hijacked a canary run into reviewing the wrong
+  # PR, so recreate the dir clean every time regardless -- this is a
+  # correctness requirement, not tidiness. Scratch, deny-bin, and the thinking
   # trace stay in $runtime_dir, outside the workspace.
   workspace_dir="$runtime_dir/workspace"
   rm -rf "$workspace_dir"
@@ -390,16 +407,64 @@ run_agy_review() {
     printf 'Failed to write build-tool refusal shims; refusing agy invocation.\n' >"$err_file"
     return 1
   fi
-  prompt=$(cat "$prompt_file")
+
+  # The diff -- the one untrusted section that can legitimately run large, and
+  # the one thing the model cannot self-serve since the PR-head snapshot has no
+  # .git history -- is staged as a file in its own directory, never inside
+  # workspace_dir: that directory's one invariant is "the only thing in here is
+  # the trusted AGENTS.md Rules file," and mixing untrusted content into it
+  # muddies that invariant for no benefit. It also can't live inside
+  # worktree_dir -- that's a cached, optional, read-only PR-head checkout
+  # described to the model as pristine; REVIEW_DIFF.md exists on every
+  # invocation regardless of whether a snapshot does.
+  task_dir="$runtime_dir/task"
+  rm -rf "$task_dir"
+  mkdir -p "$task_dir"
+  if ! cp "$diff_file" "$task_dir/REVIEW_DIFF.md"; then
+    printf 'Failed to stage REVIEW_DIFF.md in task directory; refusing agy invocation.\n' >"$err_file"
+    return 1
+  fi
+  diff_pointer="The full PR diff (changed-file index and per-file patches) is in the file $task_dir/REVIEW_DIFF.md. Read it as part of this review; paths inside it resolve under the read-only snapshot described in AGENTS.md."
+
+  # The literal --print argv value: the small, bounded argv-file content
+  # build_review_prompt already assembled (PR metadata, commit subjects, prior
+  # review/threads, and -- angry arm only -- the interruption/"User:" framing)
+  # plus the diff pointer plus, angry arm only, the narrative tail --
+  # reunified here into one continuous string rather than split across
+  # AGENTS.md (a Rules file, not a conversation) and a file discovered via a
+  # tool call. This is what makes the payoff line the actual last bytes the
+  # model reads before generating. with_prompt_personality scopes
+  # append_angry_prompt_tail to the same arm write_agents_md already used
+  # above, so a research counterfactual run gets the tail matching its own arm.
+  final_print_arg=$(with_prompt_personality "$prompt_personality" _agy_assemble_print_arg "$prompt_file" "$diff_pointer")
+  printf '%s' "$final_print_arg" >"$final_print_arg_file"
+
+  # Hard, unconditional backstop against the exact failure PR #38 hit:
+  # prompt.sh's own budgets (REVIEWER_MAX_ARGV_PROMPT_BYTES, REVIEWER_MAX_PROMPT_BYTES)
+  # bound the *inputs* to this assembly, but this checks the *actual assembled
+  # argv value* against the real kernel limit (MAX_ARG_STRLEN = 131072 bytes on
+  # a 4K-page system; confirmed by empirically bisecting the exact byte cutoff
+  # on a live VM). 130000 leaves ~1KB margin. This exists so that if a later
+  # change adds an unbounded field upstream, the daemon refuses loudly here
+  # instead of silently reproducing the original silent-forever failure.
+  final_bytes=$(prompt_byte_count "$final_print_arg_file")
+  if [ "$final_bytes" -gt "${AGY_PRINT_ARG_MAX_BYTES:-130000}" ]; then
+    log "Assembled --print argument is $final_bytes bytes, exceeding the safe argv limit (MAX_ARG_STRLEN=131072); refusing agy invocation."
+    printf 'Assembled --print argument (%s bytes) exceeds the safe argv limit; refusing agy invocation.\n' "$final_bytes" >"$err_file"
+    return 1
+  fi
+
   raw_out=$(mktemp "$runtime_dir/agy-stdout.XXXXXX")
   content_tmp=$(mktemp "$runtime_dir/agy-content.XXXXXX")
   transcript_marker=$(mktemp "$runtime_dir/agy-start.XXXXXX")
 
-  # Attach the trusted workspace (AGENTS.md) always, and the PR-head snapshot
-  # only when one exists, so both become reachable workspace members instead of
-  # prose pointers agy cannot act on. cwd is set to the workspace below so it
-  # matches an added dir, the exact shape the 1.0.16 canary validated.
-  add_dir_args=(--add-dir "$workspace_dir")
+  # Attach the trusted workspace (AGENTS.md) and the untrusted task dir
+  # (REVIEW_DIFF.md) always, and the PR-head snapshot only when one exists, so
+  # all become reachable workspace members instead of prose pointers agy
+  # cannot act on. cwd is set to workspace_dir below so Rules discovery finds
+  # AGENTS.md; task_dir and worktree_dir are reached only via their --add-dir
+  # attachment, the same way agy would reach any other project directory.
+  add_dir_args=(--add-dir "$workspace_dir" --add-dir "$task_dir")
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then
     add_dir_args+=(--add-dir "$worktree_dir")
   fi
@@ -417,10 +482,11 @@ run_agy_review() {
   agy_argv=(timeout --kill-after=30 "$AGY_TIMEOUT" agy --sandbox \
     --dangerously-skip-permissions --print-timeout "${AGY_TIMEOUT}s" \
     --model "$AGY_MODEL" "${add_dir_args[@]}" --print)
-  prompt_byte_count=$(printf '%s' "$prompt" | wc -c | tr -d ' ')
+  prompt_byte_count="$final_bytes"
   {
     printf '%q ' "${agy_argv[@]}"
     printf '<prompt: %s bytes>\n' "$prompt_byte_count"
+    printf '# diff file staged separately: %s bytes\n' "$(prompt_byte_count "$diff_file")"
   } >"$invocation_record"
 
   (
@@ -436,7 +502,7 @@ run_agy_review() {
     # Every subprocess agy spawns resolves build/test entry points to the
     # refusal shims first (issue #144). agy itself is not shimmed.
     export PATH="$runtime_dir/deny-bin:$PATH"
-    "${agy_argv[@]}" "$prompt" </dev/null >"$raw_out" 2>"$err_file"
+    "${agy_argv[@]}" "$final_print_arg" </dev/null >"$raw_out" 2>"$err_file"
   )
   agy_status=$?
 
@@ -522,6 +588,21 @@ agy_transcript_source() {
     tr -d '\n' <"$file"
   else
     printf 'agy_failed'
+  fi
+}
+
+# The literal --print argv value the immediately preceding run_agy_review
+# assembled (small argv content + diff pointer + angry tail), or empty if the
+# call refused before assembling it. Dry-run/research artifact writers read
+# this instead of hashing prompt_file directly, since the true final content
+# only exists as an in-memory string inside run_agy_review. Same overwrite
+# contract as agy_transcript_source: read before the next run_agy_review
+# reuses the runtime dir.
+agy_final_print_arg() {
+  local file
+  file="${RUNTIME_STATE_DIR:-$STATE_DIR/runtime}/agy-runtime/final-print-arg"
+  if [ -s "$file" ]; then
+    cat "$file"
   fi
 }
 

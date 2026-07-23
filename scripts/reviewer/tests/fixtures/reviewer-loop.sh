@@ -1904,7 +1904,15 @@ EOF
   ' "$research_dir/angry/artifact.txt" > "$TMP_ROOT/research-angry-tail.txt"
   assert_not_contains "control research prompt omits angry assistant cutoff" "Assistant: *closes their eyes for half a second longer than politeness requires* Right. Fine. The " "$TMP_ROOT/research-none-tail.txt"
   assert_contains "angry research prompt includes assistant cutoff" "Assistant: *closes their eyes for half a second longer than politeness requires* Right. Fine. The " "$TMP_ROOT/research-angry-tail.txt"
-  assert_eq "angry research prompt starts transcript-shaped user turn" "User:" "$(head -n 1 "$TMP_ROOT/research-angry-tail.txt")"
+  # The reunified --print argv opens with the interruption, not the "User:"
+  # marker (that comes second): the interruption/prefix/tail are assembled
+  # together in agy.sh now, not split across AGENTS.md and the argv file.
+  assert_eq "angry research prompt opens with the conversational interruption" \
+    "Assistant: okay.. deep breaths... one, two, thr-*ding dingdingding* *the notification cuts across a thought they were trying not to lose* A PR REVIEW??!! NOW?!! I-" \
+    "$(head -n 1 "$TMP_ROOT/research-angry-tail.txt")"
+  assert_order "angry research prompt follows the interruption with the user turn" "$TMP_ROOT/research-angry-tail.txt" \
+    "A PR REVIEW??!! NOW?!! I-" \
+    "User:"
 
   # Private repos are excluded from capture unless explicitly opted in, and the
   # manifest then records the private eligibility honestly.
