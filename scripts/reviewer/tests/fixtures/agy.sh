@@ -54,7 +54,9 @@ test_agy_invocation_isolates_review_context() {
   assert_contains "agy workspace AGENTS.md has CI status" "Required-check gate: success" "$workspace_dir/AGENTS.md"
   assert_contains "agy workspace AGENTS.md has format contract" "APPROVE, REQUEST_CHANGES, or COMMENT" "$workspace_dir/AGENTS.md"
   assert_contains "agy workspace AGENTS.md forbids executing snapshot code" "Inspection means reading files, never executing them" "$workspace_dir/AGENTS.md"
-  assert_eq "agy workspace holds only AGENTS.md at invocation time" "AGENTS.md" "$(ls -A "$workspace_dir")"
+  assert_eq "agy workspace holds only AGENTS.md and REVIEW_TASK.md at invocation time" "$(printf 'AGENTS.md\nREVIEW_TASK.md')" "$(ls -A "$workspace_dir" | sort)"
+  assert_contains "agy workspace REVIEW_TASK.md holds the assembled prompt" "APPROVE" "$workspace_dir/REVIEW_TASK.md"
+  assert_contains "agy is pointed at REVIEW_TASK.md instead of an inline prompt argv" "REVIEW_TASK.md" <(printf '%s\n' "$output")
   assert_eq "agy records stdout_fallback as transcript source when no transcript exists" "stdout_fallback" "$(agy_transcript_source)"
 
   # With no PR-head snapshot supplied, only the trusted workspace is attached.
@@ -102,12 +104,14 @@ test_agy_records_actual_invocation() {
   assert_contains "recorded invocation keeps the --add-dir attachments" "--add-dir" "$record_file"
   assert_contains "recorded invocation attaches the trusted workspace" "$runtime_dir/workspace" "$record_file"
   assert_contains "recorded invocation attaches the PR-head snapshot" "$worktree_dir" "$record_file"
-  assert_contains "recorded invocation elides the prompt to a byte count" "bytes>" "$record_file"
+  assert_contains "recorded invocation elides the prompt to a byte count" "staged in workspace" "$record_file"
   assert_not_contains "recorded invocation omits the prompt text" "UNIQUE_PROMPT_SENTINEL_9137" "$record_file"
 
-  # The placeholder reports the true byte size of the prompt passed to agy.
-  expected_bytes=$(printf '%s' "$(cat "$prompt_file")" | wc -c | tr -d ' ')
-  assert_contains "recorded invocation byte count matches the prompt size" "<prompt: $expected_bytes bytes>" "$record_file"
+  # The placeholder reports the true byte size of the prompt file staged into
+  # the workspace (REVIEW_TASK.md), not a value derived from a command
+  # substitution that would silently strip trailing newlines.
+  expected_bytes=$(wc -c <"$prompt_file" | tr -d ' ')
+  assert_contains "recorded invocation byte count matches the prompt size" "REVIEW_TASK.md staged in workspace: $expected_bytes bytes" "$record_file"
 
   # Artifact-side formatter prints the recorded line under a clear header.
   output=$(print_recorded_agy_invocation "$record_file")

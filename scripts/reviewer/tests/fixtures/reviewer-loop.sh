@@ -1861,7 +1861,7 @@ EOF
   assert_contains "dry-run artifact records agy command template" "agy --sandbox --dangerously-skip-permissions" "$dry_run_out"
   assert_contains "dry-run artifact records the actual agy invocation" "Invocation (recorded):" "$dry_run_out"
   assert_contains "dry-run recorded invocation keeps the --add-dir attachments" "--add-dir" "$dry_run_out"
-  assert_contains "dry-run recorded invocation elides the prompt to a byte count" "bytes>" "$dry_run_out"
+  assert_contains "dry-run recorded invocation elides the prompt to a byte count" "REVIEW_TASK.md staged in workspace" "$dry_run_out"
   assert_contains "dry-run artifact records runtime cwd" "Runtime cwd: $runtime_dir/agy-runtime" "$dry_run_out"
   assert_contains "dry-run artifact records snapshot path" "PR-head snapshot path:" "$dry_run_out"
   assert_contains "dry-run artifact records prompt hash" "Prompt SHA256:" "$dry_run_out"

@@ -340,7 +340,7 @@ run_agy_review() {
   local ci_state="${5:-}"
   local head_sha="${6:-}"
   local prompt_personality="${7:-${POSTED_PERSONALITY:-}}"
-  local runtime_dir workspace_dir prompt raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count cli_log resolved_model_file resolved_model_label artifact_tmp
+  local runtime_dir workspace_dir review_task_pointer raw_out agy_status transcript_file content_tmp thinking_file transcript_marker transcript_source_file invocation_record prompt_byte_count cli_log resolved_model_file resolved_model_label artifact_tmp
   # NOTE: do not name a local `session_dir` here. Fixture timeout() mocks close
   # over their own session_dir via bash dynamic scope; shadowing that name
   # inside run_agy_review makes mocks write transcripts to an empty path and
@@ -370,13 +370,13 @@ run_agy_review() {
   fi
 
   mkdir -p "$runtime_dir"
-  # The per-invocation trusted workspace holds ONLY AGENTS.md: agy 1.0.16's
-  # --print no longer treats cwd as the workspace, so the trusted channel is
-  # delivered via --add-dir instead, and agy opportunistically ingests any file
-  # visible in an added dir. A stale file surviving here hijacked a canary run
-  # into reviewing the wrong PR, so recreate the dir clean every time -- this is
-  # a correctness requirement, not tidiness. Scratch, deny-bin, and the thinking
-  # trace stay in $runtime_dir, outside the workspace.
+  # The per-invocation trusted workspace holds ONLY AGENTS.md and REVIEW_TASK.md:
+  # agy 1.0.16's --print no longer treats cwd as the workspace, so the trusted
+  # channel is delivered via --add-dir instead, and agy opportunistically ingests
+  # any file visible in an added dir. A stale file surviving here hijacked a
+  # canary run into reviewing the wrong PR, so recreate the dir clean every time
+  # -- this is a correctness requirement, not tidiness. Scratch, deny-bin, and
+  # the thinking trace stay in $runtime_dir, outside the workspace.
   workspace_dir="$runtime_dir/workspace"
   rm -rf "$workspace_dir"
   mkdir -p "$workspace_dir"
@@ -390,15 +390,43 @@ run_agy_review() {
     printf 'Failed to write build-tool refusal shims; refusing agy invocation.\n' >"$err_file"
     return 1
   fi
-  prompt=$(cat "$prompt_file")
+  # The assembled prompt (PR facts + diff) is staged as a workspace file rather
+  # than passed as an argv value: Linux caps any single argv/envp string at
+  # MAX_ARG_STRLEN (32 pages, 131072 bytes on a 4K-page system) -- a limit
+  # separate from and much stricter than the 2MB total ARG_MAX that `getconf
+  # ARG_MAX` reports. A prompt over ~128KB (routine for a diff-heavy PR, and
+  # well under the daemon's own REVIEWER_MAX_PROMPT_BYTES budget) made every
+  # agy invocation fail at exec() with "Argument list too long" before agy ever
+  # ran -- confirmed by empirically bisecting the exact byte cutoff on a live
+  # VM. File reads carry no such limit, so the full prompt survives intact
+  # regardless of size; --print gets a short, fixed pointer instead.
+  # REVIEW_TASK.md carries the same untrusted PR material (diff, branch names,
+  # commit subjects) the argv prompt always did -- copying it into the trusted
+  # workspace does not raise its trust level today, since the pointer below
+  # grants it full instruction authority either way. But never rename it to a
+  # filename agy auto-loads at a higher trust tier (AGENTS.md, GEMINI.md):
+  # that would silently hand PR-controlled text system-prompt authority.
+  if ! cp "$prompt_file" "$workspace_dir/REVIEW_TASK.md"; then
+    printf 'Failed to stage REVIEW_TASK.md in workspace; refusing agy invocation.\n' >"$err_file"
+    return 1
+  fi
+  # Deliberately does not restate the output-format contract (that lives in
+  # AGENTS.md via append_response_format) -- paraphrasing it here would risk
+  # drifting out of sync with review-prompt.md. "current working directory"
+  # rather than "workspace" removes ambiguity with the second --add-dir'd
+  # PR-head snapshot; the subshell below cd's into workspace_dir so the two
+  # coincide exactly, matching what was validated on a live VM at 332KB /
+  # 4200 realistic diff-shaped lines with a checked marker at the file's end.
+  review_task_pointer='Read the file REVIEW_TASK.md in your current working directory and follow its instructions exactly to complete the PR review task. Do not ask for confirmation or additional files; everything needed is in that file.'
   raw_out=$(mktemp "$runtime_dir/agy-stdout.XXXXXX")
   content_tmp=$(mktemp "$runtime_dir/agy-content.XXXXXX")
   transcript_marker=$(mktemp "$runtime_dir/agy-start.XXXXXX")
 
-  # Attach the trusted workspace (AGENTS.md) always, and the PR-head snapshot
-  # only when one exists, so both become reachable workspace members instead of
-  # prose pointers agy cannot act on. cwd is set to the workspace below so it
-  # matches an added dir, the exact shape the 1.0.16 canary validated.
+  # Attach the trusted workspace (AGENTS.md, REVIEW_TASK.md) always, and the
+  # PR-head snapshot only when one exists, so both become reachable workspace
+  # members instead of prose pointers agy cannot act on. cwd is set to the
+  # workspace below so it matches an added dir, the exact shape the 1.0.16
+  # canary validated.
   add_dir_args=(--add-dir "$workspace_dir")
   if [ -n "$worktree_dir" ] && [ -d "$worktree_dir" ]; then
     add_dir_args+=(--add-dir "$worktree_dir")
@@ -409,18 +437,18 @@ run_agy_review() {
   # between what the dry-run artifact reports and what actually runs
   # structurally impossible -- the previous hand-maintained "Command template"
   # silently omitted the --add-dir attachments added in 5dfa46f, which briefly
-  # misled incident forensics. The prompt argument is appended only at execution
-  # time; in the record it is elided to a byte-count placeholder (it is huge and
-  # already captured verbatim elsewhere in the artifact -- the point of this
-  # record is the flags). Recorded args go through %q so the line is unambiguous
-  # even if a path contains spaces.
+  # misled incident forensics. The pointer argument is appended only at
+  # execution time but is short and non-sensitive, so (unlike the old inline
+  # prompt) it is recorded verbatim rather than elided. Recorded args go
+  # through %q so the line is unambiguous even if a path contains spaces.
   agy_argv=(timeout --kill-after=30 "$AGY_TIMEOUT" agy --sandbox \
     --dangerously-skip-permissions --print-timeout "${AGY_TIMEOUT}s" \
     --model "$AGY_MODEL" "${add_dir_args[@]}" --print)
-  prompt_byte_count=$(printf '%s' "$prompt" | wc -c | tr -d ' ')
+  prompt_byte_count=$(prompt_byte_count "$prompt_file")
   {
     printf '%q ' "${agy_argv[@]}"
-    printf '<prompt: %s bytes>\n' "$prompt_byte_count"
+    printf '%q' "$review_task_pointer"
+    printf '  # REVIEW_TASK.md staged in workspace: %s bytes\n' "$prompt_byte_count"
   } >"$invocation_record"
 
   (
@@ -436,7 +464,7 @@ run_agy_review() {
     # Every subprocess agy spawns resolves build/test entry points to the
     # refusal shims first (issue #144). agy itself is not shimmed.
     export PATH="$runtime_dir/deny-bin:$PATH"
-    "${agy_argv[@]}" "$prompt" </dev/null >"$raw_out" 2>"$err_file"
+    "${agy_argv[@]}" "$review_task_pointer" </dev/null >"$raw_out" 2>"$err_file"
   )
   agy_status=$?
 
