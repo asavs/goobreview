@@ -1,0 +1,385 @@
+// Shared contracts for the goobreview engine. Modules depend on these types,
+// not on each other's internals, so each layer can be tested against fakes.
+
+export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
+export type Personality = "none" | "angry";
+
+export interface RepoRef {
+  owner: string;
+  repo: string;
+}
+
+export const repoName = (r: RepoRef): string => `${r.owner}/${r.repo}`;
+
+// ---------------------------------------------------------------------------
+// Configuration (fully resolved; see config.ts for defaults and validation)
+
+export interface ModelRef {
+  /** pi-ai provider id, e.g. "google", "google-vertex", "anthropic", "openrouter". */
+  provider: string;
+  /** Provider model id, e.g. "gemini-3.8-flash". Never "auto". */
+  id: string;
+  thinking: ThinkingLevel;
+}
+
+export interface Budgets {
+  maxPromptBytes: number;
+  diffMaxBytes: number;
+  diffFileMaxBytes: number;
+  descriptionMaxBytes: number;
+  previousReviewMaxBytes: number;
+  priorThreadLimit: number;
+  priorThreadBodyMaxBytes: number;
+  commitSubjectsMax: number;
+  suggestionMaxLines: number;
+  traceMaxBytes: number;
+}
+
+export interface ExecutorLimits {
+  maxTurns: number;
+  maxToolCalls: number;
+  maxWallSeconds: number;
+  /** Per tool result, bytes returned to the model before truncation. */
+  toolResultMaxBytes: number;
+}
+
+export interface RepoPolicy {
+  /** Exact check-run names that must succeed before review; [] = no gate. */
+  requiredChecks: string[];
+  personality: Personality;
+  include: { author: boolean; description: boolean; commitSubjects: boolean };
+}
+
+export interface EngineConfig {
+  /** Models tried in order; later entries are used only on quota/availability errors. */
+  models: ModelRef[];
+  /** Optional allowlist of "owner/repo"; empty = every repo the App is installed on. */
+  repos: string[];
+  defaults: RepoPolicy;
+  /** Per-repo overrides keyed by "owner/repo". */
+  overrides: Record<string, Partial<RepoPolicy>>;
+  budgets: Budgets;
+  limits: ExecutorLimits;
+  /** A PR the bot already reviewed waits until its head is unchanged this long. */
+  settleSeconds: number;
+  /** Failure backoff ladder; attempt N waits ladder[min(N-1, len-1)] seconds. */
+  backoffSeconds: number[];
+  checkRunSignal: boolean;
+  autoResolveBotThreads: boolean;
+  postTrace: boolean;
+  dryRun: boolean;
+  research: { consent: boolean; allowPrivate: boolean };
+  /** Directory for snapshots and transcripts; ephemeral is fine. */
+  workDir: string;
+}
+
+// ---------------------------------------------------------------------------
+// GitHub facts
+
+export interface PullSummary {
+  number: number;
+  headSha: string;
+  draft: boolean;
+  authorLogin: string;
+}
+
+export type FileStatus = "added" | "removed" | "modified" | "renamed" | "copied" | "changed" | "unchanged";
+
+export interface ChangedFile {
+  path: string;
+  previousPath?: string;
+  status: FileStatus;
+  additions: number;
+  deletions: number;
+  /** Unified diff hunk text as GitHub returns it; undefined when GitHub omits it (binary/too large). */
+  patch?: string;
+}
+
+export interface BotReview {
+  id: number;
+  commitId: string;
+  state: string;
+  body: string;
+  submittedAt: string;
+}
+
+export interface ReviewThread {
+  /** GraphQL node id, used to resolve. */
+  id: string;
+  /** Stable slug derived from the thread's first heading. */
+  handle: string;
+  path: string;
+  line?: number;
+  isResolved: boolean;
+  /** REST id of the first comment, used to reply. */
+  firstCommentId: number;
+  firstCommentBody: string;
+  viewerCanResolve: boolean;
+}
+
+export type CheckStatus = "queued" | "in_progress" | "completed" | "waiting" | "requested" | "pending";
+
+export interface CheckRunFact {
+  name: string;
+  status: CheckStatus;
+  conclusion: string | null;
+  appSlug?: string;
+}
+
+export interface PullRequestFacts {
+  repo: RepoRef;
+  number: number;
+  htmlUrl: string;
+  title: string;
+  body: string;
+  draft: boolean;
+  state: "open" | "closed";
+  author: { login: string; type: string };
+  headSha: string;
+  headRef: string;
+  baseRef: string;
+  baseSha: string;
+  isFork: boolean;
+  repoPrivate: boolean;
+  commits: { sha: string; subject: string }[];
+  files: ChangedFile[];
+  /** Reviews authored by this App's bot, oldest first. */
+  botReviews: BotReview[];
+  /** True when a review from the bot was (re-)requested after its latest review. */
+  reviewRequested: boolean;
+  /** Inline threads opened by the bot. */
+  botThreads: ReviewThread[];
+  /** Check runs on headSha, excluding this engine's own check run. */
+  checkRuns: CheckRunFact[];
+}
+
+// ---------------------------------------------------------------------------
+// Engine state, persisted in the engine's own check run on each head SHA, so
+// any stateless worker can pick up where another left off.
+
+export interface EngineState {
+  /** When the engine first observed this head SHA (ISO). */
+  firstSeenAt: string;
+  /** Consecutive failed review attempts on this head. */
+  attempts: number;
+  lastFailureReason?: "review-failure" | "invalid-review" | "quota";
+  lastAttemptAt?: string;
+}
+
+export interface EngineCheckRun {
+  id: number;
+  status: CheckStatus;
+  conclusion: string | null;
+  state: EngineState | null;
+}
+
+export interface CheckRunUpdate {
+  status: "queued" | "in_progress" | "completed";
+  conclusion?: "success" | "failure" | "neutral" | "skipped";
+  title: string;
+  summary: string;
+  state: EngineState;
+}
+
+// ---------------------------------------------------------------------------
+// Decisions (pure; see decide.ts)
+
+export type SkipReason =
+  | "draft"
+  | "self-authored"
+  | "already-reviewed"
+  | "closed"
+  | "not-allowlisted";
+
+export type Decision =
+  | { kind: "skip"; reason: SkipReason }
+  | { kind: "wait"; reason: "settling" | "backoff" | "ci-pending"; until?: string; detail?: string }
+  | { kind: "ci-failed"; failing: string[] }
+  | { kind: "review"; rereview: boolean };
+
+export type CiState =
+  | { state: "none" }
+  | { state: "success"; checks: string[] }
+  | { state: "pending"; waitingOn: string[] }
+  | { state: "failing"; failing: string[] };
+
+// ---------------------------------------------------------------------------
+// Snapshot and prompt
+
+export interface Snapshot {
+  /** Absolute path of the extracted, read-only PR-head tree. */
+  root: string;
+  sha: string;
+  /** linguist-generated patterns from the snapshot's .gitattributes (non-symlink only). */
+  generatedPatterns: string[];
+  /** Paths replaced by stubs because they were symlinks. */
+  symlinkStubs: string[];
+}
+
+export interface PromptInput {
+  facts: PullRequestFacts;
+  snapshot: Snapshot;
+  policy: RepoPolicy;
+  budgets: Budgets;
+  ci: CiState;
+  /** Guidance files present in the snapshot (AGENTS.md, CONTRIBUTING.md, ...), relative paths. */
+  guidanceFiles: string[];
+}
+
+export interface ComposedPrompt {
+  /** Trusted: role, contract, output rules, personality. Never contains PR-authored text. */
+  system: string;
+  /** Untrusted PR data, clearly fenced. */
+  user: string;
+  /** Human-readable notes of what was omitted for budget or generated-file reasons. */
+  omissions: string[];
+  bytes: number;
+}
+
+// ---------------------------------------------------------------------------
+// Review form: the model's only output channel is a submit_review tool call
+// whose arguments match this shape. Nothing is parsed out of free text.
+
+export interface Finding {
+  /** Short distinctive title; becomes the heading and the thread handle. */
+  title: string;
+  blocking: boolean;
+  path?: string;
+  /** Line in the PR head (RIGHT side). */
+  line?: number;
+  /** First line of a multi-line range ending at `line`. */
+  startLine?: number;
+  body: string;
+  /** Exact replacement for [startLine..line], verified against the snapshot. */
+  suggestion?: string;
+}
+
+export interface ReviewForm {
+  verdict: ReviewEvent;
+  summary: string;
+  findings: Finding[];
+  resolvedThreads: { handle: string; evidence: string }[];
+  unresolvedThreads: { handle: string; explanation: string }[];
+  /** Changed paths the verdict does not cover (not inspected). */
+  notCovered: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Executor
+
+export interface TranscriptEntry {
+  t: string;
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface ExecutorInput {
+  prompt: ComposedPrompt;
+  snapshot: Snapshot;
+  models: ModelRef[];
+  limits: ExecutorLimits;
+  signal?: AbortSignal;
+}
+
+export interface ExecutorResult {
+  form: ReviewForm;
+  model: ModelRef;
+  transcript: TranscriptEntry[];
+  usage: { requests: number; inputTokens: number; outputTokens: number; toolCalls: number };
+  elapsedMs: number;
+}
+
+export type ExecutorErrorKind = "quota" | "auth" | "no-review" | "invalid-review" | "timeout" | "provider";
+
+export class ExecutorError extends Error {
+  constructor(
+    readonly kind: ExecutorErrorKind,
+    message: string,
+    readonly transcript: TranscriptEntry[] = [],
+  ) {
+    super(message);
+    this.name = "ExecutorError";
+  }
+}
+
+export interface Executor {
+  run(input: ExecutorInput): Promise<ExecutorResult>;
+}
+
+// ---------------------------------------------------------------------------
+// Posting
+
+export interface InlineComment {
+  path: string;
+  line: number;
+  startLine?: number;
+  side: "RIGHT";
+  body: string;
+}
+
+export interface ReviewPayload {
+  commitId: string;
+  event: ReviewEvent;
+  body: string;
+  comments: InlineComment[];
+}
+
+export interface ThreadAction {
+  thread: ReviewThread;
+  kind: "resolve" | "reply";
+  body: string;
+}
+
+export interface PlannedReview {
+  payload: ReviewPayload;
+  threadActions: ThreadAction[];
+  /** Notes about transformations applied (downgrade, demoted suggestions, unplaced findings). */
+  notes: string[];
+}
+
+// ---------------------------------------------------------------------------
+// GitHub port. The Octokit implementation lives in github/; tests use a fake.
+
+export interface GitHubPort {
+  /** "<slug>[bot]" for the authenticated App. */
+  botLogin(): Promise<string>;
+  listInstalledRepos(): Promise<RepoRef[]>;
+  listOpenPulls(repo: RepoRef): Promise<PullSummary[]>;
+  getPullFacts(repo: RepoRef, number: number): Promise<PullRequestFacts>;
+  getHeadSha(repo: RepoRef, number: number): Promise<string>;
+  /** Writes the gzipped tarball of `sha` to `destFile`. */
+  downloadTarball(repo: RepoRef, sha: string, destFile: string): Promise<void>;
+  getEngineCheckRun(repo: RepoRef, sha: string): Promise<EngineCheckRun | null>;
+  /** Creates or updates the engine's check run on `sha`; returns its id. */
+  upsertEngineCheckRun(repo: RepoRef, sha: string, update: CheckRunUpdate): Promise<number>;
+  addReaction(repo: RepoRef, number: number, content: "eyes" | "confused"): Promise<void>;
+  postReview(repo: RepoRef, number: number, payload: ReviewPayload): Promise<{ id: number; htmlUrl: string }>;
+  replyToThread(repo: RepoRef, number: number, commentId: number, body: string): Promise<void>;
+  resolveThread(threadId: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Research capture (phase 4). Reconcile calls the sink; the default is a no-op.
+
+export interface ResearchRecord {
+  schemaVersion: 2;
+  repo: string;
+  pr: number;
+  headSha: string;
+  postedArm: Personality;
+  prompt: ComposedPrompt;
+  result: ExecutorResult;
+}
+
+export interface ResearchSink {
+  record(rec: ResearchRecord): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+
+export interface Logger {
+  info(msg: string, fields?: Record<string, unknown>): void;
+  warn(msg: string, fields?: Record<string, unknown>): void;
+  error(msg: string, fields?: Record<string, unknown>): void;
+}
