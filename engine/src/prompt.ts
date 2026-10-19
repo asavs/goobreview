@@ -303,6 +303,31 @@ export function generatedReason(filePath: string, snapshotPatterns: string[]): s
   return undefined;
 }
 
+/**
+ * Prefix each hunk line with its PR-head (RIGHT side) line number so findings
+ * can anchor on exactly the lines diffmap.ts accepts for inline comments.
+ * Removed lines get a blank number column; they have no RIGHT-side line.
+ */
+export function numberPatch(patch: string): string {
+  let next = 0;
+  const out: string[] = [];
+  for (const line of patch.replace(/\r?\n$/, "").split(/\r?\n/)) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (hunk) {
+      next = Number(hunk[1]);
+      out.push(line);
+    } else if (line.startsWith("-")) {
+      out.push(`${"".padStart(6)} ${line}`);
+    } else if (line.startsWith("+") || line.startsWith(" ") || line === "") {
+      out.push(`${String(next).padStart(6)} ${line === "" ? " " : line}`);
+      next++;
+    } else {
+      out.push(line);
+    }
+  }
+  return out.join("\n");
+}
+
 // Mirrors GitHub's Files Changed degradation: each file's patch is either
 // included whole or replaced by a marker, never cut mid-hunk. Omitted files
 // stay readable in the snapshot.
@@ -310,13 +335,14 @@ function diffSection(input: PromptInput, omissions: string[]): string {
   const { budgets, facts } = input;
   const parts = [
     `## Diff`,
-    `Per-file unified diffs against the base branch. Hunk \`+\` and context lines carry PR-head (RIGHT side) line numbers.`,
+    `Per-file unified diffs against the base branch. Each \`+\` and context line is prefixed by its PR-head (RIGHT side) line number; \`-\` lines have none. Use these numbers for finding \`line\`/\`startLine\`.`,
   ];
   let total = 0;
   for (const f of facts.files) {
     const header = `### ${code(f.path)} (${inline(f.status)}, +${f.additions}/-${f.deletions})`;
     let reason = generatedReason(f.path, input.snapshot.generatedPatterns);
-    const bytes = f.patch === undefined ? 0 : Buffer.byteLength(f.patch, "utf8");
+    const numbered = f.patch ? numberPatch(f.patch) : undefined;
+    const bytes = numbered === undefined ? 0 : Buffer.byteLength(numbered, "utf8");
     if (!reason) {
       if (f.patch === undefined || f.patch === "") reason = "GitHub provided no text patch (binary or oversized file)";
       else if (bytes > budgets.diffFileMaxBytes) reason = `patch is ${bytes} bytes, over the ${budgets.diffFileMaxBytes}-byte per-file budget`;
@@ -329,7 +355,7 @@ function diffSection(input: PromptInput, omissions: string[]): string {
     }
     total += bytes;
     const from = f.previousPath ?? f.path;
-    parts.push(`${header}\n${fence(`diff --git a/${inline(from)} b/${inline(f.path)}\n${(f.patch as string).replace(/\r?\n$/, "")}`, "diff")}`);
+    parts.push(`${header}\n${fence(`diff --git a/${inline(from)} b/${inline(f.path)}\n${numbered as string}`, "diff")}`);
   }
   if (facts.files.length === 0) parts.push("(no changed files)");
   return parts.join("\n\n");

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PromptBudgetError, blockquote, composePrompt, reviewSubject } from "../src/prompt.js";
+import { PromptBudgetError, blockquote, composePrompt, numberPatch, reviewSubject } from "../src/prompt.js";
+import { parsePatch } from "../src/diffmap.js";
 import type { ChangedFile } from "../src/types.js";
 import { budgets, facts, input, policy } from "./fixtures/prompt-input.js";
 
@@ -163,8 +164,8 @@ describe("composePrompt: diff degradation", () => {
         budgets: { ...budgets, diffFileMaxBytes: 400, diffMaxBytes: 450 },
       }),
     );
-    expect(p.user).toContain("diff of big.ts: patch is 500 bytes, over the 400-byte per-file budget");
-    expect(p.user).toContain("diff --git a/one.ts b/one.ts\n" + patchOf(300) + "\n```");
+    expect(p.user).toMatch(/diff of big\.ts: patch is \d+ bytes, over the 400-byte per-file budget/);
+    expect(p.user).toContain("diff --git a/one.ts b/one.ts\n" + numberPatch(patchOf(300)) + "\n```");
     expect(p.user).toContain("diff of two.ts: total diff budget of 450 bytes exhausted");
     // A later small file still fits after an earlier one was dropped.
     expect(p.user).toContain("diff --git a/small.ts b/small.ts");
@@ -190,5 +191,34 @@ describe("reviewSubject", () => {
   it("falls back to the first non-empty line", () => {
     expect(reviewSubject("\n\nLooks good overall.\nmore")).toBe("Looks good overall.");
     expect(reviewSubject("## Review of #7\n## Findings\n## Race in cache")).toBe("Race in cache");
+  });
+});
+
+describe("numberPatch", () => {
+  const patch = "@@ -10,4 +10,5 @@ fn\n context a\n-removed\n+added one\n+added two\n context b\n\\ No newline at end of file\n@@ -40,2 +41,2 @@\n-old\n+new\n same";
+
+  it("numbers RIGHT-side lines and leaves removed lines unnumbered", () => {
+    expect(numberPatch(patch).split("\n")).toEqual([
+      "@@ -10,4 +10,5 @@ fn",
+      "    10  context a",
+      "       -removed",
+      "    11 +added one",
+      "    12 +added two",
+      "    13  context b",
+      "\\ No newline at end of file",
+      "@@ -40,2 +41,2 @@",
+      "       -old",
+      "    41 +new",
+      "    42  same",
+    ]);
+  });
+
+  it("shows exactly the lines diffmap accepts for inline comments", () => {
+    const shown = new Set<number>();
+    for (const l of numberPatch(patch).split("\n")) {
+      const m = /^\s*(\d+) [+ ]/.exec(l);
+      if (m) shown.add(Number(m[1]));
+    }
+    expect([...shown].sort((a, b) => a - b)).toEqual([...parsePatch(patch).right].sort((a, b) => a - b));
   });
 });
