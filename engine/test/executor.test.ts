@@ -246,3 +246,20 @@ describe("executor: steering counts calls that ran", () => {
     expect(res.transcript.filter((e) => e.type === "steer")).toEqual([]);
   });
 });
+
+describe("executor: steer messages due together", () => {
+  it("delivers them before the same request", async () => {
+    const { fauxes, executor, input } = setup("faux-a");
+    const seen: string[][] = [];
+    const step = (then: () => ReturnType<typeof submit>) => (ctx: { messages: unknown[] }) => {
+      seen.push((ctx.messages as { role: string; content: unknown }[]).filter((m) => m.role === "user" && String(m.content).startsWith("S")).map((m) => String(m.content)));
+      return then();
+    };
+    const read = () => fauxAssistantMessage(fauxToolCall("read_file", { path: "a" }), { stopReason: "toolUse" });
+    fauxes[0]!.setResponses([step(read), step(read), step(() => submit(GOOD))]);
+    const persona = { ...noPersona("angry:x"), steer: [{ text: "S1", afterToolCalls: [1] }, { text: "S2", afterToolCalls: [1] }] };
+    const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 } }));
+    expect(seen).toEqual([[], ["S1", "S2"], ["S1", "S2"]]);
+    expect(res.usage.requests).toBe(3);
+  });
+});

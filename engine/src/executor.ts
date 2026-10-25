@@ -173,6 +173,9 @@ async function runOne(
     },
     streamFn: models.streamSimple.bind(models),
     maxRetryDelayMs: MAX_RETRY_DELAY_MS,
+    // Steer messages due at the same count arrive together, before the same
+    // request; one-at-a-time would stagger them and can force extra requests.
+    steeringMode: "all",
     beforeToolCall: async ({ toolCall }) => {
       if (toolCall.name === SUBMIT_TOOL) return undefined;
       if (phase === "nudge") return { block: true, reason: "Only submit_review is available now. Call it with your review." };
