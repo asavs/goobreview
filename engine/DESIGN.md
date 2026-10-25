@@ -112,9 +112,16 @@ These were each learned from an incident; the v1 issue number is noted.
 
 - GitHub access is only through the App: installation tokens minted from the
   App private key. No user tokens, no inherited `GH_TOKEN` (#14).
-- Model credentials resolve through pi-ai: environment API keys, a pi
-  `auth.json` credential store (API keys or OAuth tokens), or ambient cloud
-  credentials (Vertex ADC on GCP).
+- Model credentials resolve through pi-ai: a pi `auth.json` credential store
+  (API keys or OAuth tokens; default `~/.config/goobreview/auth.json`, 0600),
+  environment API keys, or ambient cloud credentials (Vertex ADC on GCP).
+- `goobreview auth login <provider>` runs pi-ai's own login flow and writes
+  the result straight to the store: keys through hidden input, OAuth through a
+  browser URL whose redirect can be pasted back, so it works over SSH. `auth
+  status` names each chain model's credential source and never prints a value.
+- Each review records how its model was authenticated (`ExecutorResult.credential`).
+  Subscription logins are allowed but flagged; Anthropic's rewrites the system
+  prompt and tools to Claude Code's, so its reviews are not research-comparable.
 - Logs and artifacts are redacted; GitHub error messages never include tokens.
 - Non-GET GitHub requests are not retried blindly.
 

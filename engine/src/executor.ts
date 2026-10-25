@@ -8,7 +8,7 @@
 
 import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type AssistantMessage, type Model, type Models, type Api } from "@earendil-works/pi-ai";
-import { createModelsCollection } from "./credentials.js";
+import { createModelsCollection, describeCredential } from "./credentials.js";
 import { createReadOnlyTools } from "./tools.js";
 import {
   ExecutorError,
@@ -18,6 +18,7 @@ import {
   type ExecutorResult,
   type Finding,
   type Logger,
+  type ModelCredential,
   type ModelRef,
   type ReviewForm,
   type TranscriptEntry,
@@ -80,8 +81,9 @@ async function runWithFallback(models: Models, log: Logger, input: ExecutorInput
   let allQuota = true;
   for (const ref of input.models) {
     try {
-      const form = await runOne(models, ref, input, deadline, transcript, usage);
-      return { form, model: ref, transcript, usage, elapsedMs: Date.now() - started };
+      const credential = await describeCredential(models, ref.provider);
+      const form = await runOne(models, ref, credential, input, deadline, transcript, usage);
+      return { form, model: ref, ...(credential ? { credential } : {}), transcript, usage, elapsedMs: Date.now() - started };
     } catch (err) {
       const e = err instanceof ExecutorError ? err : new ExecutorError("provider", errorText(err), transcript);
       const fallback = (e as FallbackError).fallback === true;
@@ -113,13 +115,14 @@ class FallbackError extends ExecutorError {
 async function runOne(
   models: Models,
   ref: ModelRef,
+  credential: ModelCredential | undefined,
   input: ExecutorInput,
   deadline: number,
   transcript: TranscriptEntry[],
   usage: ExecutorResult["usage"],
 ): Promise<ReviewForm> {
   const model = models.getModel(ref.provider, ref.id) as Model<Api> | undefined;
-  transcript.push(entry("model", { provider: ref.provider, model: ref.id, thinking: ref.thinking }));
+  transcript.push(entry("model", { provider: ref.provider, model: ref.id, thinking: ref.thinking, ...(credential ? { credential } : {}) }));
   if (!model) throw new FallbackError("provider", `unknown model ${ref.provider}/${ref.id}`, transcript, true);
 
   const remaining = deadline - Date.now();
@@ -266,7 +269,7 @@ function classified(message: string, transcript: TranscriptEntry[]): FallbackErr
 export function classifyProviderError(message: string): { kind: "quota" | "auth" | "provider"; fallback: boolean } {
   const m = message;
   if (
-    /\b429\b|rate.?limit|too many requests|QUOTA_EXHAUSTED|insufficient_quota|exceeded your current quota|quota exceeded|Individual quota reached|exhausted your capacity|No capacity available/i.test(m) ||
+    /\b429\b|rate.?limit|too many requests|QUOTA_EXHAUSTED|insufficient_quota|exceeded your current quota|quota exceeded|Individual quota reached|exhausted your capacity|No capacity available|usage.?limit/i.test(m) ||
     (/RESOURCE_EXHAUSTED/i.test(m) && /quota|rate limit/i.test(m))
   ) {
     return { kind: "quota", fallback: true };

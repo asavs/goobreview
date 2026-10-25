@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// goobreview CLI: wires the real modules into reconcile/sweep/prompt.
+// goobreview CLI: wires the real modules into reconcile/sweep/prompt/auth.
 // Exit codes: 0 ok, 1 failure, 2 usage.
 
 import { readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { AuthCommandError, authLogin, authLogout, authProviders, authStatus, terminalIO, type AuthIO } from "./auth.js";
 import { ConfigError, loadConfig } from "./config.js";
+import { createModelsCollection, credentialsPath, installationId } from "./credentials.js";
 import { createExecutor } from "./executor.js";
 import { createGitHubPort } from "./github/index.js";
 import { createLogger } from "./log.js";
@@ -19,10 +21,15 @@ const USAGE = `usage:
   goobreview reconcile --repo owner/repo --pr N [--dry-run] [--config file]
   goobreview sweep [--repo owner/repo] [--dry-run] [--max-reviews N] [--config file]
   goobreview prompt --repo owner/repo --pr N [--config file]
+  goobreview auth status [--config file]      which models in the chain can sign in
+  goobreview auth login <provider> [--api-key | --oauth]
+  goobreview auth logout <provider>
+  goobreview auth providers
 
 env: GOOBREVIEW_APP_ID, GOOBREVIEW_APP_PRIVATE_KEY or GOOBREVIEW_APP_PRIVATE_KEY_FILE,
      optional GOOBREVIEW_APP_INSTALLATION_ID, GOOBREVIEW_CONFIG, GOOBREVIEW_DRY_RUN,
-     GOOBREVIEW_MODELS, GOOBREVIEW_CREDENTIALS_FILE (pi auth.json)`;
+     GOOBREVIEW_MODELS, GOOBREVIEW_CREDENTIALS_FILE (pi auth.json; default
+     ~/.config/goobreview/auth.json)`;
 
 class UsageError extends Error {}
 
@@ -66,9 +73,10 @@ function appCredentials(env: NodeJS.ProcessEnv): { appId: string; privateKey: st
   return { appId, privateKey, ...(installationId !== undefined ? { installationId } : {}) };
 }
 
-export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<number> {
+export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env, io: AuthIO = terminalIO()): Promise<number> {
   const log = createLogger();
   let command: string | undefined;
+  let positionals: string[];
   let values: Record<string, string | boolean | undefined>;
   try {
     const parsed = parseArgs({
@@ -81,6 +89,8 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
         "dry-run": { type: "boolean" },
         "max-reviews": { type: "string" },
         config: { type: "string" },
+        "api-key": { type: "boolean" },
+        oauth: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -89,13 +99,18 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       process.stdout.write(USAGE + "\n");
       return 0;
     }
-    if (parsed.positionals.length !== 1) throw new UsageError("expected exactly one command");
-    command = parsed.positionals[0];
-    if (!["reconcile", "sweep", "prompt"].includes(command!)) throw new UsageError(`unknown command "${command}"`);
+    positionals = parsed.positionals;
+    command = positionals[0];
+    if (!command) throw new UsageError("expected a command");
+    if (!["reconcile", "sweep", "prompt", "auth"].includes(command)) throw new UsageError(`unknown command "${command}"`);
+    if (command !== "auth" && positionals.length !== 1) throw new UsageError(`unexpected argument "${positionals[1]}"`);
+    if (command !== "auth" && (values["api-key"] || values.oauth)) throw new UsageError("--api-key and --oauth are for auth login");
   } catch (err) {
     process.stderr.write(`goobreview: ${(err as Error).message}\n${USAGE}\n`);
     return 2;
   }
+
+  if (command === "auth") return runAuth(positionals.slice(1), values, env, io);
 
   try {
     const repo = parseRepo(values.repo as string | undefined);
@@ -120,12 +135,11 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       return 0;
     }
 
-    const credentialsFile = env.GOOBREVIEW_CREDENTIALS_FILE;
     const deps: ReconcileDeps = {
       gh,
       config,
       log,
-      executor: createExecutor({ log, ...(credentialsFile ? { credentialsFile } : {}) }),
+      executor: createExecutor({ log, credentialsFile: credentialsPath(env) }),
       prepareSnapshot,
       findGuidanceFiles,
       composePrompt,
@@ -152,6 +166,59 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
     return 1;
   }
 }
+
+async function runAuth(args: string[], values: Record<string, string | boolean | undefined>, env: NodeJS.ProcessEnv, io: AuthIO): Promise<number> {
+  const [sub, provider, extra] = args;
+  try {
+    if (extra !== undefined) throw new UsageError(`unexpected argument "${extra}"`);
+    if (values.repo || values.pr || values["dry-run"] || values["max-reviews"]) throw new UsageError("auth takes no --repo, --pr, --dry-run or --max-reviews");
+    if (sub !== "login" && (values["api-key"] || values.oauth)) throw new UsageError("--api-key and --oauth are for auth login");
+    if (values["api-key"] && values.oauth) throw new UsageError("choose one of --api-key and --oauth");
+    const needsProvider = sub === "login" || sub === "logout";
+    if (needsProvider && !provider) throw new UsageError(`auth ${sub} needs a provider, e.g. openai`);
+    if (!needsProvider && provider) throw new UsageError(`unexpected argument "${provider}"`);
+
+    const credentialsFile = credentialsPath(env);
+    const models = createModelsCollection({ credentialsFile });
+    switch (sub) {
+      case "status": {
+        const config = loadConfig({ ...(values.config ? { file: values.config as string } : {}), env });
+        await authStatus(models, config.models, credentialsFile, io);
+        return 0;
+      }
+      case "login": {
+        const type = values["api-key"] ? "api_key" : values.oauth ? "oauth" : undefined;
+        await authLogin(models, provider!, type, io, { agentName: "goobreview", getDeviceId: constant(await installationId(credentialsFile)) });
+        return 0;
+      }
+      case "logout":
+        await authLogout(models, provider!, io);
+        return 0;
+      case "providers":
+        authProviders(models, io);
+        return 0;
+      default:
+        throw new UsageError(sub ? `unknown auth command "${sub}"` : "auth needs a command: status, login, logout or providers");
+    }
+  } catch (err) {
+    if (err instanceof UsageError) {
+      process.stderr.write(`goobreview: ${err.message}
+${USAGE}
+`);
+      return 2;
+    }
+    if (err instanceof AuthCommandError || err instanceof ConfigError) {
+      process.stderr.write(`goobreview: ${err.message}
+`);
+      return err instanceof ConfigError ? 2 : 1;
+    }
+    // Provider errors can quote request details; log the message through the redacting logger.
+    createLogger().error(`auth ${sub} failed`, { error: err });
+    return 1;
+  }
+}
+
+const constant = (v: string) => () => v;
 
 // Run only when executed directly (npm bin shims are symlinks), so tests can import main().
 function isEntry(): boolean {

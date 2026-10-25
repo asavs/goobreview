@@ -3,13 +3,57 @@
 // uses. OAuth refresh runs inside `modify`, so writes must be durable and
 // atomic or a rotated refresh token is lost and the next run cannot log in.
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Credential, CredentialInfo, CredentialStore, Models } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import type { ModelCredential } from "./types.js";
 
 type AuthFile = Record<string, Credential>;
+
+/**
+ * Subscription logins whose pi-ai request path rewrites what the model sees.
+ * Anthropic OAuth prepends a Claude Code identity system block and renames
+ * tools to Claude Code names (pi-ai api/anthropic-messages buildParams), so
+ * reviews made through it are not comparable with API-key reviews.
+ */
+const REWRITING_OAUTH = new Set(["anthropic"]);
+
+/** GOOBREVIEW_CREDENTIALS_FILE, else $XDG_CONFIG_HOME/goobreview/auth.json (~/.config by default). */
+export function credentialsPath(env: NodeJS.ProcessEnv): string {
+  if (env.GOOBREVIEW_CREDENTIALS_FILE) return env.GOOBREVIEW_CREDENTIALS_FILE;
+  return path.join(env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "goobreview", "auth.json");
+}
+
+/**
+ * Stable ID for this installation, kept beside the credentials file. Some
+ * OAuth flows send it (OpenAI's agent host ID) and expect it to stay the same
+ * across logins. Not a secret.
+ */
+export async function installationId(credentialsFile: string): Promise<string> {
+  const file = path.join(path.dirname(credentialsFile), "installation-id");
+  const existing = (await fs.readFile(file, "utf8").catch(() => "")).trim();
+  if (existing) return existing;
+  const id = randomUUID();
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await fs.writeFile(file, `${id}\n`, { mode: 0o600 });
+  return id;
+}
+
+/** How a provider is currently authenticated, without refreshing or revealing anything. */
+export async function describeCredential(models: Models, providerId: string): Promise<ModelCredential | undefined> {
+  const check = await models.checkAuth(providerId).catch(() => undefined);
+  if (!check) return undefined;
+  const oauth = check.type === "oauth";
+  return {
+    type: check.type,
+    ...(check.source ? { source: check.source } : {}),
+    subscription: oauth && models.getProvider(providerId)?.auth.oauth?.isSubscription === true,
+    rewritesRequests: oauth && REWRITING_OAUTH.has(providerId),
+  };
+}
 
 const LOCK_STALE_MS = 30_000;
 const LOCK_WAIT_MS = 10_000;
@@ -67,7 +111,7 @@ export function createFileCredentialStore(file: string): CredentialStore {
  * Nothing here touches the network: dynamic catalogs (e.g. radius) only fetch
  * on an explicit `refresh()`, which the engine never calls.
  */
-export function createModelsCollection(opts: { credentialsFile?: string }): Models {
+export function createModelsCollection(opts: { credentialsFile?: string } = {}): Models {
   return builtinModels(opts.credentialsFile ? { credentials: createFileCredentialStore(opts.credentialsFile) } : {});
 }
 

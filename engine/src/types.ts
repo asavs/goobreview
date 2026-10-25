@@ -282,9 +282,21 @@ export interface ExecutorInput {
   signal?: AbortSignal;
 }
 
+/** How the reviewing model was authenticated; recorded with research data. */
+export interface ModelCredential {
+  type: "api_key" | "oauth";
+  /** pi-ai's label, e.g. "OPENAI_API_KEY" or "stored credential". Never a value. */
+  source?: string;
+  /** A consumer subscription login rather than API billing. */
+  subscription: boolean;
+  /** The provider's login path alters the system prompt or tools the model sees. */
+  rewritesRequests: boolean;
+}
+
 export interface ExecutorResult {
   form: ReviewForm;
   model: ModelRef;
+  credential?: ModelCredential;
   transcript: TranscriptEntry[];
   usage: { requests: number; inputTokens: number; outputTokens: number; toolCalls: number };
   elapsedMs: number;
