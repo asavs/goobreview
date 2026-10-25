@@ -11,7 +11,8 @@ import { createModelsCollection, credentialsPath, installationId } from "./crede
 import { createExecutor } from "./executor.js";
 import { createGitHubPort } from "./github/index.js";
 import { createLogger } from "./log.js";
-import { composePrompt } from "./prompt.js";
+import { PersonaError, resolvePersona } from "./persona.js";
+import { composePrompt, userMessage } from "./prompt.js";
 import { reconcilePull, renderPrompt, sweep, type ReconcileDeps, type ReconcileOutcome } from "./reconcile.js";
 import { runEval } from "./eval.js";
 import { createFileResearchSink, readIndex } from "./research.js";
@@ -22,7 +23,8 @@ import type { RepoRef } from "./types.js";
 const USAGE = `usage:
   goobreview reconcile --repo owner/repo --pr N [--dry-run] [--config file]
   goobreview sweep [--repo owner/repo] [--dry-run] [--max-reviews N] [--config file]
-  goobreview prompt --repo owner/repo --pr N [--config file]
+  goobreview prompt --repo owner/repo --pr N [--persona spec] [--config file]
+                                              print the exact conversation, e.g. --persona angry:v1-sigh
   goobreview eval --corpus dir --tree dir [--repeats N] [--limit N] [--name s] [--config file]
                                               run research.arms over a known-answer corpus; resumes
   goobreview auth status [--config file]      which models in the chain can sign in
@@ -146,6 +148,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env,
         name: { type: "string" },
         repeats: { type: "string" },
         limit: { type: "string" },
+        persona: { type: "string" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -162,6 +165,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env,
     if (command !== "auth" && (values["api-key"] || values.oauth)) throw new UsageError("--api-key and --oauth are for auth login");
     const evalFlags = ["corpus", "tree", "name", "repeats", "limit"].filter((f) => values[f] !== undefined);
     if (command !== "eval" && evalFlags.length > 0) throw new UsageError(`--${evalFlags[0]} is for eval`);
+    if (command !== "prompt" && values.persona !== undefined) throw new UsageError("--persona is for prompt; arms come from config");
     if (command === "eval" && (values.repo || values.pr || values["dry-run"] || values["max-reviews"])) {
       throw new UsageError("eval takes no --repo, --pr, --dry-run or --max-reviews; it never touches GitHub");
     }
@@ -189,8 +193,16 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env,
     const gh = createGitHubPort({ ...appCredentials(env), ...(repo ? { repo } : {}), log });
 
     if (command === "prompt") {
-      const composed = await renderPrompt({ gh, config, log, prepareSnapshot, findGuidanceFiles, composePrompt }, repo!, pr!);
-      process.stdout.write(`=== system ===\n${composed.system}\n\n=== user ===\n${composed.user}\n`);
+      let persona: string | undefined;
+      try {
+        persona = values.persona === undefined ? undefined : resolvePersona(values.persona as string).spec;
+      } catch (err) {
+        if (err instanceof PersonaError) throw new UsageError(err.message);
+        throw err;
+      }
+      const composed = await renderPrompt({ gh, config, log, prepareSnapshot, findGuidanceFiles, composePrompt }, repo!, pr!, persona);
+      const pieces = composed.persona.pieces.map((p) => `${p.id} (${p.slot})`).join(", ") || "(no pieces)";
+      process.stdout.write(`=== persona ===\n${composed.persona.spec}: ${pieces}\n\n=== system ===\n${composed.system}\n\n=== user ===\n${userMessage(composed)}\n`);
       if (composed.omissions.length > 0) process.stdout.write(`\n=== omissions ===\n${composed.omissions.join("\n")}\n`);
       log.info("rendered prompt", { bytes: composed.bytes, omissions: composed.omissions.length });
       return 0;

@@ -3,7 +3,17 @@
 
 export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
-export type Personality = "none" | "angry";
+/** A persona spec (personas/README.md): "<name>[:<recipe>][+piece|-piece]...", canonical once config is loaded. */
+export type Personality = string;
+/** Where a persona piece lands in the conversation. */
+export type PieceSlot = "role" | "before" | "after";
+
+export interface PersonaPiece {
+  id: string;
+  slot: PieceSlot;
+  /** SHA-256 of the piece text, so an edited line starts a new series. */
+  sha256: string;
+}
 
 export interface RepoRef {
   owner: string;
@@ -227,11 +237,22 @@ export interface PromptInput {
   guidanceFiles: string[];
 }
 
+/** The persona as composed into one prompt; blinding strips these texts. */
+export interface ComposedPersona {
+  spec: string;
+  pieces: PersonaPiece[];
+  /** Text of each slot exactly as placed ("" when empty). `system` starts with `role`. */
+  role: string;
+  before: string;
+  after: string;
+}
+
 export interface ComposedPrompt {
-  /** Trusted: role, contract, output rules, personality. Never contains PR-authored text. */
+  /** Trusted: persona role, contract, output rules. Never contains PR-authored text. */
   system: string;
-  /** Untrusted PR data, clearly fenced. */
+  /** Untrusted PR data, clearly fenced, identical across personas. The model receives it wrapped by the persona (`userMessage`). */
   user: string;
+  persona: ComposedPersona;
   /** Human-readable notes of what was omitted for budget or generated-file reasons. */
   omissions: string[];
   bytes: number;
@@ -422,7 +443,7 @@ export interface ResearchRecord {
   reviewUrl?: string;
   /** Set for offline eval runs; scoring joins this to the corpus label. */
   corpus?: { name: string; item: string; variant: string };
-  /** The system prompt carries the personality; consumers that blind must strip it. Null when composing it failed. */
+  /** Persona text is in `prompt.persona` (and starts `system`); consumers that blind must strip it. Null when composing it failed. */
   prompt: ComposedPrompt | null;
   outcome: ResearchOutcome;
 }

@@ -9,6 +9,7 @@
 import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type AssistantMessage, type Model, type Models, type Api } from "@earendil-works/pi-ai";
 import { createModelsCollection, describeCredential } from "./credentials.js";
+import { userMessage } from "./prompt.js";
 import { createReadOnlyTools } from "./tools.js";
 import {
   ExecutorError,
@@ -210,7 +211,7 @@ async function runOne(
   input.signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
-    await Promise.race([prompt(agent, input.prompt.user, transcript), stopped]);
+    await Promise.race([prompt(agent, userMessage(input.prompt), transcript), stopped]);
     if (!form) {
       check(agent, transcript, timedOut, input.signal);
       phase = "nudge";

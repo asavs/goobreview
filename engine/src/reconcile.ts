@@ -23,6 +23,7 @@ import {
   type GitHubPort,
   type Logger,
   type ModelRef,
+  type Personality,
   type PlannedReview,
   type PromptInput,
   type PullRequestFacts,
@@ -514,10 +515,11 @@ export async function renderPrompt(
   deps: Pick<ReconcileDeps, "gh" | "prepareSnapshot" | "findGuidanceFiles" | "composePrompt" | "config" | "log">,
   repo: RepoRef,
   number: number,
+  personality?: Personality,
 ): Promise<ComposedPrompt> {
   const { gh, config } = deps;
   const facts = await gh.getPullFacts(repo, number);
-  const policy = policyFor(config, repo);
+  const policy = { ...policyFor(config, repo), ...(personality ? { personality } : {}) };
   const ci = evaluateCi(facts.checkRuns, policy.requiredChecks);
   const snapshot = await deps.prepareSnapshot(gh, repo, facts.headSha, config.workDir, deps.log);
   try {

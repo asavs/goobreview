@@ -31,7 +31,7 @@ describe("loadConfig", () => {
     expect(c.limits).toEqual({ maxTurns: 40, maxToolCalls: 120, maxWallSeconds: 600, toolResultMaxBytes: 40_000 });
     expect(c.defaults).toEqual({
       requiredChecks: [],
-      personality: "none",
+      personality: "none:plain",
       include: { author: false, description: false, commitSubjects: true },
     });
     expect(c).toMatchObject({ checkRunSignal: true, autoResolveBotThreads: false, postTrace: false, dryRun: false });
@@ -51,10 +51,10 @@ describe("loadConfig", () => {
     const policy = policyFor(c, { owner: "o", repo: "r" });
     expect(policy).toEqual({
       requiredChecks: ["test"],
-      personality: "angry",
+      personality: "angry:v1",
       include: { author: true, description: false, commitSubjects: false },
     });
-    expect(policyFor(c, { owner: "x", repo: "y" }).personality).toBe("none");
+    expect(policyFor(c, { owner: "x", repo: "y" }).personality).toBe("none:plain");
     expect(isAllowlisted(c, { owner: "O", repo: "R" })).toBe(true);
     expect(isAllowlisted(c, { owner: "x", repo: "y" })).toBe(false);
   });
@@ -115,7 +115,7 @@ describe("resolveConfig validation", () => {
         "budgets.bogus: unknown key",
         "budgets.diffMaxBytes: expected an integer >= 1",
         "limits.maxTurns: expected an integer >= 1",
-        "defaults.personality: expected one of none, angry",
+        expect.stringMatching(/^defaults.personality: persona "linus": cannot read persona.json/),
         "defaults.requiredChecks: expected an array of non-empty check-run names",
         'overrides.nope: key must be "owner/repo"',
         "checkRunSignal: expected true or false",

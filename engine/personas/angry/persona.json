@@ -1,0 +1,12 @@
+{
+  "pieces": {
+    "role": "role",
+    "outburst": "before",
+    "speaker": "before",
+    "sigh": "after"
+  },
+  "recipes": {
+    "v1": ["role", "outburst", "speaker", "sigh"]
+  },
+  "default": "v1"
+}

@@ -62,19 +62,6 @@ describe("composePrompt: trust boundary", () => {
   });
 });
 
-describe("composePrompt: personality", () => {
-  it("puts angry persona text only in system", () => {
-    const angry = composePrompt(input({ policy: { ...policy, personality: "angry" } }));
-    const control = composePrompt(input());
-    expect(angry.system).toContain("You are a very angry senior engineer.");
-    expect(angry.user).not.toMatch(/angry|notification|deep breaths/i);
-    expect(control.system).not.toContain("angry");
-    expect(control.system).toContain("Judge each change on its merits.");
-    // Research arms differ only in the system prompt.
-    expect(angry.user).toBe(control.user);
-  });
-});
-
 describe("composePrompt: sections", () => {
   it("includes CI, prior review, threads, guidance and the file index", () => {
     const p = composePrompt(

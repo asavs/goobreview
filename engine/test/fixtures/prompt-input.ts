@@ -1,4 +1,7 @@
-import type { Budgets, PromptInput, PullRequestFacts, RepoPolicy } from "../../src/types.js";
+import type { Budgets, ComposedPersona, PromptInput, PullRequestFacts, RepoPolicy } from "../../src/types.js";
+
+// A persona with no pieces, for fakes that never compose a real prompt.
+export const noPersona = (spec = "none:plain"): ComposedPersona => ({ spec, pieces: [], role: "", before: "", after: "" });
 
 export const budgets: Budgets = {
   maxPromptBytes: 240_000,
@@ -15,7 +18,7 @@ export const budgets: Budgets = {
 
 export const policy: RepoPolicy = {
   requiredChecks: [],
-  personality: "none",
+  personality: "none:plain",
   include: { author: false, description: false, commitSubjects: true },
 };
 
