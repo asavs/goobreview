@@ -6,12 +6,14 @@
     "outburst": "before",
     "speaker": "before",
     "sigh": "after",
+    "thought": "after",
     "dings": { "slot": "steer", "afterToolCalls": [5, 15] }
   },
   "recipes": {
     "v1": ["role", "outburst", "speaker", "sigh"],
     "turns": ["role", "ding", "my_outburst"],
-    "turns_dings": ["role", "ding", "my_outburst", "dings"]
+    "turns_dings": ["role", "ding", "my_outburst", "dings"],
+    "thought": ["role", "outburst", "speaker", "thought"]
   },
   "default": "v1"
 }

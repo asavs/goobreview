@@ -168,3 +168,12 @@ describe("steer pieces", () => {
     expect(() => resolvePersona(name, root)).toThrow(err);
   });
 });
+
+describe("angry:thought", () => {
+  it("swaps v1's spoken tail for a thought aimed at the author's claims, as the last bytes", () => {
+    const p = composePrompt(input({ policy: { ...policy, personality: "angry:thought" } }));
+    expect(p.persona.pieces.map((x) => x.id)).toEqual(["role", "outburst", "speaker", "thought"]);
+    expect(userMessage(p).startsWith(V1_INTERRUPTION + V1_PREFIX)).toBe(true);
+    expect(userMessage(p).endsWith("\n\n*thinking: if this diff does what the author CLAIMS it does, I will eat the desk. start with what actually changed—*")).toBe(true);
+  });
+});
