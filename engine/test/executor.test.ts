@@ -228,3 +228,21 @@ describe("executor: persona steering", () => {
     expect(res.transcript.filter((e) => e.type === "steer")).toEqual([expect.objectContaining({ afterToolCalls: 2, text: "*ding*" })]);
   });
 });
+
+describe("executor: steering counts calls that ran", () => {
+  it("ignores blocked and unknown tool calls", async () => {
+    const { fauxes, executor, input } = setup("faux-a");
+    const seen: number[] = [];
+    const call = (name: string) => (ctx: { messages: unknown[] }) => {
+      seen.push((ctx.messages as { role: string; content: unknown }[]).filter((m) => m.role === "user" && m.content === "*ding*").length);
+      return fauxAssistantMessage(fauxToolCall(name, { path: "a" }), { stopReason: "toolUse" });
+    };
+    // Call 1 runs; the unknown tool and call 2 (past maxToolCalls: 1) never run, so a ding due at 2 never fires.
+    fauxes[0]!.setResponses([call("read_file"), call("no_such_tool"), call("read_file"), (ctx) => (call("x")(ctx), submit(GOOD))]);
+    const persona = { ...noPersona("angry:x"), steer: [{ text: "*ding*", afterToolCalls: [2] }] };
+    const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 }, limits: { ...LIMITS, maxToolCalls: 1 } }));
+    expect(res.form.verdict).toBe("APPROVE");
+    expect(seen).toEqual([0, 0, 0, 0]);
+    expect(res.transcript.filter((e) => e.type === "steer")).toEqual([]);
+  });
+});

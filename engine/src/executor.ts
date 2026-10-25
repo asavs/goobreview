@@ -137,6 +137,8 @@ async function runOne(
   let turns = 0;
   let nudgeTurns = 0;
   let budgetedCalls = 0;
+  /** Snapshot tool calls admitted to run; unknown, invalid and blocked calls never are. */
+  const admitted = new Set<string>();
   const { maxTurns, maxToolCalls } = input.limits;
 
   const submit: AgentTool<typeof ReviewFormSchema> = {
@@ -178,6 +180,7 @@ async function runOne(
         return { block: true, reason: `Tool-call budget (${maxToolCalls}) exhausted. Call submit_review now with what you have.` };
       }
       budgetedCalls += 1;
+      admitted.add(toolCall.id);
       return undefined;
     },
     finishTurn: async () => {
@@ -196,9 +199,10 @@ async function runOne(
   const steering = createSteering(input.prompt.persona.steer);
   agent.subscribe((event) => {
     record(event, transcript, usage);
-    // Persona steering counts snapshot tool calls in the main review only;
-    // pi delivers each queued message before the next model request.
-    if (event.type !== "tool_execution_end" || event.toolName === SUBMIT_TOOL || phase !== "main" || form) return;
+    // Persona steering counts snapshot tool calls that actually ran, in the
+    // main review only; pi delivers each queued message before the next
+    // model request.
+    if (event.type !== "tool_execution_end" || !admitted.has(event.toolCallId) || phase !== "main" || form) return;
     for (const text of steering.toolCompleted()) {
       agent.steer({ role: "user", content: text, timestamp: Date.now() });
       transcript.push(entry("steer", { afterToolCalls: steering.completed, text: clip(text, TRANSCRIPT_TEXT_MAX) }));
