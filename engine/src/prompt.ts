@@ -2,9 +2,10 @@
 // budgets. PR-authored text only ever reaches the user message, and only
 // blockquoted or fenced, so it cannot fake headings or omission markers.
 
+import { createHash } from "node:crypto";
 import { matchesGitPattern } from "./snapshot.js";
 import { redact, redactPatch, truncateUtf8 } from "./redact.js";
-import { historyTurns, resolvePersona, slotText, steerMessages } from "./persona.js";
+import { historyTurns, resolvePersona, slotText, steerMessages, type ResolvedPersona } from "./persona.js";
 import {
   guidanceSection,
   omissionMarker,
@@ -14,7 +15,19 @@ import {
   toolsSection,
   trustBoundarySection,
 } from "./prompts/system.js";
-import type { BotReview, ChangedFile, CiState, ComposedPersona, ComposedPrompt, PromptInput, PullRequestFacts, ReviewThread } from "./types.js";
+import type {
+  BotReview,
+  Budgets,
+  ChangedFile,
+  CiState,
+  ComposedPersona,
+  ComposedPrompt,
+  PromptFingerprint,
+  PromptInput,
+  PullRequestFacts,
+  RepoPolicy,
+  ReviewThread,
+} from "./types.js";
 
 export class PromptBudgetError extends Error {
   constructor(
@@ -46,17 +59,8 @@ export const GENERATED_FLOOR = [
 const CHECK_RUNS_SHOWN = 50;
 
 export function composePrompt(input: PromptInput): ComposedPrompt {
-  const resolved = resolvePersona(input.policy.personality);
-  const persona: ComposedPersona = {
-    spec: resolved.spec,
-    pieces: resolved.pieces.map(({ id, slot, sha256, afterToolCalls }) => ({ id, slot, sha256, ...(afterToolCalls ? { afterToolCalls } : {}) })),
-    role: slotText(resolved, "role"),
-    history: historyTurns(resolved),
-    before: slotText(resolved, "before"),
-    after: slotText(resolved, "after"),
-    steer: steerMessages(resolved),
-  };
-  const system = composeSystem(input, persona.role);
+  const persona = composePersona(resolvePersona(input.policy.personality));
+  const system = composeSystem(input.budgets, persona.role);
   const omissions: string[] = [];
   // Redact before rendering and capping, so a cap cannot split a secret into
   // an unrecognisable prefix, and the budget measures what is actually sent.
@@ -70,6 +74,47 @@ export function composePrompt(input: PromptInput): ComposedPrompt {
   if (bytes > input.budgets.maxPromptBytes) throw new PromptBudgetError(bytes, input.budgets.maxPromptBytes);
   return { system, user, persona, omissions, bytes };
 }
+
+function composePersona(resolved: ResolvedPersona): ComposedPersona {
+  return {
+    spec: resolved.spec,
+    pieces: resolved.pieces.map(({ id, slot, sha256, afterToolCalls }) => ({ id, slot, sha256, ...(afterToolCalls ? { afterToolCalls } : {}) })),
+    role: slotText(resolved, "role"),
+    history: historyTurns(resolved),
+    before: slotText(resolved, "before"),
+    after: slotText(resolved, "after"),
+    steer: steerMessages(resolved),
+  };
+}
+
+const sha16 = (s: string): string => createHash("sha256").update(s).digest("hex").slice(0, 16);
+
+/**
+ * Identifies everything an arm sends apart from the PR data, without
+ * needing the PR: the shared system prompt (`contract`) and the persona's
+ * texts and steer schedule (`persona`). Editing either starts a new series;
+ * resume and scoring key on it, never on the arm name alone.
+ */
+export function promptFingerprint(policy: RepoPolicy, budgets: Budgets): PromptFingerprint {
+  const p = composePersona(resolvePersona(policy.personality));
+  return {
+    contract: sha16(composeSystem(budgets, "")),
+    persona: sha16(JSON.stringify({ role: p.role, history: p.history, before: p.before, after: p.after, steer: p.steer })),
+  };
+}
+
+/** `promptFingerprint`, or null when the persona cannot be resolved (records still get written). */
+export function fingerprintOrNull(policy: RepoPolicy, budgets: Budgets): PromptFingerprint | null {
+  try {
+    return promptFingerprint(policy, budgets);
+  } catch {
+    return null;
+  }
+}
+
+/** The resume key of one run: the same item, arm and fingerprint is the same series. */
+export const seriesKey = (itemId: string, arm: string, fp: PromptFingerprint | null | undefined): string =>
+  [itemId, arm, fp?.contract ?? "", fp?.persona ?? ""].join("\0");
 
 /**
  * The user message the model receives: the persona's `before` text on the
@@ -98,13 +143,13 @@ export function redactFacts(f: PullRequestFacts): PullRequestFacts {
   };
 }
 
-function composeSystem(input: PromptInput, role: string): string {
+function composeSystem(budgets: Budgets, role: string): string {
   return [
     ...(role ? [role] : []),
     roleSection(),
     reviewerContract(),
     toolsSection(),
-    outputSection(input.budgets.suggestionMaxLines),
+    outputSection(budgets.suggestionMaxLines),
     guidanceSection(),
     trustBoundarySection(),
   ].join("\n\n") + "\n";

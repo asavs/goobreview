@@ -265,6 +265,14 @@ export interface ComposedPersona {
   steer: PersonaSteer[];
 }
 
+/** Short SHA-256s of what an arm sends apart from the PR data (`promptFingerprint`). */
+export interface PromptFingerprint {
+  /** The shared system prompt: role section, contract, tools, output rules, trust boundary. */
+  contract: string;
+  /** The persona's texts by slot and its steer schedule. */
+  persona: string;
+}
+
 export interface ComposedPrompt {
   /** Trusted: persona role, contract, output rules. Never contains PR-authored text. */
   system: string;
@@ -461,6 +469,8 @@ export interface ResearchRecord {
   reviewUrl?: string;
   /** Set for offline eval runs; scoring joins this to the corpus label. */
   corpus?: { name: string; item: string; variant: string };
+  /** Which series this run belongs to; null only if the arm's persona could not be resolved. */
+  fingerprint: PromptFingerprint | null;
   /** Persona text is in `prompt.persona` (and starts `system`); consumers that blind must strip it. Null when composing it failed. */
   prompt: ComposedPrompt | null;
   outcome: ResearchOutcome;

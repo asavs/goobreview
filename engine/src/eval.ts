@@ -16,6 +16,8 @@ import * as tar from "tar";
 import { modelName } from "./config.js";
 import type { ComposePromptFn, FindGuidanceFilesFn, PlanReviewFn } from "./reconcile.js";
 import { removeTree, runArm } from "./reconcile.js";
+import { fingerprintOrNull, seriesKey } from "./prompt.js";
+import type { IndexedRun } from "./research.js";
 import { snapshotFromArchive } from "./snapshot.js";
 import {
   ExecutorError,
@@ -58,7 +60,7 @@ export interface EvalOptions {
   /** Only the first N items (each with all its variants), in sorted order. */
   limit?: number;
   /** Prior index rows, so an interrupted eval resumes instead of repeating runs. */
-  done?: { itemId: string; arm: string; status: string; kind?: string }[];
+  done?: IndexedRun[];
 }
 
 export interface EvalSummary {
@@ -244,10 +246,13 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
   }
 
   // Quota failures do not count as attempts, so a resumed eval retries them.
+  // A run counts only toward its own series: an edited persona or contract
+  // has a new fingerprint, so its cells run again instead of being skipped.
+  const fingerprints = new Map(arms.map((a) => [a.name, fingerprintOrNull({ ...config.defaults, personality: a.personality }, config.budgets)]));
   const prior = new Map<string, number>();
   for (const r of opts.done ?? []) {
     if (r.status === "failed" && r.kind === "quota") continue;
-    const k = `${r.itemId}\0${r.arm}`;
+    const k = seriesKey(r.itemId, r.arm, r.fingerprint);
     prior.set(k, (prior.get(k) ?? 0) + 1);
   }
 
@@ -267,7 +272,7 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
   for (const v of variants) {
     const itemId = `eval:${name}/${v.item}/${v.variant}`;
     const todo = arms.map((arm) => {
-      const have = Math.min(prior.get(`${itemId}\0${arm.name}`) ?? 0, opts.repeats);
+      const have = Math.min(prior.get(seriesKey(itemId, arm.name, fingerprints.get(arm.name))) ?? 0, opts.repeats);
       summary.resumed += have;
       return { arm, left: opts.repeats - have };
     });
@@ -351,6 +356,7 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
             arm,
             posted: false,
             corpus: { name, item: v.item, variant: v.variant },
+            fingerprint: fingerprints.get(arm.name) ?? null,
             prompt,
             outcome,
           });

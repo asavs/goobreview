@@ -48,6 +48,7 @@ is kept byte for byte, trailing spaces included (`angry/sigh.md` ends in
 `The ` on purpose). Line endings are normalised to `\n`. Names, recipes and
 piece ids are lowercase letters, digits and `_`.
 
-Each research record stores the spec and a SHA-256 of every piece it used, so
-editing a line starts a new, distinguishable series rather than blending into
-the old one.
+Each research record stores the spec, a SHA-256 of every piece it used, and a
+fingerprint of the persona's texts and of the shared system prompt. Resume
+and scoring key on the fingerprint, so editing a line starts a new,
+distinguishable series rather than blending into the old one.

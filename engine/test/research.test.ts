@@ -18,6 +18,7 @@ const rec = (over: Partial<ResearchRecord> = {}): ResearchRecord => ({
   pr: 7,
   headSha: "abc",
   baseSha: "def",
+  fingerprint: null,
   engineVersion: "test",
   live: true,
   arm: { name: "angry:v1@openai/gpt-x:medium", model, personality: "angry:v1" },
