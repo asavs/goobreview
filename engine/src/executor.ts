@@ -200,15 +200,26 @@ async function runOne(
   });
 
   const steering = createSteering(input.prompt.persona.steer);
+  /** Queued steer messages and the tool-call count each fell due at; logged only once delivered. */
+  const queued = new Map<AgentMessage, number>();
   agent.subscribe((event) => {
     record(event, transcript, usage);
+    // pi emits message_end for a queued message when it adds it to the
+    // context, right before the request it reaches. A message dropped (the
+    // review ended, or the nudge cleared it) is never logged.
+    if (event.type === "message_end" && queued.has(event.message)) {
+      const m = event.message as { content: string };
+      transcript.push(entry("steer", { afterToolCalls: queued.get(event.message), text: clip(m.content, TRANSCRIPT_TEXT_MAX) }));
+      queued.delete(event.message);
+      return;
+    }
     // Persona steering counts snapshot tool calls that actually ran, in the
-    // main review only; pi delivers each queued message before the next
-    // model request.
+    // main review only.
     if (event.type !== "tool_execution_end" || !admitted.has(event.toolCallId) || phase !== "main" || form) return;
     for (const text of steering.toolCompleted()) {
-      agent.steer({ role: "user", content: text, timestamp: Date.now() });
-      transcript.push(entry("steer", { afterToolCalls: steering.completed, text: clip(text, TRANSCRIPT_TEXT_MAX) }));
+      const message: AgentMessage = { role: "user", content: text, timestamp: Date.now() };
+      queued.set(message, steering.completed);
+      agent.steer(message);
     }
   });
 

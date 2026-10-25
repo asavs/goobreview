@@ -282,3 +282,18 @@ describe("executor: no steering in the nudge", () => {
     expect(nudgeUsers).not.toContain("*ding*");
   });
 });
+
+describe("executor: steer logged on delivery", () => {
+  it("does not log a ding that was queued but never sent", async () => {
+    const { fauxes, executor, input } = setup("faux-a");
+    // One assistant message reads a file and submits: the ding falls due, but submit ends the run first.
+    fauxes[0]!.setResponses([
+      fauxAssistantMessage([fauxToolCall("read_file", { path: "a" }), fauxToolCall("submit_review", GOOD as Parameters<typeof fauxToolCall>[1])], { stopReason: "toolUse" }),
+    ]);
+    const persona = { ...noPersona("angry:x"), steer: [{ text: "*ding*", afterToolCalls: [1] }] };
+    const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 } }));
+    expect(res.form.verdict).toBe("APPROVE");
+    expect(res.usage.requests).toBe(1);
+    expect(res.transcript.filter((e) => e.type === "steer")).toEqual([]);
+  });
+});
