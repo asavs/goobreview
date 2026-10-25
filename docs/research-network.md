@@ -28,17 +28,26 @@ what makes data from strangers usable.
 
 ## Participation
 
-Two ways in, one record format:
+Contributors pay for their own model use, in every mode: the shadow arms
+multiply it, and they choose to spend it. Two ways in, one record format:
 
 1. **Self-hosted.** A contributor runs goobreview with their own App and
    their own model credentials, and turns on `research.consent` and
-   `research.upload`. Their model spend is theirs; they choose the grid
-   (the registered default grid is recommended, so cells pool).
+   `research.upload`.
 2. **Hosted** (after the Cloud Run phase). A repo admin installs the public
-   App and adds `.github/goobreview.yml` with `research: contribute`. The
-   file is the consent record: only someone with write access can add it, and
-   it is visible to everyone working on the repo. We pay the model spend,
-   with a per-installation cap.
+   App, adds `.github/goobreview.yml` with `research: contribute`, and signs
+   in their own model provider (API key or subscription login) for that
+   installation. The file is the consent record: only someone with write
+   access can add it, and it is visible to everyone working on the repo.
+
+### Eligibility: the persona pair
+
+A contribution counts toward the research dataset only when its grid runs
+**both personalities, `none` and `angry`, on every model it uses**. Models
+are the contributor's choice (whatever they pay for); the persona pair is
+not, because the primary comparison is persona within model within item.
+`research upload` refuses items that lack the pair and says why. Records
+without it stay on the contributor's machine.
 
 ## Consent and opt-out
 
@@ -162,13 +171,13 @@ Proposed:
 5. Ingest endpoint, quarantine bucket, `research register` and `research upload`.
 6. Validator with GitHub verification and trust tiers.
 7. Export job, outcome enrichment, first internal release.
+   Upload enforces the persona pair (above).
 8. Hosted mode and public onboarding docs; first public release.
 
 ## Open questions
 
-- Hosted mode's model spend: who funds it, and what cap per installation?
-- Should the default grid be fixed per release (better pooling) or chosen by
-  contributors (more models covered)?
+- Hosted mode needs a safe place for contributors' model credentials
+  (per-installation, encrypted, revocable). Worth it, or self-hosted only?
 - Dataset host and licence for the code-free annotations.
 - Whether private repos may ever contribute numbers only (counts, verdicts,
   no text).
