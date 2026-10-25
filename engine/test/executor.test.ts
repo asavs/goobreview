@@ -163,6 +163,7 @@ describe("classifyProviderError", () => {
     ["429 Too Many Requests", "quota", true],
     ["RESOURCE_EXHAUSTED: Quota exceeded", "quota", true],
     ["RESOURCE_EXHAUSTED: request payload too large", "provider", false],
+    ["OpenAI API error: subscription_sharing_usage_limit_exceeded\nCheck your ChatGPT usage: https://chatgpt.com/settings/usage", "quota", true],
     ["Provider is not configured: anthropic", "auth", false],
     ["403 PERMISSION_DENIED", "auth", false],
     ["503 Service Unavailable", "provider", true],
