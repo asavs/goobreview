@@ -185,6 +185,28 @@ describe("runEval", () => {
     expect(records.filter((r) => r.prompt === null)).toHaveLength(4);
   });
 
+  it("uses a variant's pr.json as the author's claims, and refuses a malformed one", async () => {
+    const claim = { title: "Tidy clamp", body: "Pure refactor: no behaviour change.", commits: ["Tidy clamp", "Rename local"] };
+    writeFileSync(path.join(root, "corpus", "calc-L2-inverted", "mutant", "pr.json"), JSON.stringify(claim));
+    const seen: { title: string; body: string; commits: string[] }[] = [];
+    const base = deps();
+    const composePrompt: EvalDeps["composePrompt"] = (i) => {
+      seen.push({ title: i.facts.title, body: i.facts.body, commits: i.facts.commits.map((c) => c.subject) });
+      return base.composePrompt(i);
+    };
+    await runEval({ ...base, composePrompt }, { ...opts(), repeats: 1 });
+    const inverted = seen.filter((f) => f.title === "Tidy clamp");
+    expect(inverted).toHaveLength(4);
+    expect(inverted[0]).toEqual(claim);
+    // Variants without pr.json keep the plain synthetic PR.
+    expect(seen.filter((f) => f.title === "Update pkg/calc.py" && f.body === "" && f.commits[0] === f.title)).toHaveLength(8);
+
+    writeFileSync(path.join(root, "corpus", "calc-L2-inverted", "mutant", "pr.json"), JSON.stringify({ title: 1 }));
+    records = [];
+    const s = await runEval(deps(), { ...opts(), repeats: 1 });
+    expect(s).toMatchObject({ unprepared: 1, incomplete: 4 });
+  });
+
   it("refuses to run without arms", async () => {
     config.research.arms = [];
     await expect(runEval(deps(), opts())).rejects.toThrow(/research\.arms/);
