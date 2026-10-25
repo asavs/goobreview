@@ -1,7 +1,7 @@
 import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import { noPersona } from "./fixtures/prompt-input.js";
 import { describe, expect, it, vi } from "vitest";
-import { classifyProviderError, createExecutor, validateReviewForm } from "../src/executor.js";
+import { TRANSCRIPT_TEXT_MAX, classifyProviderError, createExecutor, validateReviewForm } from "../src/executor.js";
 import { ExecutorError, type ExecutorInput, type ExecutorLimits, type ModelRef } from "../src/types.js";
 
 // tools.ts is another module's concern; a single fake read_file is enough here.
@@ -304,5 +304,22 @@ describe("executor: thinking used", () => {
     fauxes[0]!.setResponses([submit(GOOD)]);
     const res = await executor.run(input());
     expect(res.thinking).toEqual({ requested: "off", sent: "off" });
+  });
+});
+
+describe("executor: transcript keeps long reasoning", () => {
+  it("records reasoning and text well past the old 16 KB cap, clipping only past TRANSCRIPT_TEXT_MAX", async () => {
+    const { fauxes, executor, input } = setup("faux-a");
+    const long = "r".repeat(60_000);
+    const huge = "t".repeat(TRANSCRIPT_TEXT_MAX + 10);
+    fauxes[0]!.setResponses([
+      fauxAssistantMessage([fauxThinking(long), fauxText(huge), fauxToolCall("read_file", { path: "a" })], { stopReason: "toolUse" }),
+      submit(GOOD),
+    ]);
+    const res = await executor.run(input());
+    const first = res.transcript.find((e) => e.type === "assistant")!;
+    expect(first.thinking).toBe(long);
+    expect(String(first.text).startsWith("t".repeat(TRANSCRIPT_TEXT_MAX))).toBe(true);
+    expect(String(first.text)).toMatch(/\[10 chars truncated\]$/);
   });
 });

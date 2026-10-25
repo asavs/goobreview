@@ -34,8 +34,12 @@ const NUDGE =
   "You stopped without calling submit_review. The review is only recorded through that tool. " +
   "Call submit_review now with your verdict, summary and findings; do not call any other tool.";
 
-/** Per transcript text field; the transcript is a debugging artifact, not an archive. */
-const TRANSCRIPT_TEXT_MAX = 16_384;
+/**
+ * Per transcript text field. The model's own text and reasoning are research
+ * data (raw reasoning from open-weight providers, thinking aloud between tool
+ * calls), so they get a generous cap; tool results are only a debugging aid.
+ */
+export const TRANSCRIPT_TEXT_MAX = 131_072;
 const TRANSCRIPT_RESULT_MAX = 2_048;
 /** Turns allowed after the nudge (one to submit, one to fix a rejected submission). */
 const NUDGE_TURNS = 2;
