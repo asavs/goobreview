@@ -1,1 +1,1 @@
-(break room. five quiet minutes, finally.)
+queue empty. nothing assigned.
