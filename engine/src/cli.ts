@@ -13,7 +13,8 @@ import { createGitHubPort } from "./github/index.js";
 import { createLogger } from "./log.js";
 import { composePrompt } from "./prompt.js";
 import { reconcilePull, renderPrompt, sweep, type ReconcileDeps, type ReconcileOutcome } from "./reconcile.js";
-import { createFileResearchSink } from "./research.js";
+import { runEval } from "./eval.js";
+import { createFileResearchSink, readIndex } from "./research.js";
 import { ciFailureReview, planReview } from "./review.js";
 import { findGuidanceFiles, prepareSnapshot } from "./snapshot.js";
 import type { RepoRef } from "./types.js";
@@ -22,6 +23,8 @@ const USAGE = `usage:
   goobreview reconcile --repo owner/repo --pr N [--dry-run] [--config file]
   goobreview sweep [--repo owner/repo] [--dry-run] [--max-reviews N] [--config file]
   goobreview prompt --repo owner/repo --pr N [--config file]
+  goobreview eval --corpus dir --tree dir [--repeats N] [--limit N] [--name s] [--config file]
+                                              run research.arms over a known-answer corpus; resumes
   goobreview auth status [--config file]      which models in the chain can sign in
   goobreview auth login <provider> [--api-key | --oauth]
   goobreview auth logout <provider>
@@ -74,6 +77,52 @@ function appCredentials(env: NodeJS.ProcessEnv): { appId: string; privateKey: st
   return { appId, privateKey, ...(installationId !== undefined ? { installationId } : {}) };
 }
 
+async function runEvalCommand(
+  values: Record<string, string | boolean | undefined>,
+  env: NodeJS.ProcessEnv,
+  log: ReturnType<typeof createLogger>,
+): Promise<number> {
+  try {
+    const corpus = values.corpus as string | undefined;
+    const tree = values.tree as string | undefined;
+    if (!corpus || !tree) throw new UsageError("eval needs --corpus and --tree");
+    const repeats = parsePositive("--repeats", values.repeats as string | undefined) ?? 1;
+    const limit = parsePositive("--limit", values.limit as string | undefined);
+    const config = loadConfig({ ...(values.config ? { file: values.config as string } : {}), env });
+    if (config.research.arms.length === 0) throw new UsageError("eval needs research.arms in the config");
+    const summary = await runEval(
+      {
+        config,
+        log,
+        executor: createExecutor({ log, credentialsFile: credentialsPath(env) }),
+        composePrompt,
+        planReview,
+        findGuidanceFiles,
+        engineVersion: engineVersion(),
+        research: createFileResearchSink({ dir: config.research.dir, installationId: await installationId(credentialsPath(env)) }),
+      },
+      {
+        corpus,
+        tree,
+        repeats,
+        ...(limit !== undefined ? { limit } : {}),
+        ...(values.name ? { name: values.name as string } : {}),
+        done: await readIndex(config.research.dir),
+      },
+    );
+    process.stdout.write(JSON.stringify(summary) + "\n");
+    // Incomplete (a model ran out of quota): rerun later and it resumes.
+    return summary.skippedQuota > 0 ? 1 : 0;
+  } catch (err) {
+    if (err instanceof UsageError || err instanceof ConfigError) {
+      process.stderr.write(`goobreview: ${err.message}\n`);
+      return 2;
+    }
+    log.error("eval failed", { error: err });
+    return 1;
+  }
+}
+
 export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env, io: AuthIO = terminalIO()): Promise<number> {
   const log = createLogger();
   let command: string | undefined;
@@ -92,6 +141,11 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env,
         config: { type: "string" },
         "api-key": { type: "boolean" },
         oauth: { type: "boolean" },
+        corpus: { type: "string" },
+        tree: { type: "string" },
+        name: { type: "string" },
+        repeats: { type: "string" },
+        limit: { type: "string" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -103,15 +157,21 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env,
     positionals = parsed.positionals;
     command = positionals[0];
     if (!command) throw new UsageError("expected a command");
-    if (!["reconcile", "sweep", "prompt", "auth"].includes(command)) throw new UsageError(`unknown command "${command}"`);
+    if (!["reconcile", "sweep", "prompt", "auth", "eval"].includes(command)) throw new UsageError(`unknown command "${command}"`);
     if (command !== "auth" && positionals.length !== 1) throw new UsageError(`unexpected argument "${positionals[1]}"`);
     if (command !== "auth" && (values["api-key"] || values.oauth)) throw new UsageError("--api-key and --oauth are for auth login");
+    const evalFlags = ["corpus", "tree", "name", "repeats", "limit"].filter((f) => values[f] !== undefined);
+    if (command !== "eval" && evalFlags.length > 0) throw new UsageError(`--${evalFlags[0]} is for eval`);
+    if (command === "eval" && (values.repo || values.pr || values["dry-run"] || values["max-reviews"])) {
+      throw new UsageError("eval takes no --repo, --pr, --dry-run or --max-reviews; it never touches GitHub");
+    }
   } catch (err) {
     process.stderr.write(`goobreview: ${(err as Error).message}\n${USAGE}\n`);
     return 2;
   }
 
   if (command === "auth") return runAuth(positionals.slice(1), values, env, io);
+  if (command === "eval") return runEvalCommand(values, env, log);
 
   try {
     const repo = parseRepo(values.repo as string | undefined);

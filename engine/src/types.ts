@@ -420,6 +420,8 @@ export interface ResearchRecord {
   /** This arm's review is the one posted (or, in dry run, the one that would be). */
   posted: boolean;
   reviewUrl?: string;
+  /** Set for offline eval runs; scoring joins this to the corpus label. */
+  corpus?: { name: string; item: string; variant: string };
   /** The system prompt carries the personality; consumers that blind must strip it. */
   prompt: ComposedPrompt;
   outcome: ResearchOutcome;

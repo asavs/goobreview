@@ -27,6 +27,7 @@ call validated against `ReviewForm`; nothing is parsed out of free text.
 | `src/prompt.ts` | Compose the trusted system prompt and the untrusted PR payload under byte budgets. |
 | `src/executor.ts` | Run the pi agent with model fallback, limits, transcript capture; return a validated `ReviewForm`. |
 | `src/review.ts` | Turn a `ReviewForm` into a `PlannedReview`: inline placement against the diff, suggestion demotion, downgrade rule, thread actions, body rendering. |
+| `src/eval.ts` | Offline eval: the research arms over a known-answer corpus, no GitHub. |
 | `src/research.ts` | File research sink: one JSON record per arm run plus an `index.jsonl` of summary rows. |
 | `src/reconcile.ts` | Orchestrate one PR end to end; `sweep()` reconciles every open PR in every allowed repo. |
 | `src/cli.ts` | `goobreview reconcile --repo o/r --pr N [--dry-run]`, `sweep`, `prompt` (render only). |
@@ -148,6 +149,26 @@ reviewed head yields one `ResearchRecord` (schema v2) per arm:
 - The file sink (`src/research.ts`) writes one JSON file per record under
   `research.dir` plus an `index.jsonl` of summary rows, tagged with the random
   installation id. Exporting and uploading are separate steps.
+
+### Offline eval
+
+`goobreview eval --corpus <dir> --tree <seed> [--repeats N] [--limit N]` runs
+the same arms over a known-answer corpus (angry-llm-research
+`scripts/generate-mutants.sh`: `<item>/<variant>/{diff.patch, snapshot/,
+label.json}`) with no GitHub:
+
+- Each variant becomes a copy of the seed tree (minus `.git`) with its files
+  overlaid, packed and extracted through the same snapshot hardening as a PR
+  head. The diff becomes a synthetic PR titled `Update <path>`, with no
+  description and no CI.
+- Labels are never read; records carry `corpus: {name, item, variant}` and
+  scoring joins them to `label.json` afterwards.
+- Arms interleave within each repeat, so a model running out of quota part-way
+  leaves balanced cells. A quota failure stops that model for the rest of the
+  invocation; rerunning resumes from `index.jsonl`, retrying quota failures
+  and nothing else. Exit 1 means incomplete.
+- Records go to the same `research.dir`, marked `live: false`, item ids
+  `eval:<corpus>/<item>/<variant>`.
 
 The system prompt in a record carries the personality: anything that blinds
 (judges, uploads) must strip it (#117), and the judge must receive the diff.
