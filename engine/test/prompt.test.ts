@@ -249,3 +249,12 @@ describe("composePrompt: think aloud", () => {
     }
   });
 });
+
+describe("composePrompt: trust boundary scope", () => {
+  it("scopes distrust to the PR data block, which the user message opens with, so persona turns are not covered", () => {
+    const p = composePrompt(input());
+    expect(p.system).toContain("everything from the `# Pull Request Data` heading through the end of the diff");
+    expect(p.system).not.toContain("Everything in the user message");
+    expect(p.user.startsWith("# Pull Request Data\n")).toBe(true);
+  });
+});

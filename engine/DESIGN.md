@@ -97,8 +97,12 @@ These were each learned from an incident; the v1 issue number is noted.
 - **Trusted/untrusted split:** the system prompt carries the role, the
   reviewer contract and output rules. PR-authored text (title,
   description, commit subjects, prior review text, thread bodies, file
-  contents) appears only in the user message, inside clearly delimited blocks,
-  and the system prompt says to treat it as data (#18, #101).
+  contents) appears only in the PR data block, which opens the user message
+  at `# Pull Request Data` and runs through the diff, inside clearly delimited
+  blocks, and the system prompt says to treat that block and every tool result
+  as data (#18, #101). The distrust is scoped to the block, not to "the user
+  message", because persona turns and steer messages are user messages too and
+  are trusted engine text.
 - **Author text is blockquoted** so it cannot impersonate prompt structure
   (#63), and the system prompt says omission markers appear only in a fixed
   form the engine emits; look-alike text in PR data is to be ignored (#64).
