@@ -139,9 +139,11 @@ class PrRun {
 
   async checkRun(update: Omit<CheckRunUpdate, "state">): Promise<boolean> {
     if (!this.deps.config.checkRunSignal) return true;
-    return this.write(`check run ${update.status}`, () =>
-      this.deps.gh.upsertEngineCheckRun(this.repo, this.facts.headSha, { ...update, state: this.state }),
-    );
+    return this.write(`check run ${update.status}`, async () => {
+      // The adapter returns -1 instead of throwing when the App lacks checks:write.
+      const id = await this.deps.gh.upsertEngineCheckRun(this.repo, this.facts.headSha, { ...update, state: this.state });
+      if (id < 0) throw new Error("check run not persisted (the App needs checks:write)");
+    });
   }
 
   bump(event: StateEvent): void {

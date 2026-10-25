@@ -99,6 +99,39 @@ export function redact(text: string): string {
   return out;
 }
 
+const KEY_BEGIN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/;
+const KEY_END = /-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/;
+
+/**
+ * `redact` for a unified-diff patch, one line at a time so the line count and
+ * every line's +/-/space prefix survive (prompt line numbering depends on
+ * both). A key block spanning lines has every line replaced, through its END
+ * line or the end of the hunk.
+ */
+export function redactPatch(patch: string): string {
+  let inKey = false;
+  return patch
+    .split("\n")
+    .map((line) => {
+      if (line.startsWith("@@")) {
+        inKey = false;
+        return redact(line);
+      }
+      const prefix = line.slice(0, 1);
+      const body = line.slice(1);
+      if (inKey) {
+        if (KEY_END.test(body)) inKey = false;
+        return `${prefix}[REDACTED:private-key]`;
+      }
+      if (KEY_BEGIN.test(body) && !KEY_END.test(body)) {
+        inKey = true;
+        return `${prefix}[REDACTED:private-key]`;
+      }
+      return prefix + redact(body);
+    })
+    .join("\n");
+}
+
 /**
  * Longest prefix of `text` within `maxBytes` UTF-8 bytes, never splitting a
  * code point. Shared by every byte-capped surface (tool results, prompt).
