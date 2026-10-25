@@ -216,6 +216,19 @@ label.json}`) with no GitHub:
 - Records go to the same `research.dir`, marked `live: false`, item ids
   `eval:<corpus>/<item>/<variant>`.
 
-A record's `prompt.persona` holds the persona text by slot (`system` starts
-with `role`; `before` and `after` wrap `user`): anything that blinds (judges,
-uploads) must strip it (#117), and the judge must receive the diff.
+### Blinding
+
+Anything that blinds a record (judges, uploads; #117) must remove or replace
+every place the arm shows, and must still give the judge the diff:
+
+- `arm.name` and `arm.personality` (the persona spec), and `fingerprint.persona`.
+- `prompt.persona`: the spec, pieces, and the text of every slot.
+- The persona's role at the start of `prompt.system` (`prompt.persona.role`
+  followed by a blank line; the rest is shared by every arm).
+- `before`/`after` around `prompt.user`: send the judge `prompt.user`, the
+  PR data alone, never the user message the model received.
+- `steer` transcript entries: they name the piece, never its text, but their
+  presence identifies a steering arm.
+- The model's own visible text and reasoning in `outcome.result.transcript`
+  (and a failed outcome's `transcript`) can voice the persona; a judge of
+  decisions should get the planned review, not the transcript.

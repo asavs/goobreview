@@ -7,14 +7,14 @@ import type { PersonaSteer } from "./types.js";
 export interface Steering {
   /** Completed snapshot tool calls counted so far. */
   readonly completed: number;
-  /** Count one completed snapshot tool call; returns the messages due at the new count, in persona order. */
-  toolCompleted(): string[];
+  /** Count one completed snapshot tool call; returns the steer pieces due at the new count, in persona order. */
+  toolCompleted(): readonly PersonaSteer[];
 }
 
 export function createSteering(steer: readonly PersonaSteer[]): Steering {
-  const due = new Map<number, string[]>();
+  const due = new Map<number, PersonaSteer[]>();
   for (const s of steer) {
-    for (const n of s.afterToolCalls) due.set(n, [...(due.get(n) ?? []), s.text]);
+    for (const n of s.afterToolCalls) due.set(n, [...(due.get(n) ?? []), s]);
   }
   let completed = 0;
   return {
