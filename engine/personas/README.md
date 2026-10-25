@@ -18,7 +18,7 @@ produces.
 
 | Slot | Where the text lands |
 |---|---|
-| `role` | top of the system prompt, before the reviewer contract |
+| `role` | top of the system prompt, above the shared `## Role` section every arm gets; a persona adds to the role, it never replaces it |
 | `history.user`, `history.assistant` | one earlier conversation turn each, before the pull request message; the model reads an assistant turn as something it already said |
 | `before` | the user message, before the pull request data |
 | `after` | the user message, after the pull request data: the last words the model reads |

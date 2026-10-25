@@ -78,7 +78,8 @@ These were each learned from an incident; the v1 issue number is noted.
 ### Prompt
 
 - **Personas are pieces** (`personas/README.md`): small text files, each in
-  one slot (`role` heads the system prompt; `history.user` and
+  one slot (`role` is added above the shared `## Role` section, so every arm's
+  system prompt is identical apart from it; `history.user` and
   `history.assistant` are earlier turns before the PR message; `before` and
   `after` wrap the PR data in the user message; `steer` messages arrive
   mid-review on a tool-call schedule), switched on by a recipe and toggled

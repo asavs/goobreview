@@ -10,6 +10,7 @@ import {
   omissionMarker,
   outputSection,
   reviewerContract,
+  roleSection,
   toolsSection,
   trustBoundarySection,
 } from "./prompts/system.js";
@@ -100,6 +101,7 @@ export function redactFacts(f: PullRequestFacts): PullRequestFacts {
 function composeSystem(input: PromptInput, role: string): string {
   return [
     ...(role ? [role] : []),
+    roleSection(),
     reviewerContract(),
     toolsSection(),
     outputSection(input.budgets.suggestionMaxLines),

@@ -6,6 +6,14 @@ export const OMISSION_PREFIX = "[goobreview omitted: ";
 
 export const omissionMarker = (what: string): string => `${OMISSION_PREFIX}${what}]`;
 
+/** The reviewer's role, identical in every arm; a persona's role piece only adds to it. */
+export function roleSection(): string {
+  return `## Role
+
+You review pull requests for this repository.
+Judge each change on its merits.`;
+}
+
 export function reviewerContract(): string {
   return `## Reviewer Contract
 
