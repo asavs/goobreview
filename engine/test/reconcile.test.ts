@@ -147,6 +147,37 @@ describe("research arms", () => {
     });
   });
 
+  it("records an arm whose prompt cannot be composed as failed and keeps going", async () => {
+    const base = deps();
+    const composePrompt: ReconcileDeps["composePrompt"] = (i) => {
+      if (i.policy.personality === "angry") throw new Error("prompt is 999 bytes, over maxPromptBytes=10");
+      return base.composePrompt(i);
+    };
+    const out = await reconcilePull(deps({ composePrompt }), REPO, 7);
+    expect(out).toMatchObject({ action: "posted", research: { recorded: 4, failed: 2 } });
+    const failed = research.filter((r) => r.outcome.status === "failed");
+    expect(failed.map((r) => [r.arm.name, r.prompt])).toEqual([
+      ["angry@google/m:medium", null],
+      ["angry@anthropic/c:medium", null],
+    ]);
+    expect(failed[0]!.outcome).toMatchObject({ kind: "error", message: expect.stringContaining("maxPromptBytes") });
+  });
+
+  it("retries an arm once on a transient provider error, not on other errors", async () => {
+    let calls = 0;
+    executorRun.mockImplementation(async (i) => {
+      if (i.models[0]!.provider === "anthropic" && i.prompt.system === "sys:none" && calls++ === 0) {
+        throw new ExecutorError("provider", "OpenAI API error (503): upstream connect error");
+      }
+      if (i.models[0]!.provider === "anthropic" && i.prompt.system === "sys:angry") throw new ExecutorError("provider", "400 invalid tool schema");
+      return { ...ok(), model: i.models[0]! };
+    });
+    const out = await reconcilePull(deps(), REPO, 7);
+    expect(out).toMatchObject({ research: { recorded: 4, failed: 1 } });
+    expect(executorRun).toHaveBeenCalledTimes(5);
+    expect(research.find((r) => r.arm.name === "none@anthropic/c:medium")?.outcome.status).toBe("ok");
+  });
+
   it("records a posted review outside the grid as its own arm", async () => {
     executorRun.mockImplementation(async (i) => ({ ...ok(), model: i.models.length > 1 ? { provider: "openai", id: "x", thinking: "low" } : i.models[0]! }));
     config.models = [google, anthropic];

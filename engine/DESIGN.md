@@ -133,7 +133,11 @@ reviewed head yields one `ResearchRecord` (schema v2) per arm:
 
 - `research.arms` is a grid, `{models, personalities}`, expanded to their
   cross product. Each arm runs one model with no fallback, so a quota or
-  availability failure is a failed record, never a silent substitution.
+  availability failure is a failed record, never a silent substitution. A
+  transient availability error (503, overloaded) gets one retry first.
+- Everything per arm is failure-isolated, prompt composition included (an
+  angry prompt can exceed the budget the posted one fit): the arm is recorded
+  as failed with a null prompt, and the remaining arms and the sweep go on.
 - The posted review fills the arm it matches (personality + actual model).
   When it matches none, for example after a fallback, it is recorded as its
   own arm. Every other arm runs unposted on the same snapshot and the same

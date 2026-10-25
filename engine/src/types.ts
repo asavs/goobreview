@@ -420,8 +420,8 @@ export interface ResearchRecord {
   /** This arm's review is the one posted (or, in dry run, the one that would be). */
   posted: boolean;
   reviewUrl?: string;
-  /** The system prompt carries the personality; consumers that blind must strip it. */
-  prompt: ComposedPrompt;
+  /** The system prompt carries the personality; consumers that blind must strip it. Null when composing it failed. */
+  prompt: ComposedPrompt | null;
   outcome: ResearchOutcome;
 }
 
