@@ -258,3 +258,11 @@ describe("composePrompt: trust boundary scope", () => {
     expect(p.user.startsWith("# Pull Request Data\n")).toBe(true);
   });
 });
+
+describe("composePrompt: claim checking", () => {
+  it("states the rule without an example that would echo the eval corpus's claim", () => {
+    const p = composePrompt(input());
+    expect(p.system).toContain("are the author's claims about the change, not facts");
+    expect(p.system).not.toMatch(/behaviou?r change/i);
+  });
+});
