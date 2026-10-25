@@ -6,7 +6,13 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
 /** A persona spec (personas/README.md): "<name>[:<recipe>][+piece|-piece]...", canonical once config is loaded. */
 export type Personality = string;
 /** Where a persona piece lands in the conversation. */
-export type PieceSlot = "role" | "before" | "after";
+export type PieceSlot = "role" | "history.user" | "history.assistant" | "before" | "after";
+
+/** One seeded conversation turn, placed before the PR data. */
+export interface PersonaTurn {
+  role: "user" | "assistant";
+  text: string;
+}
 
 export interface PersonaPiece {
   id: string;
@@ -243,6 +249,8 @@ export interface ComposedPersona {
   pieces: PersonaPiece[];
   /** Text of each slot exactly as placed ("" when empty). `system` starts with `role`. */
   role: string;
+  /** Turns the model sees as earlier conversation, ending on an assistant turn. */
+  history: PersonaTurn[];
   before: string;
   after: string;
 }

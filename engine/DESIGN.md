@@ -77,8 +77,12 @@ These were each learned from an incident; the v1 issue number is noted.
 ### Prompt
 
 - **Personas are pieces** (`personas/README.md`): small text files, each in
-  one slot (`role` heads the system prompt; `before` and `after` wrap the PR
-  data in the user message), switched on by a recipe and toggled per spec.
+  one slot (`role` heads the system prompt; `history.user` and
+  `history.assistant` are earlier turns before the PR message; `before` and
+  `after` wrap the PR data in the user message), switched on by a recipe and
+  toggled per spec. Seeded assistant turns are text only, carry a synthetic
+  provider so pi replays them as plain prior turns on any model, and are never
+  counted as model requests or transcript output.
   `angry:v1` is v1's scene byte for byte: the interruption and `User:` above
   the data, the tail ending mid-sentence as the last bytes. Persona text ships
   with the engine and is trusted; the contract, tools, output rules and trust

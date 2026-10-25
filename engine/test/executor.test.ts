@@ -186,3 +186,27 @@ describe("validateReviewForm", () => {
     expect(r.ok && r.form).toMatchObject({ resolvedThreads: [], unresolvedThreads: [], notCovered: [] });
   });
 });
+
+describe("executor: persona turns", () => {
+  it("seeds the persona's turns before the wrapped PR data, and never counts them as model output", async () => {
+    const { fauxes, executor, input } = setup("faux-a");
+    let seen: { role: string; text: string }[] = [];
+    fauxes[0]!.setResponses([
+      (ctx) => {
+        seen = (ctx.messages as { role: string; content: string | { type: string; text?: string }[] }[])
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({ role: m.role, text: typeof m.content === "string" ? m.content : m.content.map((c) => c.text ?? "").join("") }));
+        return submit(GOOD);
+      },
+    ]);
+    const persona = { ...noPersona("angry:turns"), history: [{ role: "user" as const, text: "*ding*" }, { role: "assistant" as const, text: "Right. Fine. Show me." }], after: "Go." };
+    const res = await executor.run(input({ prompt: { system: "sys", user: "review this\n", persona, omissions: [], bytes: 0 } }));
+    expect(seen).toEqual([
+      { role: "user", text: "*ding*" },
+      { role: "assistant", text: "Right. Fine. Show me." },
+      { role: "user", text: "review this\n\nGo." },
+    ]);
+    expect(res.usage.requests).toBe(1);
+    expect(res.transcript.filter((e) => e.type === "assistant")).toHaveLength(1);
+  });
+});

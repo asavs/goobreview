@@ -4,7 +4,7 @@
 
 import { matchesGitPattern } from "./snapshot.js";
 import { redact, redactPatch, truncateUtf8 } from "./redact.js";
-import { resolvePersona, slotText } from "./persona.js";
+import { historyTurns, resolvePersona, slotText } from "./persona.js";
 import {
   guidanceSection,
   omissionMarker,
@@ -50,6 +50,7 @@ export function composePrompt(input: PromptInput): ComposedPrompt {
     spec: resolved.spec,
     pieces: resolved.pieces.map(({ id, slot, sha256 }) => ({ id, slot, sha256 })),
     role: slotText(resolved, "role"),
+    history: historyTurns(resolved),
     before: slotText(resolved, "before"),
     after: slotText(resolved, "after"),
   };
@@ -58,7 +59,10 @@ export function composePrompt(input: PromptInput): ComposedPrompt {
   // Redact before rendering and capping, so a cap cannot split a secret into
   // an unrecognisable prefix, and the budget measures what is actually sent.
   const user = composeUser({ ...input, facts: redactFacts(input.facts) }, omissions);
-  const bytes = Buffer.byteLength(system, "utf8") + Buffer.byteLength(userMessage({ user, persona }), "utf8");
+  const bytes =
+    Buffer.byteLength(system, "utf8") +
+    persona.history.reduce((n, t) => n + Buffer.byteLength(t.text, "utf8"), 0) +
+    Buffer.byteLength(userMessage({ user, persona }), "utf8");
   if (bytes > input.budgets.maxPromptBytes) throw new PromptBudgetError(bytes, input.budgets.maxPromptBytes);
   return { system, user, persona, omissions, bytes };
 }

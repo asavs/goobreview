@@ -7,12 +7,12 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PersonaPiece, PieceSlot } from "./types.js";
+import type { PersonaPiece, PersonaTurn, PieceSlot } from "./types.js";
 
 /** Built-in personas, beside src/ and dist/. */
 export const PERSONAS_DIR = fileURLToPath(new URL("../personas/", import.meta.url));
 
-export const SLOTS: readonly PieceSlot[] = ["role", "before", "after"];
+export const SLOTS: readonly PieceSlot[] = ["role", "history.user", "history.assistant", "before", "after"];
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 const SPEC = /^([a-z][a-z0-9_]*)(?::([a-z0-9_]+))?((?:[+-][a-z][a-z0-9_]*)*)$/;
@@ -113,7 +113,7 @@ export function resolvePersona(spec: string, dir: string = PERSONAS_DIR): Resolv
     }
   }
   const canonical = `${name}:${recipe}${removed.sort().map((id) => `-${id}`).join("")}${added.sort().map((id) => `+${id}`).join("")}`;
-  return {
+  const resolved: ResolvedPersona = {
     spec: canonical,
     pieces: file.pieces
       .filter(([id]) => on.has(id))
@@ -122,6 +122,20 @@ export function resolvePersona(spec: string, dir: string = PERSONAS_DIR): Resolv
         return { id, slot, sha256: createHash("sha256").update(text).digest("hex"), text };
       }),
   };
+  // The PR data is the next user message, so seeded turns must alternate,
+  // open with the user and leave the last word to the assistant.
+  const roles = historyTurns(resolved).map((t) => t.role);
+  if (roles.length > 0 && (roles[0] !== "user" || roles.at(-1) !== "assistant" || roles.some((r, i) => i > 0 && r === roles[i - 1]))) {
+    throw new PersonaError(`persona spec "${spec}": history turns must alternate user/assistant, starting with user and ending with assistant (got ${roles.join(", ")})`);
+  }
+  return resolved;
+}
+
+/** Seeded conversation turns, in placement order, before the PR data. */
+export function historyTurns(persona: ResolvedPersona): PersonaTurn[] {
+  return persona.pieces.flatMap((p): PersonaTurn[] =>
+    p.slot === "history.user" ? [{ role: "user" as const, text: p.text }] : p.slot === "history.assistant" ? [{ role: "assistant" as const, text: p.text }] : [],
+  );
 }
 
 /** Text of one slot: its pieces joined by newlines, or "" when none are on. */
