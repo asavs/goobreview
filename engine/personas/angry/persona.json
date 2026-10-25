@@ -5,11 +5,13 @@
     "my_outburst": "history.assistant",
     "outburst": "before",
     "speaker": "before",
-    "sigh": "after"
+    "sigh": "after",
+    "dings": { "slot": "steer", "afterToolCalls": [5, 15] }
   },
   "recipes": {
     "v1": ["role", "outburst", "speaker", "sigh"],
-    "turns": ["role", "ding", "my_outburst"]
+    "turns": ["role", "ding", "my_outburst"],
+    "turns_dings": ["role", "ding", "my_outburst", "dings"]
   },
   "default": "v1"
 }

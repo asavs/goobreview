@@ -142,3 +142,29 @@ describe("history turns", () => {
     expect(() => resolvePersona(spec)).toThrow(err);
   });
 });
+
+describe("steer pieces", () => {
+  it("carry their schedule into the composed persona and the budget", () => {
+    const p = composePrompt(input({ policy: { ...policy, personality: "angry:turns_dings" } }));
+    expect(p.persona.steer).toEqual([{ text: "*ding*", afterToolCalls: [5, 15] }]);
+    expect(p.persona.pieces.find((x) => x.id === "dings")).toMatchObject({ slot: "steer", afterToolCalls: [5, 15] });
+    const without = composePrompt(input({ policy: { ...policy, personality: "angry:turns" } }));
+    expect(p.bytes - without.bytes).toBe(2 * Buffer.byteLength("*ding*"));
+    expect(userMessage(p)).toBe(p.user);
+  });
+
+  const root = mkdtempSync(path.join(tmpdir(), "goob-steer-"));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  it.each([
+    ["noschedule", "steer", /needs "afterToolCalls"/],
+    ["unsorted", { slot: "steer", afterToolCalls: [5, 3] }, /increasing whole numbers/],
+    ["zero", { slot: "steer", afterToolCalls: [0] }, /increasing whole numbers/],
+    ["extra", { slot: "steer", afterToolCalls: [1], every: 2 }, /unknown keys/],
+    ["objrole", { slot: "role" }, /only steer pieces take an object/],
+  ])("rejects %s", (name, value, err) => {
+    mkdirSync(path.join(root, name));
+    writeFileSync(path.join(root, name, "persona.json"), JSON.stringify({ pieces: { d: value }, recipes: { x: ["d"] }, default: "x" }));
+    writeFileSync(path.join(root, name, "d.md"), "*ding*");
+    expect(() => resolvePersona(name, root)).toThrow(err);
+  });
+});

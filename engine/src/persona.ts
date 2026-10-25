@@ -7,12 +7,12 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PersonaPiece, PersonaTurn, PieceSlot } from "./types.js";
+import type { PersonaPiece, PersonaSteer, PersonaTurn, PieceSlot } from "./types.js";
 
 /** Built-in personas, beside src/ and dist/. */
 export const PERSONAS_DIR = fileURLToPath(new URL("../personas/", import.meta.url));
 
-export const SLOTS: readonly PieceSlot[] = ["role", "history.user", "history.assistant", "before", "after"];
+export const SLOTS: readonly PieceSlot[] = ["role", "history.user", "history.assistant", "before", "after", "steer"];
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 const SPEC = /^([a-z][a-z0-9_]*)(?::([a-z0-9_]+))?((?:[+-][a-z][a-z0-9_]*)*)$/;
@@ -25,8 +25,8 @@ export class PersonaError extends Error {
 }
 
 interface PersonaFile {
-  /** Piece id -> slot, in placement order. */
-  pieces: [string, PieceSlot][];
+  /** Pieces in placement order; steer pieces carry their schedule. */
+  pieces: { id: string; slot: PieceSlot; afterToolCalls?: number[] }[];
   recipes: Map<string, Set<string>>;
   default: string;
 }
@@ -57,11 +57,26 @@ function loadFile(dir: string, name: string): PersonaFile & { texts: Map<string,
   }
   const piecesRaw = obj.pieces as Record<string, unknown> | undefined;
   if (typeof piecesRaw !== "object" || piecesRaw === null || Array.isArray(piecesRaw)) throw new PersonaError(`${where}: "pieces" must map piece ids to slots`);
-  const pieces: [string, PieceSlot][] = [];
+  const pieces: PersonaFile["pieces"] = [];
   const texts = new Map<string, string>();
-  for (const [id, slot] of Object.entries(piecesRaw)) {
+  for (const [id, value] of Object.entries(piecesRaw)) {
     if (!NAME.test(id)) throw new PersonaError(`${where}: piece id "${id}" must match ${NAME}`);
+    // A slot name, or for steer {"slot": "steer", "afterToolCalls": [5, 15]}.
+    const isObj = typeof value === "object" && value !== null && !Array.isArray(value);
+    const slot = isObj ? (value as Record<string, unknown>).slot : value;
     if (!SLOTS.includes(slot as PieceSlot)) throw new PersonaError(`${where}: piece "${id}" has unknown slot "${String(slot)}" (expected one of ${SLOTS.join(", ")})`);
+    let afterToolCalls: number[] | undefined;
+    if (slot === "steer") {
+      const v = value as Record<string, unknown>;
+      const at = isObj ? v.afterToolCalls : undefined;
+      if (isObj && Object.keys(v).some((k) => k !== "slot" && k !== "afterToolCalls")) throw new PersonaError(`${where}: piece "${id}" has unknown keys`);
+      if (!Array.isArray(at) || at.length === 0 || !at.every((n, i) => Number.isInteger(n) && n >= 1 && (i === 0 || n > (at[i - 1] as number)))) {
+        throw new PersonaError(`${where}: steer piece "${id}" needs "afterToolCalls": increasing whole numbers >= 1`);
+      }
+      afterToolCalls = at as number[];
+    } else if (isObj) {
+      throw new PersonaError(`${where}: piece "${id}": only steer pieces take an object; use the slot name`);
+    }
     let text: string;
     try {
       text = readFileSync(path.join(dir, name, `${id}.md`), "utf8");
@@ -70,7 +85,7 @@ function loadFile(dir: string, name: string): PersonaFile & { texts: Map<string,
     }
     // One trailing newline is the file's, not the piece's; trailing spaces are kept.
     texts.set(id, text.replace(/\r\n?/g, "\n").replace(/\n$/, ""));
-    pieces.push([id, slot as PieceSlot]);
+    pieces.push({ id, slot: slot as PieceSlot, ...(afterToolCalls ? { afterToolCalls } : {}) });
   }
   const recipesRaw = obj.recipes as Record<string, unknown> | undefined;
   if (typeof recipesRaw !== "object" || recipesRaw === null || Array.isArray(recipesRaw)) throw new PersonaError(`${where}: "recipes" must map recipe names to piece lists`);
@@ -116,10 +131,10 @@ export function resolvePersona(spec: string, dir: string = PERSONAS_DIR): Resolv
   const resolved: ResolvedPersona = {
     spec: canonical,
     pieces: file.pieces
-      .filter(([id]) => on.has(id))
-      .map(([id, slot]) => {
-        const text = file.texts.get(id)!;
-        return { id, slot, sha256: createHash("sha256").update(text).digest("hex"), text };
+      .filter((p) => on.has(p.id))
+      .map((p) => {
+        const text = file.texts.get(p.id)!;
+        return { ...p, sha256: createHash("sha256").update(text).digest("hex"), text };
       }),
   };
   // The PR data is the next user message, so seeded turns must alternate,
@@ -136,6 +151,11 @@ export function historyTurns(persona: ResolvedPersona): PersonaTurn[] {
   return persona.pieces.flatMap((p): PersonaTurn[] =>
     p.slot === "history.user" ? [{ role: "user" as const, text: p.text }] : p.slot === "history.assistant" ? [{ role: "assistant" as const, text: p.text }] : [],
   );
+}
+
+/** Messages delivered mid-run, each after the given counts of completed tool calls. */
+export function steerMessages(persona: ResolvedPersona): PersonaSteer[] {
+  return persona.pieces.flatMap((p) => (p.slot === "steer" && p.afterToolCalls ? [{ text: p.text, afterToolCalls: p.afterToolCalls }] : []));
 }
 
 /** Text of one slot: its pieces joined by newlines, or "" when none are on. */

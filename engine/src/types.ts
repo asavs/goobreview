@@ -6,7 +6,7 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
 /** A persona spec (personas/README.md): "<name>[:<recipe>][+piece|-piece]...", canonical once config is loaded. */
 export type Personality = string;
 /** Where a persona piece lands in the conversation. */
-export type PieceSlot = "role" | "history.user" | "history.assistant" | "before" | "after";
+export type PieceSlot = "role" | "history.user" | "history.assistant" | "before" | "after" | "steer";
 
 /** One seeded conversation turn, placed before the PR data. */
 export interface PersonaTurn {
@@ -14,11 +14,19 @@ export interface PersonaTurn {
   text: string;
 }
 
+/** A user message delivered mid-run, once after each listed count of completed tool calls. */
+export interface PersonaSteer {
+  text: string;
+  afterToolCalls: number[];
+}
+
 export interface PersonaPiece {
   id: string;
   slot: PieceSlot;
   /** SHA-256 of the piece text, so an edited line starts a new series. */
   sha256: string;
+  /** Steer pieces only: the schedule. */
+  afterToolCalls?: number[];
 }
 
 export interface RepoRef {
@@ -253,6 +261,8 @@ export interface ComposedPersona {
   history: PersonaTurn[];
   before: string;
   after: string;
+  /** Mid-run messages; the executor delivers each as a user message after its tool-call counts. */
+  steer: PersonaSteer[];
 }
 
 export interface ComposedPrompt {

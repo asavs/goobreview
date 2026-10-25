@@ -4,7 +4,7 @@
 
 import { matchesGitPattern } from "./snapshot.js";
 import { redact, redactPatch, truncateUtf8 } from "./redact.js";
-import { historyTurns, resolvePersona, slotText } from "./persona.js";
+import { historyTurns, resolvePersona, slotText, steerMessages } from "./persona.js";
 import {
   guidanceSection,
   omissionMarker,
@@ -48,11 +48,12 @@ export function composePrompt(input: PromptInput): ComposedPrompt {
   const resolved = resolvePersona(input.policy.personality);
   const persona: ComposedPersona = {
     spec: resolved.spec,
-    pieces: resolved.pieces.map(({ id, slot, sha256 }) => ({ id, slot, sha256 })),
+    pieces: resolved.pieces.map(({ id, slot, sha256, afterToolCalls }) => ({ id, slot, sha256, ...(afterToolCalls ? { afterToolCalls } : {}) })),
     role: slotText(resolved, "role"),
     history: historyTurns(resolved),
     before: slotText(resolved, "before"),
     after: slotText(resolved, "after"),
+    steer: steerMessages(resolved),
   };
   const system = composeSystem(input, persona.role);
   const omissions: string[] = [];
@@ -62,6 +63,8 @@ export function composePrompt(input: PromptInput): ComposedPrompt {
   const bytes =
     Buffer.byteLength(system, "utf8") +
     persona.history.reduce((n, t) => n + Buffer.byteLength(t.text, "utf8"), 0) +
+    // Steering counts at its most: every scheduled delivery.
+    persona.steer.reduce((n, s) => n + s.afterToolCalls.length * Buffer.byteLength(s.text, "utf8"), 0) +
     Buffer.byteLength(userMessage({ user, persona }), "utf8");
   if (bytes > input.budgets.maxPromptBytes) throw new PromptBudgetError(bytes, input.budgets.maxPromptBytes);
   return { system, user, persona, omissions, bytes };
