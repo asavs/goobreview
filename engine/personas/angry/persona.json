@@ -7,7 +7,6 @@
     "scene_count": "history.assistant",
     "scene_ding": "history.user",
     "scene_outburst": "history.assistant",
-    "vow": "history.assistant",
     "outburst": "before",
     "speaker": "before",
     "sigh": "after",
