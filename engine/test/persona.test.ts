@@ -210,3 +210,18 @@ describe("angry:scene", () => {
     expect(p.persona.history[3]!.text.endsWith("Right. Fine. Show me.\nAnd it had better do what it says it does.")).toBe(true);
   });
 });
+
+describe("ablations", () => {
+  it("separates the anger label from the scene", () => {
+    const control = composePrompt(input());
+    const label = composePrompt(input({ policy: { ...policy, personality: "angry:label" } }));
+    const sceneOnly = composePrompt(input({ policy: { ...policy, personality: "angry:scene-role" } }));
+    // Label only: the one-line system difference, no scene.
+    expect(label.system).toBe(`${V1_ROLE}\n\n${control.system}`);
+    expect(label.persona.history).toEqual([]);
+    expect(userMessage(label)).toBe(control.user);
+    // Scene only: the control's system prompt, the scene's turns.
+    expect(sceneOnly.system).toBe(control.system);
+    expect(sceneOnly.persona.history).toHaveLength(4);
+  });
+});
