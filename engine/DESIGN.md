@@ -186,8 +186,11 @@ label.json}`) with no GitHub:
 
 - Each variant becomes a copy of the seed tree (minus `.git`) with its files
   overlaid, packed and extracted through the same snapshot hardening as a PR
-  head. The diff becomes a synthetic PR titled `Update <path>`, with no
-  description and no CI.
+  head. The diff becomes a synthetic PR with no CI: titled `Update <path>`
+  with no description, unless the variant has a `pr.json` (`{title?, body?,
+  commits?}`) supplying the author's claims. A generator gives both twins of
+  an item the same claim, so its truth, not its wording, is what differs. A
+  malformed `pr.json` makes the variant unprepared.
 - Labels are never read; records carry `corpus: {name, item, variant}` and
   scoring joins them to `label.json` afterwards.
 - Arms interleave within each repeat, so a model running out of quota part-way

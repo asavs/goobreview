@@ -6,6 +6,7 @@
 // Corpus layout (angry-llm-research scripts/generate-mutants.sh):
 //   <corpus>/<item>/<variant>/diff.patch
 //   <corpus>/<item>/<variant>/snapshot/<relpath>   files that replace the seed's
+//   <corpus>/<item>/<variant>/pr.json              optional PR text: {title?, body?, commits?}
 //   <corpus>/<item>/<variant>/label.json           ground truth (not read)
 
 import { createHash, randomBytes } from "node:crypto";
@@ -169,15 +170,45 @@ async function writeVariantArchive(tree: string, v: EvalVariant, overlay: string
   }
 }
 
-/** A plain PR: no description, one commit, no CI. The title names the file and nothing else. */
-export function syntheticFacts(name: string, files: ChangedFile[], sha: string): PullRequestFacts {
+/** Optional author text for a variant: the claims a reviewer checks the code against. */
+export interface VariantPrText {
+  title?: string;
+  body?: string;
+  commits?: string[];
+}
+
+/** Reads `pr.json` beside the diff: undefined when absent, an error when malformed. */
+export async function readPrText(dir: string): Promise<VariantPrText | undefined> {
+  let raw: string;
+  try {
+    raw = await readFile(path.join(dir, "pr.json"), "utf8");
+  } catch {
+    return undefined;
+  }
+  const v = JSON.parse(raw) as Record<string, unknown>;
+  const ok =
+    typeof v === "object" && v !== null && !Array.isArray(v) &&
+    Object.keys(v).every((k) => ["title", "body", "commits"].includes(k)) &&
+    (v.title === undefined || (typeof v.title === "string" && v.title.length > 0)) &&
+    (v.body === undefined || typeof v.body === "string") &&
+    (v.commits === undefined || (Array.isArray(v.commits) && v.commits.length > 0 && v.commits.every((c) => typeof c === "string" && c.length > 0)));
+  if (!ok) throw new Error("pr.json must be {title?: string, body?: string, commits?: non-empty string[]}");
+  return v as VariantPrText;
+}
+
+/**
+ * A synthetic PR with one commit and no CI. Without `pr`, there is no
+ * description and the title names the file and nothing else; `pr` supplies
+ * the author's claims instead.
+ */
+export function syntheticFacts(name: string, files: ChangedFile[], sha: string, pr: VariantPrText = {}): PullRequestFacts {
   const subject = files.length === 1 ? `Update ${files[0]!.path}` : `Update ${files.length} files`;
   return {
     repo: { owner: "eval", repo: name },
     number: 1,
     htmlUrl: "",
-    title: subject,
-    body: "",
+    title: pr.title ?? subject,
+    body: pr.body ?? "",
     draft: false,
     state: "open",
     author: { login: "contributor", type: "User" },
@@ -187,7 +218,7 @@ export function syntheticFacts(name: string, files: ChangedFile[], sha: string):
     baseSha: "",
     isFork: false,
     repoPrivate: true,
-    commits: [{ sha, subject }],
+    commits: (pr.commits ?? [pr.title ?? subject]).map((s) => ({ sha, subject: s })),
     files,
     botReviews: [],
     reviewRequested: false,
@@ -256,7 +287,14 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
     }
     const overlay = await filesUnder(path.join(v.dir, "snapshot"));
     const sha = await variantSha(v, diff, overlay);
-    const facts = syntheticFacts(name, files, sha);
+    let pr: VariantPrText | undefined;
+    try {
+      pr = await readPrText(v.dir);
+    } catch (err) {
+      unprepared("has an invalid pr.json", err);
+      continue;
+    }
+    const facts = syntheticFacts(name, files, sha, pr);
     let snapshot: Snapshot;
     try {
       snapshot = await snapshotFromArchive((dest) => writeVariantArchive(opts.tree, v, overlay, config.workDir, dest), sha, config.workDir, log);
