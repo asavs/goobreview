@@ -1,0 +1,10 @@
+# /etc/logrotate.d/goobreview
+/var/lib/goobreview/v2-work/sweep.log {
+    su USER USER
+    size 10M
+    rotate 5
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

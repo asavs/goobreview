@@ -1,0 +1,2 @@
+# goobreview: sweep every minute; flock skips a tick while a sweep is still running.
+* * * * * /usr/bin/flock -n /var/lib/goobreview/v2-work/sweep.lock /home/USER/bin/goobreview sweep --max-reviews 2 >> /var/lib/goobreview/v2-work/sweep.log 2>&1
