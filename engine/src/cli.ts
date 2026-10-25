@@ -111,8 +111,8 @@ async function runEvalCommand(
       },
     );
     process.stdout.write(JSON.stringify(summary) + "\n");
-    // Incomplete (a model ran out of quota): rerun later and it resumes.
-    return summary.skippedQuota > 0 ? 1 : 0;
+    // Runs still owed (quota, unprepared variants): exit 1; a rerun resumes.
+    return summary.incomplete > 0 ? 1 : 0;
   } catch (err) {
     if (err instanceof UsageError || err instanceof ConfigError) {
       process.stderr.write(`goobreview: ${err.message}\n`);

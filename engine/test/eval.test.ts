@@ -99,16 +99,16 @@ describe("runEval", () => {
       "calc-L2-inverted/mutant",
     ]);
     const s = await runEval(deps(), opts());
-    expect(s).toMatchObject({ variants: 3, runs: 24, ok: 24, failed: 0, resumed: 0, skippedQuota: 0 });
+    expect(s).toMatchObject({ variants: 3, runs: 24, ok: 24, failed: 0, resumed: 0, skippedQuota: 0, unprepared: 0, incomplete: 0 });
     const boundary = records.filter((r) => r.itemId === "eval:corpus/calc-L2-boundary/mutant");
     expect(boundary).toHaveLength(8);
     // The reviewer sees the mutant file, not the seed's.
     expect(boundary.every((r) => r.outcome.status === "ok" && r.outcome.body.includes("if x <= hi:"))).toBe(true);
     expect(boundary[0]).toMatchObject({ repo: "eval/corpus", live: false, posted: false, corpus: { name: "corpus", item: "calc-L2-boundary", variant: "mutant" } });
     // Arms share one payload; only the system prompt differs. The title names the file only.
-    expect(new Set(boundary.map((r) => r.prompt.user)).size).toBe(1);
-    expect(boundary[0]!.prompt.user.startsWith("Update pkg/calc.py\n@@")).toBe(true);
-    expect(new Set(boundary.map((r) => r.prompt.system))).toEqual(new Set(["sys:none", "sys:angry"]));
+    expect(new Set(boundary.map((r) => r.prompt?.user)).size).toBe(1);
+    expect(boundary[0]!.prompt?.user.startsWith("Update pkg/calc.py\n@@")).toBe(true);
+    expect(new Set(boundary.map((r) => r.prompt?.system))).toEqual(new Set(["sys:none", "sys:angry"]));
     // Single model per arm; snapshots and staging copies are cleaned up.
     expect(run.mock.calls.every(([i]) => i.models.length === 1)).toBe(true);
     expect(readdirSync(config.workDir)).toEqual(["snapshots"]);
@@ -147,8 +147,41 @@ describe("runEval", () => {
     });
     const s = await runEval(deps(), opts());
     // Model a: 3 variants x 2 arms x 2 repeats. Model b: one failed attempt, the rest skipped.
-    expect(s).toMatchObject({ ok: 12, failed: 1, skippedQuota: 11, exhaustedModels: ["b/m:medium"] });
+    expect(s).toMatchObject({ ok: 12, failed: 1, skippedQuota: 11, exhaustedModels: ["b/m:medium"], incomplete: 12 });
     expect(records.filter((r) => r.outcome.status === "failed")).toHaveLength(1);
+  });
+
+  it("counts a quota failure on the last pending run as incomplete", async () => {
+    const s = await runEval(deps(), { ...opts(), limit: 1, repeats: 1 });
+    expect(s.incomplete).toBe(0);
+    run.mockRejectedValueOnce(new ExecutorError("quota", "usage limit"));
+    const done = records.map((r) => ({ itemId: r.itemId, arm: r.arm.name, status: r.outcome.status })).slice(0, -1);
+    records = [];
+    const again = await runEval(deps(), { ...opts(), limit: 1, repeats: 1, done });
+    expect(again).toMatchObject({ runs: 1, failed: 1, skippedQuota: 0, incomplete: 1 });
+  });
+
+  it("counts unprepared variants and refuses a missing tree", async () => {
+    writeFileSync(path.join(root, "corpus", "calc-L2-inverted", "mutant", "diff.patch"), "");
+    const s = await runEval(deps(), { ...opts(), repeats: 1 });
+    expect(s).toMatchObject({ unprepared: 1, incomplete: 4, runs: 8 });
+    await expect(runEval(deps(), { ...opts(), tree: path.join(root, "nope") })).rejects.toThrow(/--tree .* is not a directory/);
+  });
+
+  it("records a run whose prompt cannot be composed as failed", async () => {
+    const base = deps();
+    const s = await runEval(
+      {
+        ...base,
+        composePrompt: (i) => {
+          if (i.policy.personality === "angry") throw new Error("over maxPromptBytes");
+          return base.composePrompt(i);
+        },
+      },
+      { ...opts(), limit: 1, repeats: 1 },
+    );
+    expect(s).toMatchObject({ runs: 8, ok: 4, failed: 4, incomplete: 0 });
+    expect(records.filter((r) => r.prompt === null)).toHaveLength(4);
   });
 
   it("refuses to run without arms", async () => {

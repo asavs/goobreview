@@ -9,16 +9,17 @@
 //   <corpus>/<item>/<variant>/label.json           ground truth (not read)
 
 import { createHash, randomBytes } from "node:crypto";
-import { cp, mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import * as tar from "tar";
 import { modelName } from "./config.js";
 import type { ComposePromptFn, FindGuidanceFilesFn, PlanReviewFn } from "./reconcile.js";
-import { removeTree } from "./reconcile.js";
+import { removeTree, runArm } from "./reconcile.js";
 import { snapshotFromArchive } from "./snapshot.js";
 import {
   ExecutorError,
   type ChangedFile,
+  type ComposedPrompt,
   type EngineConfig,
   type Executor,
   type Logger,
@@ -69,6 +70,13 @@ export interface EvalSummary {
   /** Runs not attempted because their model ran out of quota this invocation. */
   skippedQuota: number;
   exhaustedModels: string[];
+  /** Variants whose snapshot could not be prepared or whose diff was empty. */
+  unprepared: number;
+  /**
+   * Runs still owed after this invocation: quota failures, quota skips, and
+   * every pending run of an unprepared variant. Zero means the corpus is done.
+   */
+  incomplete: number;
 }
 
 export async function listCorpus(corpus: string): Promise<EvalVariant[]> {
@@ -194,6 +202,9 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
   if (arms.length === 0) throw new Error("eval needs research.arms in the config");
   const name = opts.name ?? path.basename(path.resolve(opts.corpus));
   const engineVersion = deps.engineVersion ?? "dev";
+  for (const [flag, dir] of [["--corpus", opts.corpus], ["--tree", opts.tree]] as const) {
+    if (!(await stat(dir).then((s) => s.isDirectory(), () => false))) throw new Error(`${flag} ${dir} is not a directory`);
+  }
 
   let variants = await listCorpus(opts.corpus);
   if (opts.limit !== undefined) {
@@ -209,7 +220,17 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
     prior.set(k, (prior.get(k) ?? 0) + 1);
   }
 
-  const summary: EvalSummary = { variants: variants.length, runs: 0, ok: 0, failed: 0, resumed: 0, skippedQuota: 0, exhaustedModels: [] };
+  const summary: EvalSummary = {
+    variants: variants.length,
+    runs: 0,
+    ok: 0,
+    failed: 0,
+    resumed: 0,
+    skippedQuota: 0,
+    exhaustedModels: [],
+    unprepared: 0,
+    incomplete: 0,
+  };
   const exhausted = new Set<string>();
 
   for (const v of variants) {
@@ -220,11 +241,17 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
       return { arm, left: opts.repeats - have };
     });
     if (todo.every((t) => t.left === 0)) continue;
+    const owed = todo.reduce((n, t) => n + t.left, 0);
+    const unprepared = (why: string, error?: unknown) => {
+      summary.unprepared++;
+      summary.incomplete += owed;
+      log.error(`eval: ${itemId} ${why}; its ${owed} runs are still owed`, error === undefined ? {} : { error });
+    };
 
     const diff = await readFile(path.join(v.dir, "diff.patch"), "utf8");
     const files = parseUnifiedDiff(diff);
     if (files.length === 0) {
-      log.warn(`eval: ${itemId} has an empty diff; skipped`);
+      unprepared("has an empty diff");
       continue;
     }
     const overlay = await filesUnder(path.join(v.dir, "snapshot"));
@@ -234,7 +261,7 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
     try {
       snapshot = await snapshotFromArchive((dest) => writeVariantArchive(opts.tree, v, overlay, config.workDir, dest), sha, config.workDir, log);
     } catch (err) {
-      log.error(`eval: ${itemId} could not be prepared; skipped`, { error: err });
+      unprepared("could not be prepared", err);
       continue;
     }
     // A sink failure (e.g. a full disk) ends the eval: runs nobody records are wasted spend.
@@ -249,12 +276,14 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
           const { arm } = t;
           if (exhausted.has(modelName(arm.model))) {
             summary.skippedQuota++;
+            summary.incomplete++;
             continue;
           }
-          const prompt = deps.composePrompt({ ...input, policy: { ...config.defaults, personality: arm.personality } });
+          let prompt: ComposedPrompt | null = null;
           let outcome: ResearchOutcome;
           try {
-            const result = await deps.executor.run({ prompt, snapshot, models: [arm.model], limits: config.limits });
+            prompt = deps.composePrompt({ ...input, policy: { ...config.defaults, personality: arm.personality } });
+            const result = await runArm(deps.executor, { prompt, snapshot, models: [arm.model], limits: config.limits });
             const p = deps.planReview(result.form, facts, { config, model: result.model, elapsedMs: result.elapsedMs, engineVersion });
             outcome = { status: "ok", result, event: p.payload.event, body: p.payload.body, comments: p.payload.comments, notes: p.notes };
             summary.ok++;
@@ -265,6 +294,8 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
             summary.failed++;
             log.warn(`eval: ${itemId} ${arm.name} failed`, { kind, error: outcome.message });
             if (kind === "quota") {
+              // A quota failure does not count as an attempt; the next invocation retries it.
+              summary.incomplete++;
               exhausted.add(modelName(arm.model));
               log.warn(`eval: ${modelName(arm.model)} is out of quota; its remaining runs are skipped until the next invocation`);
             }

@@ -170,7 +170,9 @@ label.json}`) with no GitHub:
 - Arms interleave within each repeat, so a model running out of quota part-way
   leaves balanced cells. A quota failure stops that model for the rest of the
   invocation; rerunning resumes from `index.jsonl`, retrying quota failures
-  and nothing else. Exit 1 means incomplete.
+  and nothing else. The summary's `incomplete` counts every run still owed
+  (quota failures and skips, and all pending runs of a variant that could not
+  be prepared); exit 1 whenever it is non-zero.
 - Records go to the same `research.dir`, marked `live: false`, item ids
   `eval:<corpus>/<item>/<variant>`.
 
