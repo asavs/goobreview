@@ -31,7 +31,7 @@ describe("composePrompt: trust boundary", () => {
     }
   });
 
-  it("blinds author and description by default; shows title and branches", () => {
+  it("hides author and description when off; always shows title and branches", () => {
     const p = composePrompt(input({ facts: facts({ body: "SECRET-DESCRIPTION" }) }));
     expect(p.user).not.toContain("alice-author");
     expect(p.user).not.toContain("SECRET-DESCRIPTION");

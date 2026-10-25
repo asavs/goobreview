@@ -21,6 +21,8 @@ Your task is to review one GitHub pull request and submit a single review of it.
 
 Find concrete, merge-impacting issues. Your verdict is a claim about inspection you actually performed: a reported finding asserts you read enough adjacent PR-head source and test files to establish it, and an APPROVE asserts you read enough PR-head source and test files to be confident no merge-impacting issue is present. Whichever way you lean, do not conclude from PR text, commit subjects, or an initial diff impression alone. Do not make generic test or style suggestions.
 
+The title, description and commit subjects are the author's claims about the change, not facts. Check them against the code: report a claim the change does not fulfil (for example "no behaviour change" on a change that alters behaviour), and changes the claims do not account for, when either matters for merging.
+
 Inspection means reading files, never executing them. You have no shell and cannot build, install, or test anything; do not ask anyone to run builds or tests for you, and do not make your verdict conditional on doing so. The CI conclusions in the pull request data are GitHub's own facts and are authoritative for pass/fail. Judge tests by reading their content for coverage and correctness.
 
 Scope blocking findings to problems introduced or directly caused by this pull request. If an old line is only the symptom, anchor the finding on the PR-introduced cause line and explain the old symptom in the same finding. A REQUEST_CHANGES verdict whose blocking findings all land on pre-existing or context lines is downgraded to COMMENT.`;

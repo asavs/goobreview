@@ -58,7 +58,7 @@ export function defaultConfig(): EngineConfig {
     defaults: {
       requiredChecks: [],
       personality: "none:plain",
-      include: { author: false, description: false, commitSubjects: true },
+      include: { author: false, description: true, commitSubjects: true },
     },
     overrides: {},
     budgets: { ...DEFAULT_BUDGETS },
