@@ -234,6 +234,9 @@ async function runOne(
     if (!form) {
       check(agent, transcript, timedOut, input.signal);
       phase = "nudge";
+      // A steer message still queued from the main review must not land
+      // after the nudge's instruction; the nudge is persona-free in every arm.
+      agent.clearSteeringQueue();
       transcript.push(entry("nudge", { text: NUDGE }));
       await Promise.race([prompt(agent, NUDGE, transcript), stopped]);
     }

@@ -263,3 +263,22 @@ describe("executor: steer messages due together", () => {
     expect(res.usage.requests).toBe(3);
   });
 });
+
+describe("executor: no steering in the nudge", () => {
+  it("drops a steer message still queued when the main loop ends", async () => {
+    const { fauxes, executor, input } = setup("faux-a");
+    let nudgeUsers: string[] = [];
+    const read = () => fauxAssistantMessage(fauxToolCall("read_file", { path: "a" }), { stopReason: "toolUse" });
+    // maxTurns 3: the third call completes on the last main turn, so its ding is queued when the loop ends.
+    fauxes[0]!.setResponses([read(), read(), read(), (ctx) => {
+      const text = (c: unknown) => (typeof c === "string" ? c : (c as { text?: string }[]).map((b) => b.text ?? "").join(""));
+      nudgeUsers = (ctx.messages as { role: string; content: unknown }[]).filter((m) => m.role === "user").map((m) => text(m.content));
+      return submit(GOOD);
+    }]);
+    const persona = { ...noPersona("angry:x"), steer: [{ text: "*ding*", afterToolCalls: [3] }] };
+    const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 }, limits: { ...LIMITS, maxTurns: 3 } }));
+    expect(res.form.verdict).toBe("APPROVE");
+    expect(nudgeUsers.at(-1)).toMatch(/submit_review/);
+    expect(nudgeUsers).not.toContain("*ding*");
+  });
+});
