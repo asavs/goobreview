@@ -165,7 +165,9 @@ export function historyTurns(persona: ResolvedPersona): PersonaTurn[] {
 
 /** Messages delivered mid-run, each after the given counts of completed tool calls. */
 export function steerMessages(persona: ResolvedPersona): PersonaSteer[] {
-  return persona.pieces.flatMap((p) => (p.slot === "steer" && p.afterToolCalls ? [{ text: p.text, afterToolCalls: p.afterToolCalls }] : []));
+  return persona.pieces.flatMap((p) =>
+    p.slot === "steer" && p.afterToolCalls ? [{ id: p.id, sha256: p.sha256, text: p.text, afterToolCalls: p.afterToolCalls }] : [],
+  );
 }
 
 /** Text of one slot: its pieces joined by newlines, or "" when none are on. */

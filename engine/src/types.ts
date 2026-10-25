@@ -16,6 +16,9 @@ export interface PersonaTurn {
 
 /** A user message delivered mid-run, once after each listed count of completed tool calls. */
 export interface PersonaSteer {
+  /** The piece id and its SHA-256: what transcripts log, so they never carry persona text. */
+  id: string;
+  sha256: string;
   text: string;
   afterToolCalls: number[];
 }

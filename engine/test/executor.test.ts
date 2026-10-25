@@ -220,12 +220,12 @@ describe("executor: persona steering", () => {
       return fauxAssistantMessage(fauxToolCall("read_file", { path }), { stopReason: "toolUse" });
     };
     fauxes[0]!.setResponses([read("a"), read("b"), read("c"), (ctx) => (read("x")(ctx), submit(GOOD))]);
-    const persona = { ...noPersona("angry:x"), steer: [{ text: "*ding*", afterToolCalls: [2] }] };
+    const persona = { ...noPersona("angry:x"), steer: [{ id: "p_*ding*", sha256: "h", text: "*ding*", afterToolCalls: [2] }] };
     const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 } }));
     expect(res.form.verdict).toBe("APPROVE");
     // Requests 1-2 see only the PR message; the ding lands after the second tool result, once.
     expect(userTexts.map((u) => u.filter((t) => t === "*ding*").length)).toEqual([0, 0, 1, 1]);
-    expect(res.transcript.filter((e) => e.type === "steer")).toEqual([expect.objectContaining({ afterToolCalls: 2, text: "*ding*" })]);
+    expect(res.transcript.filter((e) => e.type === "steer")).toEqual([{ t: expect.any(String), type: "steer", piece: "p_*ding*", sha256: "h", afterToolCalls: 2 }]);
   });
 });
 
@@ -239,7 +239,7 @@ describe("executor: steering counts calls that ran", () => {
     };
     // Call 1 runs; the unknown tool and call 2 (past maxToolCalls: 1) never run, so a ding due at 2 never fires.
     fauxes[0]!.setResponses([call("read_file"), call("no_such_tool"), call("read_file"), (ctx) => (call("x")(ctx), submit(GOOD))]);
-    const persona = { ...noPersona("angry:x"), steer: [{ text: "*ding*", afterToolCalls: [2] }] };
+    const persona = { ...noPersona("angry:x"), steer: [{ id: "p_*ding*", sha256: "h", text: "*ding*", afterToolCalls: [2] }] };
     const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 }, limits: { ...LIMITS, maxToolCalls: 1 } }));
     expect(res.form.verdict).toBe("APPROVE");
     expect(seen).toEqual([0, 0, 0, 0]);
@@ -257,7 +257,7 @@ describe("executor: steer messages due together", () => {
     };
     const read = () => fauxAssistantMessage(fauxToolCall("read_file", { path: "a" }), { stopReason: "toolUse" });
     fauxes[0]!.setResponses([step(read), step(read), step(() => submit(GOOD))]);
-    const persona = { ...noPersona("angry:x"), steer: [{ text: "S1", afterToolCalls: [1] }, { text: "S2", afterToolCalls: [1] }] };
+    const persona = { ...noPersona("angry:x"), steer: [{ id: "p_S1", sha256: "h", text: "S1", afterToolCalls: [1] }, { id: "p_S2", sha256: "h", text: "S2", afterToolCalls: [1] }] };
     const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 } }));
     expect(seen).toEqual([[], ["S1", "S2"], ["S1", "S2"]]);
     expect(res.usage.requests).toBe(3);
@@ -275,7 +275,7 @@ describe("executor: no steering in the nudge", () => {
       nudgeUsers = (ctx.messages as { role: string; content: unknown }[]).filter((m) => m.role === "user").map((m) => text(m.content));
       return submit(GOOD);
     }]);
-    const persona = { ...noPersona("angry:x"), steer: [{ text: "*ding*", afterToolCalls: [3] }] };
+    const persona = { ...noPersona("angry:x"), steer: [{ id: "p_*ding*", sha256: "h", text: "*ding*", afterToolCalls: [3] }] };
     const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 }, limits: { ...LIMITS, maxTurns: 3 } }));
     expect(res.form.verdict).toBe("APPROVE");
     expect(nudgeUsers.at(-1)).toMatch(/submit_review/);
@@ -290,7 +290,7 @@ describe("executor: steer logged on delivery", () => {
     fauxes[0]!.setResponses([
       fauxAssistantMessage([fauxToolCall("read_file", { path: "a" }), fauxToolCall("submit_review", GOOD as Parameters<typeof fauxToolCall>[1])], { stopReason: "toolUse" }),
     ]);
-    const persona = { ...noPersona("angry:x"), steer: [{ text: "*ding*", afterToolCalls: [1] }] };
+    const persona = { ...noPersona("angry:x"), steer: [{ id: "p_*ding*", sha256: "h", text: "*ding*", afterToolCalls: [1] }] };
     const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 } }));
     expect(res.form.verdict).toBe("APPROVE");
     expect(res.usage.requests).toBe(1);

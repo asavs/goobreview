@@ -4,10 +4,10 @@ import { createSteering } from "../src/steering.js";
 describe("createSteering", () => {
   it("returns each message once, at its scheduled counts, in persona order", () => {
     const s = createSteering([
-      { text: "*ding*", afterToolCalls: [2, 4] },
-      { text: "ETA?", afterToolCalls: [4] },
+      { id: "*ding*", sha256: "h", text: "*ding*", afterToolCalls: [2, 4] },
+      { id: "ETA?", sha256: "h", text: "ETA?", afterToolCalls: [4] },
     ]);
-    const due = Array.from({ length: 6 }, () => s.toolCompleted());
+    const due = Array.from({ length: 6 }, () => s.toolCompleted().map((p) => p.text));
     expect(due).toEqual([[], ["*ding*"], [], ["*ding*", "ETA?"], [], []]);
     expect(s.completed).toBe(6);
   });

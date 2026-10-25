@@ -160,7 +160,7 @@ describe("steer pieces", () => {
     const p = composePrompt(input({ policy: { ...policy, personality: "angry:scene_dings" } }));
     // Irrelevant by its content, not by commentary, and not a question: it irritates without asking for speed or a reply. One early delivery keeps the dose even.
     const ding = "*ding dingdingding* #random: someone left their lunch in the big fridge again";
-    expect(p.persona.steer).toEqual([{ text: ding, afterToolCalls: [3] }]);
+    expect(p.persona.steer).toEqual([{ id: "dings", sha256: expect.stringMatching(/^[0-9a-f]{64}$/), text: ding, afterToolCalls: [3] }]);
     expect(p.persona.pieces.find((x) => x.id === "dings")).toMatchObject({ slot: "steer", afterToolCalls: [3] });
     const without = composePrompt(input({ policy: { ...policy, personality: "angry:scene" } }));
     expect(p.bytes - without.bytes).toBe(Buffer.byteLength(ding));

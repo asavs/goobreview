@@ -200,25 +200,26 @@ async function runOne(
   });
 
   const steering = createSteering(input.prompt.persona.steer);
-  /** Queued steer messages and the tool-call count each fell due at; logged only once delivered. */
-  const queued = new Map<AgentMessage, number>();
+  /** Queued steer messages, with the piece and the tool-call count each fell due at; logged only once delivered. */
+  const queued = new Map<AgentMessage, { piece: string; sha256: string; afterToolCalls: number }>();
   agent.subscribe((event) => {
     record(event, transcript, usage);
     // pi emits message_end for a queued message when it adds it to the
     // context, right before the request it reaches. A message dropped (the
     // review ended, or the nudge cleared it) is never logged.
-    if (event.type === "message_end" && queued.has(event.message)) {
-      const m = event.message as { content: string };
-      transcript.push(entry("steer", { afterToolCalls: queued.get(event.message), text: clip(m.content, TRANSCRIPT_TEXT_MAX) }));
-      queued.delete(event.message);
+    // The entry names the piece, never its text, so transcripts stay blindable.
+    const delivered = event.type === "message_end" ? queued.get(event.message) : undefined;
+    if (delivered) {
+      transcript.push(entry("steer", delivered));
+      queued.delete((event as { message: AgentMessage }).message);
       return;
     }
     // Persona steering counts snapshot tool calls that actually ran, in the
     // main review only.
     if (event.type !== "tool_execution_end" || !admitted.has(event.toolCallId) || phase !== "main" || form) return;
-    for (const text of steering.toolCompleted()) {
-      const message: AgentMessage = { role: "user", content: text, timestamp: Date.now() };
-      queued.set(message, steering.completed);
+    for (const s of steering.toolCompleted()) {
+      const message: AgentMessage = { role: "user", content: s.text, timestamp: Date.now() };
+      queued.set(message, { piece: s.id, sha256: s.sha256, afterToolCalls: steering.completed });
       agent.steer(message);
     }
   });
