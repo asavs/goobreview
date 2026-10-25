@@ -27,6 +27,7 @@ call validated against `ReviewForm`; nothing is parsed out of free text.
 | `src/prompt.ts` | Compose the trusted system prompt and the untrusted PR payload under byte budgets. |
 | `src/executor.ts` | Run the pi agent with model fallback, limits, transcript capture; return a validated `ReviewForm`. |
 | `src/review.ts` | Turn a `ReviewForm` into a `PlannedReview`: inline placement against the diff, suggestion demotion, downgrade rule, thread actions, body rendering. |
+| `src/research.ts` | File research sink: one JSON record per arm run plus an `index.jsonl` of summary rows. |
 | `src/reconcile.ts` | Orchestrate one PR end to end; `sweep()` reconciles every open PR in every allowed repo. |
 | `src/cli.ts` | `goobreview reconcile --repo o/r --pr N [--dry-run]`, `sweep`, `prompt` (render only). |
 
@@ -127,7 +128,30 @@ These were each learned from an incident; the v1 issue number is noted.
 
 ## Research capture
 
-Reconcile hands a `ResearchRecord` to a `ResearchSink` after a live review
-when consent allows (public repos only unless `allowPrivate`). Schema v2 is
-designed in phase 4; the persona must never appear in the judged payload
-(#117) and the judge must receive the diff.
+With `research.consent` (public repos only unless `allowPrivate`), every
+reviewed head yields one `ResearchRecord` (schema v2) per arm:
+
+- `research.arms` is a grid, `{models, personalities}`, expanded to their
+  cross product. Each arm runs one model with no fallback, so a quota or
+  availability failure is a failed record, never a silent substitution. A
+  transient availability error (503, overloaded) gets one retry first.
+- Everything per arm is failure-isolated, prompt composition included (an
+  angry prompt can exceed the budget the posted one fit): the arm is recorded
+  as failed with a null prompt, and the remaining arms and the sweep go on.
+- The posted review fills the arm it matches (personality + actual model).
+  When it matches none, for example after a fallback, it is recorded as its
+  own arm. Every other arm runs unposted on the same snapshot and the same
+  untrusted payload; only the system prompt differs.
+- Arms run after the posted review is out, so capture never delays or
+  changes it. A head whose posted review fails or is superseded runs no arms;
+  its retry does.
+- Records share an `itemId` (`owner/repo#N@sha`) and carry the arm, whether
+  it was posted, `live` (false in dry run), the engine version, the full
+  prompt, and either the planned review with the executor result (form,
+  model, credential, transcript, usage) or the failure with its transcript.
+- The file sink (`src/research.ts`) writes one JSON file per record under
+  `research.dir` plus an `index.jsonl` of summary rows, tagged with the random
+  installation id. Exporting and uploading are separate steps.
+
+The system prompt in a record carries the personality: anything that blinds
+(judges, uploads) must strip it (#117), and the judge must receive the diff.
