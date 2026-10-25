@@ -241,3 +241,11 @@ describe("composePrompt: secret redaction", () => {
     expect(p.user.match(/\[REDACTED:/g)!.length).toBeGreaterThanOrEqual(4);
   });
 });
+
+describe("composePrompt: think aloud", () => {
+  it("invites unposted plain-text thinking in every arm, as part of the shared rules", () => {
+    for (const personality of ["none:plain", "angry:scene"]) {
+      expect(composePrompt(input({ policy: { ...policy, personality } })).system).toContain("think aloud in plain text between tool calls");
+    }
+  });
+});
