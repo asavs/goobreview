@@ -6,7 +6,7 @@
 //   <dir>/runs/<owner>/<repo>/<pr>/<sha>/<arm>.<recordId>.json
 
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ResearchRecord, ResearchSink } from "./types.js";
 
@@ -30,6 +30,7 @@ export function indexRow(rec: StoredResearchRecord, file: string): Record<string
     posted: rec.posted,
     live: rec.live,
     engineVersion: rec.engineVersion,
+    ...(rec.corpus ? { corpus: rec.corpus } : {}),
     status: o.status,
     ...(o.status === "ok"
       ? {
@@ -44,6 +45,24 @@ export function indexRow(rec: StoredResearchRecord, file: string): Record<string
       : { kind: o.kind }),
     file,
   };
+}
+
+/** Index rows written so far; a torn last line (crash mid-append) is ignored. */
+export async function readIndex(dir: string): Promise<{ itemId: string; arm: string; status: string; kind?: string }[]> {
+  const text = await readFile(join(dir, "index.jsonl"), "utf8").catch((err: NodeJS.ErrnoException) => {
+    if (err.code === "ENOENT") return "";
+    throw err;
+  });
+  const rows = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      rows.push(JSON.parse(line));
+    } catch {
+      // skip
+    }
+  }
+  return rows;
 }
 
 export function createFileResearchSink(opts: { dir: string; installationId: string; now?: () => Date }): ResearchSink {

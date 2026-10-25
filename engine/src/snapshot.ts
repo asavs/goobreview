@@ -49,6 +49,19 @@ export async function prepareSnapshot(
   workDir: string,
   log: Logger,
 ): Promise<Snapshot> {
+  return snapshotFromArchive((dest) => gh.downloadTarball(repo, sha, dest), sha, workDir, log);
+}
+
+/**
+ * Builds a snapshot from any gzipped tarball with one top-level directory,
+ * so trees that never came from GitHub (eval corpora) get the same hardening.
+ */
+export async function snapshotFromArchive(
+  writeArchive: (destFile: string) => Promise<void>,
+  sha: string,
+  workDir: string,
+  log: Logger,
+): Promise<Snapshot> {
   if (!/^[0-9a-f]{7,64}$/i.test(sha)) throw new SnapshotError(`refusing unexpected head SHA: ${sha}`);
   const parent = snapshotsDir(workDir);
   await mkdir(parent, { recursive: true });
@@ -65,7 +78,7 @@ export async function prepareSnapshot(
   let bytes = 0;
 
   try {
-    await gh.downloadTarball(repo, sha, archive);
+    await writeArchive(archive);
     await tar.x({
       file: archive,
       cwd: root,
