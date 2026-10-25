@@ -297,3 +297,12 @@ describe("executor: steer logged on delivery", () => {
     expect(res.transcript.filter((e) => e.type === "steer")).toEqual([]);
   });
 });
+
+describe("executor: thinking used", () => {
+  it("reports the requested level and what pi sent", async () => {
+    const { fauxes, executor, input } = setup("faux-a");
+    fauxes[0]!.setResponses([submit(GOOD)]);
+    const res = await executor.run(input());
+    expect(res.thinking).toEqual({ requested: "off", sent: "off" });
+  });
+});

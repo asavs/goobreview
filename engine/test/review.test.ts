@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BODY_MAX_CHARS, ciFailureReview, planReview, type PlanContext } from "../src/review.js";
+import { BODY_MAX_CHARS, ciFailureReview, planReview, thinkingNote, type PlanContext } from "../src/review.js";
 import type { EngineConfig, Finding, PullRequestFacts, ReviewForm, ReviewThread } from "../src/types.js";
 
 // a.ts: hunk 0 covers RIGHT 1-4 (2 added), hunk 1 covers RIGHT 20-22 (21 added).
@@ -210,5 +210,16 @@ describe("ciFailureReview", () => {
     expect(p.body).toContain("CI is failing on this commit. Fix the failing job(s) and push a new commit - I will re-review on the new head SHA.");
     expect(p.body).toContain("```\ntest: failure\nlint: failing\n```");
     expect(p.body).toContain("no model call was made");
+  });
+});
+
+describe("thinkingNote", () => {
+  it("names the level that ran, and the request when they differ", () => {
+    expect(thinkingNote(undefined)).toBe("");
+    expect(thinkingNote({ requested: "medium", sent: "medium", provider: "medium" })).toBe(" (thinking medium)");
+    // pi rounds an unsupported level to the nearest one the model has (DeepSeek V4 has no medium).
+    expect(thinkingNote({ requested: "medium", sent: "high" })).toBe(" (thinking high; asked medium)");
+    // A provider-reported level wins over what pi sent.
+    expect(thinkingNote({ requested: "high", sent: "high", provider: "xhigh" })).toBe(" (thinking xhigh; asked high)");
   });
 });

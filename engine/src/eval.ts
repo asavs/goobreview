@@ -338,7 +338,7 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
           try {
             prompt = deps.composePrompt({ ...input, policy: { ...config.defaults, personality: arm.personality } });
             const result = await runArm(deps.executor, { prompt, snapshot, models: [arm.model], limits: config.limits });
-            const p = deps.planReview(result.form, facts, { config, model: result.model, elapsedMs: result.elapsedMs, engineVersion });
+            const p = deps.planReview(result.form, facts, { config, model: result.model, ...(result.thinking ? { thinking: result.thinking } : {}), elapsedMs: result.elapsedMs, engineVersion });
             outcome = { status: "ok", result, event: p.payload.event, body: p.payload.body, comments: p.payload.comments, notes: p.notes };
             summary.ok++;
             log.info(`eval: ${itemId} ${arm.name} -> ${p.payload.event}`, { usage: result.usage, elapsedMs: result.elapsedMs });
