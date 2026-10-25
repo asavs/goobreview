@@ -6,13 +6,14 @@
 // without one; pi-telemetry ships contracts only, no exporter. We never pass
 // one, so the only network peer is the configured model provider.
 
-import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core";
+import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type AssistantMessage, type Model, type Models, type Api } from "@earendil-works/pi-ai";
 import { createModelsCollection, describeCredential } from "./credentials.js";
 import { userMessage } from "./prompt.js";
 import { createReadOnlyTools } from "./tools.js";
 import {
   ExecutorError,
+  type ComposedPrompt,
   type Executor,
   type ExecutorErrorKind,
   type ExecutorInput,
@@ -211,7 +212,7 @@ async function runOne(
   input.signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
-    await Promise.race([prompt(agent, userMessage(input.prompt), transcript), stopped]);
+    await Promise.race([prompt(agent, openingMessages(input.prompt), transcript), stopped]);
     if (!form) {
       check(agent, transcript, timedOut, input.signal);
       phase = "nudge";
@@ -229,9 +230,33 @@ async function runOne(
   throw new ExecutorError("no-review", "model stopped without calling submit_review", transcript);
 }
 
-async function prompt(agent: Agent, text: string, transcript: TranscriptEntry[]): Promise<void> {
+/** Marks persona turns seeded as earlier conversation: never a model response, never counted as one. */
+export const SEEDED = "goobreview-persona";
+
+/** The persona's seeded turns, then the PR data wrapped in the persona: one batch, ending on the user. */
+export function openingMessages(p: ComposedPrompt, now = Date.now()): AgentMessage[] {
+  const turns: AgentMessage[] = p.persona.history.map((t) =>
+    t.role === "user"
+      ? { role: "user", content: t.text, timestamp: now }
+      : {
+          role: "assistant",
+          content: [{ type: "text", text: t.text }],
+          api: SEEDED,
+          provider: SEEDED,
+          model: SEEDED,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: "stop",
+          timestamp: now,
+        },
+  );
+  return [...turns, { role: "user", content: userMessage(p), timestamp: now }];
+}
+
+const seeded = (m: AssistantMessage): boolean => m.provider === SEEDED;
+
+async function prompt(agent: Agent, input: string | AgentMessage[], transcript: TranscriptEntry[]): Promise<void> {
   try {
-    await agent.prompt(text);
+    await (typeof input === "string" ? agent.prompt(input) : agent.prompt(input));
   } catch (err) {
     // Agent normally reports failures on the last assistant message; a throw
     // here is a setup failure, classified the same way.
@@ -251,7 +276,7 @@ function lastAssistant(agent: Agent): AssistantMessage | undefined {
   const msgs = agent.state.messages;
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i] as { role?: string };
-    if (m.role === "assistant") return m as AssistantMessage;
+    if (m.role === "assistant" && !seeded(m as AssistantMessage)) return m as AssistantMessage;
   }
   return undefined;
 }
@@ -371,6 +396,7 @@ function record(
       const msg = event.message as { role?: string };
       if (msg.role !== "assistant") break;
       const m = msg as AssistantMessage;
+      if (seeded(m)) break;
       const u = m.usage;
       usage.requests += 1;
       usage.inputTokens += (u?.input ?? 0) + (u?.cacheRead ?? 0) + (u?.cacheWrite ?? 0);

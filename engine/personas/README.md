@@ -19,11 +19,14 @@ produces.
 | Slot | Where the text lands |
 |---|---|
 | `role` | top of the system prompt, before the reviewer contract |
+| `history.user`, `history.assistant` | one earlier conversation turn each, before the pull request message; the model reads an assistant turn as something it already said |
 | `before` | the user message, before the pull request data |
 | `after` | the user message, after the pull request data: the last words the model reads |
 
 Pieces in one slot are joined by newlines, in the order `persona.json` lists
-them; a recipe is a set, so its order does not matter. The reviewer contract,
+them; a recipe is a set, so its order does not matter. History pieces are one
+turn each, in that same order, and must alternate, opening with the user and
+ending on the assistant, since the pull request message comes next. The reviewer contract,
 tools, output rules and trust boundary are not pieces and are always on. The
 pull request data is identical for every persona.
 

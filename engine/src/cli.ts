@@ -202,7 +202,8 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env,
       }
       const composed = await renderPrompt({ gh, config, log, prepareSnapshot, findGuidanceFiles, composePrompt }, repo!, pr!, persona);
       const pieces = composed.persona.pieces.map((p) => `${p.id} (${p.slot})`).join(", ") || "(no pieces)";
-      process.stdout.write(`=== persona ===\n${composed.persona.spec}: ${pieces}\n\n=== system ===\n${composed.system}\n\n=== user ===\n${userMessage(composed)}\n`);
+      const history = composed.persona.history.map((t) => `=== ${t.role} (persona) ===\n${t.text}\n\n`).join("");
+      process.stdout.write(`=== persona ===\n${composed.persona.spec}: ${pieces}\n\n=== system ===\n${composed.system}\n\n${history}=== user ===\n${userMessage(composed)}\n`);
       if (composed.omissions.length > 0) process.stdout.write(`\n=== omissions ===\n${composed.omissions.join("\n")}\n`);
       log.info("rendered prompt", { bytes: composed.bytes, omissions: composed.omissions.length });
       return 0;

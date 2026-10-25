@@ -123,3 +123,22 @@ describe("persona files", () => {
     expect(() => resolvePersona(name, root)).toThrow(err);
   });
 });
+
+describe("history turns", () => {
+  it("angry:turns seeds the outburst as the model's own earlier turn, leaving the PR data unwrapped", () => {
+    const p = composePrompt(input({ policy: { ...policy, personality: "angry:turns" } }));
+    expect(p.persona.history.map((t) => t.role)).toEqual(["user", "assistant"]);
+    expect(p.persona.history[1]!.text).toMatch(/^okay\.\. deep breaths\.\.\. .*Right\. Fine\. Show me\.$/s);
+    expect(userMessage(p)).toBe(p.user);
+    expect(p.user).toBe(composePrompt(input()).user);
+    const historyBytes = p.persona.history.reduce((n, t) => n + Buffer.byteLength(t.text), 0);
+    expect(p.bytes).toBe(Buffer.byteLength(p.system) + historyBytes + Buffer.byteLength(p.user));
+  });
+
+  it.each([
+    ["angry:turns-ding", /starting with user/],
+    ["angry:turns-my_outburst", /ending with assistant \(got user\)/],
+  ])("rejects %s: turns must alternate and end on the assistant", (spec, err) => {
+    expect(() => resolvePersona(spec)).toThrow(err);
+  });
+});

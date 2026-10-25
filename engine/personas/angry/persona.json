@@ -1,12 +1,15 @@
 {
   "pieces": {
     "role": "role",
+    "ding": "history.user",
+    "my_outburst": "history.assistant",
     "outburst": "before",
     "speaker": "before",
     "sigh": "after"
   },
   "recipes": {
-    "v1": ["role", "outburst", "speaker", "sigh"]
+    "v1": ["role", "outburst", "speaker", "sigh"],
+    "turns": ["role", "ding", "my_outburst"]
   },
   "default": "v1"
 }
