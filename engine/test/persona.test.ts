@@ -209,7 +209,7 @@ describe("angry:scene", () => {
     try {
       mkdirSync(path.join(dir, "m"));
       writeFileSync(path.join(dir, "m", "persona.json"), JSON.stringify({ pieces: { u: "history.user", a: "history.assistant", more: "history.assistant" }, recipes: { x: ["u", "a"] }, default: "x" }));
-      for (const [id, text] of [["u", "hi"], ["a", "Show me."], ["more", "Now."]]) writeFileSync(path.join(dir, "m", `${id}.md`), text);
+      for (const [id, text] of [["u", "hi"], ["a", "Show me."], ["more", "Now."]] as const) writeFileSync(path.join(dir, "m", `${id}.md`), text);
       expect(historyTurns(resolvePersona("m:x+more", dir))).toEqual([
         { role: "user", text: "hi" },
         { role: "assistant", text: "Show me.\nNow." },
