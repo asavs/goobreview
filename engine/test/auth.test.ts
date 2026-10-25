@@ -91,6 +91,28 @@ describe("credential description", () => {
     expect(text).toContain("2. openai/no-such-model  unknown model");
     expect(text).not.toContain("sk-VALUE");
   });
+
+  it("status lists every stored credential by provider, even one no configured model uses", async () => {
+    const file = path.join(fresh(), "auth.json");
+    writeFileSync(file, JSON.stringify({ openai: { type: "api_key", key: "sk-A" }, openrouter: { type: "api_key", key: "sk-or-B" } }));
+    const models = createModelsCollection({ credentialsFile: file });
+    const openaiModel = models.getModels("openai")[0]!;
+    const { io, lines } = scriptedIO([]);
+    const chain = [{ provider: "openai", id: openaiModel.id, thinking: "low" as const }];
+    await authStatus(models, chain, file, io);
+    expect(lines).toContain("stored credentials:");
+    expect(lines).toContain(`  openai  API key; used by openai/${openaiModel.id}`);
+    expect(lines).toContain("  openrouter  API key; used by no configured model");
+
+    // Once a research arm uses it, the arm model is listed and the credential names it.
+    const arm = { provider: "openrouter", id: "deepseek/deepseek-v4-pro", thinking: "high" as const };
+    lines.length = 0;
+    await authStatus(models, chain, file, io, [chain[0]!, arm]);
+    expect(lines).toContain("research arm models (not in the chain):");
+    expect(lines.some((l) => l.startsWith("  1. openrouter/deepseek/deepseek-v4-pro  ready (API key"))).toBe(true);
+    expect(lines).toContain("  openrouter  API key; used by openrouter/deepseek/deepseek-v4-pro");
+    expect(lines.join("\n")).not.toMatch(/sk-/);
+  });
 });
 
 describe("credentials paths", () => {
