@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/config.js";
 import { listCorpus, parseUnifiedDiff, runEval, type EvalDeps } from "../src/eval.js";
+import { promptFingerprint } from "../src/prompt.js";
 import { ExecutorError, type EngineConfig, type ExecutorInput, type ExecutorResult, type ResearchRecord } from "../src/types.js";
 
 const DIFF = `--- a/pkg/calc.py
@@ -128,10 +129,11 @@ describe("runEval", () => {
   });
 
   it("resumes from the index, retrying only quota failures", async () => {
+    const fp = (i: number) => promptFingerprint({ ...config.defaults, personality: arms[i]!.personality }, config.budgets);
     const done = [
-      ...Array.from({ length: 2 }, () => ({ itemId: "eval:corpus/calc-L2-boundary/clean", arm: arms[0]!.name, status: "ok" })),
-      { itemId: "eval:corpus/calc-L2-boundary/clean", arm: arms[1]!.name, status: "failed", kind: "provider" },
-      { itemId: "eval:corpus/calc-L2-boundary/clean", arm: arms[2]!.name, status: "failed", kind: "quota" },
+      ...Array.from({ length: 2 }, () => ({ itemId: "eval:corpus/calc-L2-boundary/clean", arm: arms[0]!.name, status: "ok", fingerprint: fp(0) })),
+      { itemId: "eval:corpus/calc-L2-boundary/clean", arm: arms[1]!.name, status: "failed", kind: "provider", fingerprint: fp(1) },
+      { itemId: "eval:corpus/calc-L2-boundary/clean", arm: arms[2]!.name, status: "failed", kind: "quota", fingerprint: fp(2) },
     ];
     const s = await runEval(deps(), { ...opts(), limit: 1, done });
     expect(s).toMatchObject({ resumed: 3, runs: 13 });
@@ -139,6 +141,21 @@ describe("runEval", () => {
     expect(clean.filter((a) => a === arms[0]!.name)).toHaveLength(0);
     expect(clean.filter((a) => a === arms[1]!.name)).toHaveLength(1);
     expect(clean.filter((a) => a === arms[2]!.name)).toHaveLength(2);
+  });
+
+  it("counts a run only toward its own series: an edited persona or contract runs again", async () => {
+    const fp = promptFingerprint({ ...config.defaults, personality: arms[0]!.personality }, config.budgets);
+    const item = "eval:corpus/calc-L2-boundary/clean";
+    const done = [
+      { itemId: item, arm: arms[0]!.name, status: "ok", fingerprint: fp },
+      { itemId: item, arm: arms[0]!.name, status: "ok", fingerprint: { ...fp, persona: "edited-persona0" } },
+      { itemId: item, arm: arms[0]!.name, status: "ok", fingerprint: { ...fp, contract: "edited-contract" } },
+      { itemId: item, arm: arms[0]!.name, status: "ok" },
+    ];
+    const s = await runEval(deps(), { ...opts(), limit: 1, done });
+    expect(s.resumed).toBe(1);
+    expect(records.filter((r) => r.itemId === item && r.arm.name === arms[0]!.name)).toHaveLength(1);
+    expect(records.every((r) => r.fingerprint !== null && r.fingerprint.contract.length === 16)).toBe(true);
   });
 
   it("stops using a model once it runs out of quota", async () => {
@@ -156,7 +173,7 @@ describe("runEval", () => {
     const s = await runEval(deps(), { ...opts(), limit: 1, repeats: 1 });
     expect(s.incomplete).toBe(0);
     run.mockRejectedValueOnce(new ExecutorError("quota", "usage limit"));
-    const done = records.map((r) => ({ itemId: r.itemId, arm: r.arm.name, status: r.outcome.status })).slice(0, -1);
+    const done = records.map((r) => ({ itemId: r.itemId, arm: r.arm.name, status: r.outcome.status, fingerprint: r.fingerprint })).slice(0, -1);
     records = [];
     const again = await runEval(deps(), { ...opts(), limit: 1, repeats: 1, done });
     expect(again).toMatchObject({ runs: 1, failed: 1, skippedQuota: 0, incomplete: 1 });

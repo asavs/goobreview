@@ -7,6 +7,7 @@ import { chmod, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { evaluateCi } from "./ci.js";
 import { armName, isAllowlisted, modelName, policyFor } from "./config.js";
+import { fingerprintOrNull } from "./prompt.js";
 import { decide, isSelf, nextState, type StateEvent } from "./decide.js";
 import { classifyProviderError } from "./executor.js";
 import {
@@ -469,6 +470,7 @@ async function captureResearch(
       arm,
       posted: isPosted,
       ...(isPosted && posted.reviewUrl ? { reviewUrl: posted.reviewUrl } : {}),
+      fingerprint: fingerprintOrNull({ ...promptInput.policy, personality: arm.personality }, promptInput.budgets),
       prompt,
       outcome,
     };

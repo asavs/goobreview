@@ -169,7 +169,12 @@ reviewed head yields one `ResearchRecord` (schema v2) per arm:
   own arm. Every other arm runs unposted on the same snapshot and the same
   PR data; only the persona differs. Arm names use the canonical spec
   (`angry:v1@openai/...`), and each record's prompt stores the persona's
-  pieces with a SHA-256 of each, so an edited line starts a new series.
+  pieces with a SHA-256 of each.
+- A series is an arm name plus a `fingerprint` (`promptFingerprint`): short
+  SHA-256s of the shared system prompt (`contract`) and of the persona's texts
+  and steer schedule (`persona`), computed without the PR. Every record and
+  index row carries it. Editing a piece or the contract changes it, so resume
+  and scoring never blend the new text into the old series under one arm name.
 - Arms run after the posted review is out, so capture never delays or
   changes it. A head whose posted review fails or is superseded runs no arms;
   its retry does.
@@ -200,7 +205,9 @@ label.json}`) with no GitHub:
 - Arms interleave within each repeat, so a model running out of quota part-way
   leaves balanced cells. A quota failure stops that model for the rest of the
   invocation; rerunning resumes from `index.jsonl`, retrying quota failures
-  and nothing else. The summary's `incomplete` counts every run still owed
+  and nothing else. A prior run counts only toward its own series (item, arm
+  and fingerprint), so after an edit every cell runs again; rows from before
+  fingerprints existed match no series. The summary's `incomplete` counts every run still owed
   (quota failures and skips, and all pending runs of a variant that could not
   be prepared); exit 1 whenever it is non-zero.
 - Records go to the same `research.dir`, marked `live: false`, item ids

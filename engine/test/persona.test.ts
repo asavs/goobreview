@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { PersonaError, resolvePersona, slotText } from "../src/persona.js";
-import { PromptBudgetError, composePrompt, userMessage } from "../src/prompt.js";
+import { PromptBudgetError, composePrompt, promptFingerprint, userMessage } from "../src/prompt.js";
 import { budgets, input, policy } from "./fixtures/prompt-input.js";
 
 // v1 (v2.3.0) scripts/reviewer/lib/prompt.sh and config/personalities, verbatim.
@@ -223,5 +223,17 @@ describe("ablations", () => {
     // Scene only: the control's system prompt, the scene's turns.
     expect(sceneOnly.system).toBe(control.system);
     expect(sceneOnly.persona.history).toHaveLength(4);
+  });
+});
+
+describe("promptFingerprint", () => {
+  it("separates contract from persona, and changes with either", () => {
+    const control = promptFingerprint(policy, budgets);
+    const angry = promptFingerprint({ ...policy, personality: "angry:scene" }, budgets);
+    expect(angry.contract).toBe(control.contract);
+    expect(angry.persona).not.toBe(control.persona);
+    expect(promptFingerprint({ ...policy, personality: "angry:scene_dings" }, budgets).persona).not.toBe(angry.persona);
+    expect(promptFingerprint(policy, { ...budgets, suggestionMaxLines: 3 }).contract).not.toBe(control.contract);
+    expect(promptFingerprint({ ...policy, personality: "none" }, budgets)).toEqual(control);
   });
 });

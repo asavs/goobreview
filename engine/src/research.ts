@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ResearchRecord, ResearchSink } from "./types.js";
+import type { PromptFingerprint, ResearchRecord, ResearchSink } from "./types.js";
 
 export interface StoredResearchRecord extends ResearchRecord {
   recordId: string;
@@ -30,6 +30,7 @@ export function indexRow(rec: StoredResearchRecord, file: string): Record<string
     posted: rec.posted,
     live: rec.live,
     engineVersion: rec.engineVersion,
+    fingerprint: rec.fingerprint,
     ...(rec.corpus ? { corpus: rec.corpus } : {}),
     status: o.status,
     ...(o.status === "ok"
@@ -47,8 +48,17 @@ export function indexRow(rec: StoredResearchRecord, file: string): Record<string
   };
 }
 
+/** The index fields resume reads. Rows written before fingerprints existed have none, so they match no current series. */
+export interface IndexedRun {
+  itemId: string;
+  arm: string;
+  status: string;
+  kind?: string;
+  fingerprint?: PromptFingerprint | null;
+}
+
 /** Index rows written so far; a torn last line (crash mid-append) is ignored. */
-export async function readIndex(dir: string): Promise<{ itemId: string; arm: string; status: string; kind?: string }[]> {
+export async function readIndex(dir: string): Promise<IndexedRun[]> {
   const text = await readFile(join(dir, "index.jsonl"), "utf8").catch((err: NodeJS.ErrnoException) => {
     if (err.code === "ENOENT") return "";
     throw err;
