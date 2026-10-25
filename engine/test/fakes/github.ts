@@ -56,6 +56,8 @@ export class FakeGitHub implements GitHubPort {
   writes: Write[] = [];
   /** Method names that should throw. */
   failing = new Set<keyof GitHubPort>();
+  /** Mimic the real adapter without checks:write: resolve -1 and store nothing. */
+  checkRunsForbidden = false;
   private nextId = 100;
 
   constructor(...prs: PullRequestFacts[]) {
@@ -107,6 +109,7 @@ export class FakeGitHub implements GitHubPort {
   }
   async upsertEngineCheckRun(repo: RepoRef, sha: string, update: CheckRunUpdate): Promise<number> {
     this.guard("upsertEngineCheckRun");
+    if (this.checkRunsForbidden) return -1;
     this.writes.push({ op: "checkRun", repo: repoName(repo), sha, update: structuredClone(update) });
     const key = `${repoName(repo)}@${sha}`;
     const id = this.engineRuns.get(key)?.id ?? this.nextId++;
