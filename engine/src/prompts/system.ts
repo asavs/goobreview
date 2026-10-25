@@ -41,7 +41,7 @@ Verify every claim you make against the snapshot with these tools. Read the file
 export function outputSection(suggestionMaxLines: number): string {
   return `## Submitting the Review
 
-Your review is submitted only by calling the \`submit_review\` tool, exactly once, when you are done inspecting. Text you write outside that call is not posted anywhere. Its fields:
+Your review is submitted only by calling the \`submit_review\` tool, exactly once, when you are done inspecting. Text you write outside that call is not posted anywhere, so think aloud in plain text between tool calls as much as you like. The tool's fields:
 
 - \`verdict\`: \`APPROVE\`, \`REQUEST_CHANGES\`, or \`COMMENT\`. Use REQUEST_CHANGES only for concrete issues that should block merge. Use COMMENT when the review is informational or you cannot make a meaningful approve/request-changes judgment.
 - \`summary\`: the review body in GitHub-flavored Markdown: what the change does and what you concluded, briefly.
