@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { PersonaError, resolvePersona, slotText } from "../src/persona.js";
+import { PersonaError, historyTurns, resolvePersona, slotText } from "../src/persona.js";
 import { PromptBudgetError, composePrompt, promptFingerprint, userMessage } from "../src/prompt.js";
 import { budgets, input, policy } from "./fixtures/prompt-input.js";
 
@@ -204,10 +204,19 @@ describe("angry:scene", () => {
     expect(userMessage(p)).toBe(composePrompt(input()).user);
   });
 
-  it("merges consecutive same-speaker pieces into one turn, so +vow extends the last line", () => {
-    const p = composePrompt(input({ policy: { ...policy, personality: "angry:scene+vow" } }));
-    expect(p.persona.history).toHaveLength(4);
-    expect(p.persona.history[3]!.text.endsWith("Right. Fine. Show me.\nAnd it had better do what it says it does.")).toBe(true);
+  it("merges consecutive same-speaker pieces into one turn, so an optional piece extends a line", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "goob-merge-"));
+    try {
+      mkdirSync(path.join(dir, "m"));
+      writeFileSync(path.join(dir, "m", "persona.json"), JSON.stringify({ pieces: { u: "history.user", a: "history.assistant", more: "history.assistant" }, recipes: { x: ["u", "a"] }, default: "x" }));
+      for (const [id, text] of [["u", "hi"], ["a", "Show me."], ["more", "Now."]]) writeFileSync(path.join(dir, "m", `${id}.md`), text);
+      expect(historyTurns(resolvePersona("m:x+more", dir))).toEqual([
+        { role: "user", text: "hi" },
+        { role: "assistant", text: "Show me.\nNow." },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
