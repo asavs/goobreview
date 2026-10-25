@@ -3,7 +3,7 @@
 // blockquoted or fenced, so it cannot fake headings or omission markers.
 
 import { matchesGitPattern } from "./snapshot.js";
-import { truncateUtf8 } from "./redact.js";
+import { redact, redactPatch, truncateUtf8 } from "./redact.js";
 import { PERSONALITY_TEXT } from "./prompts/personalities.js";
 import {
   guidanceSection,
@@ -47,10 +47,29 @@ const CHECK_RUNS_SHOWN = 50;
 export function composePrompt(input: PromptInput): ComposedPrompt {
   const system = composeSystem(input);
   const omissions: string[] = [];
-  const user = composeUser(input, omissions);
+  // Redact before rendering and capping, so a cap cannot split a secret into
+  // an unrecognisable prefix, and the budget measures what is actually sent.
+  const user = composeUser({ ...input, facts: redactFacts(input.facts) }, omissions);
   const bytes = Buffer.byteLength(system, "utf8") + Buffer.byteLength(user, "utf8");
   if (bytes > input.budgets.maxPromptBytes) throw new PromptBudgetError(bytes, input.budgets.maxPromptBytes);
   return { system, user, omissions, bytes };
+}
+
+/** PR-authored and GitHub-supplied text with recognisable secrets replaced; tools redact the snapshot side. */
+export function redactFacts(f: PullRequestFacts): PullRequestFacts {
+  return {
+    ...f,
+    title: redact(f.title),
+    body: redact(f.body),
+    headRef: redact(f.headRef),
+    baseRef: redact(f.baseRef),
+    author: { ...f.author, login: redact(f.author.login) },
+    commits: f.commits.map((c) => ({ ...c, subject: redact(c.subject) })),
+    files: f.files.map((x) => (x.patch === undefined ? x : { ...x, patch: redactPatch(x.patch) })),
+    botReviews: f.botReviews.map((r) => ({ ...r, body: redact(r.body) })),
+    botThreads: f.botThreads.map((t) => ({ ...t, firstCommentBody: redact(t.firstCommentBody) })),
+    checkRuns: f.checkRuns.map((r) => ({ ...r, name: redact(r.name) })),
+  };
 }
 
 function composeSystem(input: PromptInput): string {

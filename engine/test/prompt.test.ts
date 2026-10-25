@@ -222,3 +222,35 @@ describe("numberPatch", () => {
     expect([...shown].sort((a, b) => a - b)).toEqual([...parsePatch(patch).right].sort((a, b) => a - b));
   });
 });
+
+describe("composePrompt: secret redaction", () => {
+  const TOKEN = "ghp_" + "A".repeat(36);
+  const KEY = ["-----BEGIN PRIVATE KEY-----", "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC", "c2VjcmV0LWtleS1ib2R5LWxpbmU=", "-----END PRIVATE KEY-----"];
+
+  it("redacts secrets in patches without shifting line numbers", () => {
+    const patch = ["@@ -1,2 +1,7 @@", " const a = 1;", `+const token = "${TOKEN}";`, ...KEY.map((l) => `+${l}`), "+const b = 2;", " const c = 3;"].join("\n");
+    const file: ChangedFile = { path: "src/a.ts", status: "modified", additions: 6, deletions: 0, patch };
+    const p = composePrompt(input({ facts: facts({ files: [file] }) }));
+    expect(p.user).not.toContain(TOKEN);
+    expect(p.user).not.toContain("c2VjcmV0");
+    expect(p.user).not.toContain("MIIEvQ");
+    expect(p.user).toContain("[REDACTED:github-token]");
+    // Same numbering as the unredacted patch: the line after the key block keeps its RIGHT-side number.
+    const plain = numberPatch(patch);
+    const after = (s: string) => lines(s).find((l) => l.includes("const b = 2;"));
+    expect(after(p.user)).toBe(after(plain));
+    expect(lines(p.user).filter((l) => l.includes("[REDACTED:private-key]"))).toHaveLength(4);
+  });
+
+  it("redacts secrets in titles, descriptions, commit subjects and branch names", () => {
+    const p = composePrompt(
+      input({
+        facts: facts({ title: `fix ${TOKEN}`, body: `OPENAI_API_KEY=sk-${"b".repeat(40)}`, headRef: `x-${TOKEN}`, commits: [{ sha: "1".repeat(40), subject: `add ${TOKEN}` }] }),
+        policy: { ...policy, include: { author: true, description: true, commitSubjects: true } },
+      }),
+    );
+    expect(p.user).not.toContain(TOKEN);
+    expect(p.user).not.toContain("b".repeat(40));
+    expect(p.user.match(/\[REDACTED:/g)!.length).toBeGreaterThanOrEqual(4);
+  });
+});

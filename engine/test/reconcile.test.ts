@@ -223,6 +223,13 @@ describe("reconcilePull", () => {
     expect(await reconcilePull(deps(), REPO, 7)).toMatchObject({ action: "posted" });
   });
 
+  it("settling fails open when the App cannot write check runs (adapter resolves -1)", async () => {
+    const prior = { id: 1, commitId: "c".repeat(40), state: "COMMENTED", body: "", submittedAt: NOW.toISOString() };
+    gh.addPull(makeFacts({ botReviews: [prior] }));
+    gh.checkRunsForbidden = true;
+    expect(await reconcilePull(deps(), REPO, 7)).toMatchObject({ action: "posted" });
+  });
+
   it("quota: confused reaction, neutral check run, short backoff, ladder untouched", async () => {
     executorRun.mockRejectedValueOnce(new ExecutorError("quota", "429"));
     const out = await reconcilePull(deps(), REPO, 7);
