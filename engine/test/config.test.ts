@@ -32,7 +32,7 @@ describe("loadConfig", () => {
     expect(c.defaults).toEqual({
       requiredChecks: [],
       personality: "none:plain",
-      include: { author: false, description: false, commitSubjects: true },
+      include: { author: false, description: true, commitSubjects: true },
     });
     expect(c).toMatchObject({ checkRunSignal: true, autoResolveBotThreads: false, postTrace: false, dryRun: false });
     expect(c.workDir).toBe(join(tmpdir(), "goobreview"));
@@ -52,7 +52,7 @@ describe("loadConfig", () => {
     expect(policy).toEqual({
       requiredChecks: ["test"],
       personality: "angry:v1",
-      include: { author: true, description: false, commitSubjects: false },
+      include: { author: true, description: true, commitSubjects: false },
     });
     expect(policyFor(c, { owner: "x", repo: "y" }).personality).toBe("none:plain");
     expect(isAllowlisted(c, { owner: "O", repo: "R" })).toBe(true);
