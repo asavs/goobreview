@@ -468,7 +468,8 @@ export interface ResearchRecord {
   posted: boolean;
   reviewUrl?: string;
   /** Set for offline eval runs; scoring joins this to the corpus label. */
-  corpus?: { name: string; item: string; variant: string };
+  /** `claims`: short SHA-256 of the variant's pr.json, null without one; scoring keeps the two conditions apart. */
+  corpus?: { name: string; item: string; variant: string; claims: string | null };
   /** Which series this run belongs to; null only if the arm's persona could not be resolved. */
   fingerprint: PromptFingerprint | null;
   /** Persona text is in `prompt.persona` (and starts `system`); consumers that blind must strip it. Null when composing it failed. */

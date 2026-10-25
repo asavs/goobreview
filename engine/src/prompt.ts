@@ -112,9 +112,9 @@ export function fingerprintOrNull(policy: RepoPolicy, budgets: Budgets): PromptF
   }
 }
 
-/** The resume key of one run: the same item, arm and fingerprint is the same series. */
-export const seriesKey = (itemId: string, arm: string, fp: PromptFingerprint | null | undefined): string =>
-  [itemId, arm, fp?.contract ?? "", fp?.persona ?? ""].join("\0");
+/** The resume key of one run: the same item, arm, fingerprint and eval claims is the same series. */
+export const seriesKey = (itemId: string, arm: string, fp: PromptFingerprint | null | undefined, claims?: string | null): string =>
+  [itemId, arm, fp?.contract ?? "", fp?.persona ?? "", claims ?? ""].join("\0");
 
 /**
  * The user message the model receives: the persona's `before` text on the

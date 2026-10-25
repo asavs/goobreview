@@ -224,6 +224,26 @@ describe("runEval", () => {
     expect(s).toMatchObject({ unprepared: 1, incomplete: 4 });
   });
 
+  it("treats claims as part of a run's identity: adding pr.json later is a new series", async () => {
+    await runEval(deps(), { ...opts(), limit: 1, repeats: 1 });
+    expect(records.every((r) => r.corpus?.claims === null)).toBe(true);
+    const done = records.map((r) => ({ itemId: r.itemId, arm: r.arm.name, status: r.outcome.status, fingerprint: r.fingerprint, corpus: r.corpus }));
+    for (const v of ["mutant", "clean"]) writeFileSync(path.join(root, "corpus", "calc-L2-boundary", v, "pr.json"), JSON.stringify({ title: "Tidy clamp" }));
+    records = [];
+    const s = await runEval(deps(), { ...opts(), limit: 1, repeats: 1, done });
+    expect(s).toMatchObject({ resumed: 0, runs: 8 });
+    const shas = new Set(records.map((r) => r.corpus?.claims));
+    expect(shas.size).toBe(1);
+    expect([...shas][0]).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("refuses an unreadable pr.json instead of running without the claim", async () => {
+    mkdirSync(path.join(root, "corpus", "calc-L2-inverted", "mutant", "pr.json"));
+    const s = await runEval(deps(), { ...opts(), repeats: 1 });
+    expect(s).toMatchObject({ unprepared: 1, incomplete: 4 });
+    expect(records.some((r) => r.itemId.endsWith("calc-L2-inverted/mutant"))).toBe(false);
+  });
+
   it("refuses to run without arms", async () => {
     config.research.arms = [];
     await expect(runEval(deps(), opts())).rejects.toThrow(/research\.arms/);

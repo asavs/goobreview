@@ -179,13 +179,18 @@ export interface VariantPrText {
   commits?: string[];
 }
 
-/** Reads `pr.json` beside the diff: undefined when absent, an error when malformed. */
-export async function readPrText(dir: string): Promise<VariantPrText | undefined> {
+/**
+ * Reads `pr.json` beside the diff, with a short SHA-256 of its bytes that
+ * becomes part of the run's identity. Undefined only when the file does not
+ * exist; any other read error, or a malformed file, throws.
+ */
+export async function readPrText(dir: string): Promise<{ pr: VariantPrText; sha: string } | undefined> {
   let raw: string;
   try {
     raw = await readFile(path.join(dir, "pr.json"), "utf8");
-  } catch {
-    return undefined;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw err;
   }
   const v = JSON.parse(raw) as Record<string, unknown>;
   const ok =
@@ -195,7 +200,7 @@ export async function readPrText(dir: string): Promise<VariantPrText | undefined
     (v.body === undefined || typeof v.body === "string") &&
     (v.commits === undefined || (Array.isArray(v.commits) && v.commits.length > 0 && v.commits.every((c) => typeof c === "string" && c.length > 0)));
   if (!ok) throw new Error("pr.json must be {title?: string, body?: string, commits?: non-empty string[]}");
-  return v as VariantPrText;
+  return { pr: v as VariantPrText, sha: createHash("sha256").update(raw).digest("hex").slice(0, 16) };
 }
 
 /**
@@ -252,7 +257,7 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
   const prior = new Map<string, number>();
   for (const r of opts.done ?? []) {
     if (r.status === "failed" && r.kind === "quota") continue;
-    const k = seriesKey(r.itemId, r.arm, r.fingerprint);
+    const k = seriesKey(r.itemId, r.arm, r.fingerprint, r.corpus?.claims);
     prior.set(k, (prior.get(k) ?? 0) + 1);
   }
 
@@ -271,8 +276,17 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
 
   for (const v of variants) {
     const itemId = `eval:${name}/${v.item}/${v.variant}`;
+    // The claims are part of the run's identity: adding or editing pr.json is a new series.
+    let claims: { pr: VariantPrText; sha: string } | undefined;
+    let claimsError: unknown;
+    try {
+      claims = await readPrText(v.dir);
+    } catch (err) {
+      claimsError = err;
+    }
+    const claimsSha = claims?.sha ?? null;
     const todo = arms.map((arm) => {
-      const have = Math.min(prior.get(seriesKey(itemId, arm.name, fingerprints.get(arm.name))) ?? 0, opts.repeats);
+      const have = Math.min(prior.get(seriesKey(itemId, arm.name, fingerprints.get(arm.name), claimsSha)) ?? 0, opts.repeats);
       summary.resumed += have;
       return { arm, left: opts.repeats - have };
     });
@@ -292,14 +306,11 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
     }
     const overlay = await filesUnder(path.join(v.dir, "snapshot"));
     const sha = await variantSha(v, diff, overlay);
-    let pr: VariantPrText | undefined;
-    try {
-      pr = await readPrText(v.dir);
-    } catch (err) {
-      unprepared("has an invalid pr.json", err);
+    if (claimsError !== undefined) {
+      unprepared("has an unreadable or invalid pr.json", claimsError);
       continue;
     }
-    const facts = syntheticFacts(name, files, sha, pr);
+    const facts = syntheticFacts(name, files, sha, claims?.pr);
     let snapshot: Snapshot;
     try {
       snapshot = await snapshotFromArchive((dest) => writeVariantArchive(opts.tree, v, overlay, config.workDir, dest), sha, config.workDir, log);
@@ -355,7 +366,7 @@ export async function runEval(deps: EvalDeps, opts: EvalOptions): Promise<EvalSu
             live: false,
             arm,
             posted: false,
-            corpus: { name, item: v.item, variant: v.variant },
+            corpus: { name, item: v.item, variant: v.variant, claims: claimsSha },
             fingerprint: fingerprints.get(arm.name) ?? null,
             prompt,
             outcome,

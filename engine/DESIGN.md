@@ -198,8 +198,11 @@ label.json}`) with no GitHub:
   head. The diff becomes a synthetic PR with no CI: titled `Update <path>`
   with no description, unless the variant has a `pr.json` (`{title?, body?,
   commits?}`) supplying the author's claims. A generator gives both twins of
-  an item the same claim, so its truth, not its wording, is what differs. A
-  malformed `pr.json` makes the variant unprepared.
+  an item the same claim, so its truth, not its wording, is what differs.
+  Records carry `corpus.claims` (a short SHA-256 of the file, null without
+  one) and resume keys on it, so adding or editing claims is a new series,
+  never a silent mix with runs made without them. A `pr.json` that is
+  malformed or unreadable (anything but absent) makes the variant unprepared.
 - Labels are never read; records carry `corpus: {name, item, variant}` and
   scoring joins them to `label.json` afterwards.
 - Arms interleave within each repeat, so a model running out of quota part-way
