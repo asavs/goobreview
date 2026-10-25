@@ -19,17 +19,28 @@ describe("built-in personas", () => {
     const p = composePrompt(input({ policy: { ...policy, personality: "angry" } }));
     expect(p.persona.spec).toBe("angry:v1");
     expect(p.persona.pieces.map((x) => `${x.id}:${x.slot}`)).toEqual(["role:role", "outburst:before", "speaker:before", "sigh:after"]);
-    expect(p.system.startsWith(`${V1_ROLE}\n\n## Reviewer Contract`)).toBe(true);
+    // The angry line is added above the shared role; v1's own angry arm lacked the shared role.
+    expect(p.system.startsWith(`${V1_ROLE}\n\n${V1_CONTROL}\n\n## Reviewer Contract`)).toBe(true);
     // v1: interruption + prefix + PR data, then a blank line, then the tail as the last bytes.
     expect(userMessage(p)).toBe(V1_INTERRUPTION + V1_PREFIX + p.user + V1_TAIL);
     expect(p.user.endsWith("\n")).toBe(true);
   });
 
-  it("none:plain is the control role and leaves the PR data unwrapped", () => {
+  it("none:plain has no pieces: the shared role, unchanged since v1, and the PR data unwrapped", () => {
     const p = composePrompt(input());
-    expect(p.persona).toMatchObject({ spec: "none:plain", role: V1_CONTROL, before: "", after: "" });
+    expect(p.persona).toMatchObject({ spec: "none:plain", pieces: [], role: "", before: "", after: "" });
     expect(p.system.startsWith(`${V1_CONTROL}\n\n## Reviewer Contract`)).toBe(true);
     expect(userMessage(p)).toBe(p.user);
+  });
+
+  it("gives every arm the same system prompt apart from the persona's role line", () => {
+    const control = composePrompt(input());
+    for (const spec of ["angry:v1", "angry:turns", "angry:thought"]) {
+      const angry = composePrompt(input({ policy: { ...policy, personality: spec } }));
+      expect(angry.system).toBe(`${V1_ROLE}\n\n${control.system}`);
+    }
+    // Without its role piece, an angry recipe's system prompt is the control's.
+    expect(composePrompt(input({ policy: { ...policy, personality: "angry:turns-role" } })).system).toBe(control.system);
   });
 
   it("keeps the PR data identical and persona text out of it", () => {
@@ -55,10 +66,11 @@ describe("built-in personas", () => {
     expect(slotText(p, "before")).toBe(V1_INTERRUPTION + "User:");
     expect(resolvePersona("angry").spec).toBe("angry:v1");
     expect(resolvePersona("angry:v1-speaker-outburst").spec).toBe("angry:v1-outburst-speaker");
-    // Every piece off: the system prompt starts at the contract.
-    const bare = composePrompt(input({ policy: { ...policy, personality: "none:plain-role" } }));
+    // Every piece off: exactly the control.
+    const bare = composePrompt(input({ policy: { ...policy, personality: "angry:v1-outburst-role-sigh-speaker" } }));
     expect(bare.persona.pieces).toEqual([]);
-    expect(bare.system.startsWith("## Reviewer Contract")).toBe(true);
+    expect(bare.system).toBe(composePrompt(input()).system);
+    expect(userMessage(bare)).toBe(bare.user);
   });
 });
 

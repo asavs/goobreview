@@ -1,9 +1,7 @@
 {
-  "pieces": {
-    "role": "role"
-  },
+  "pieces": {},
   "recipes": {
-    "plain": ["role"]
+    "plain": []
   },
   "default": "plain"
 }
