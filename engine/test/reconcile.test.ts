@@ -60,7 +60,7 @@ function deps(over: Partial<ReconcileDeps> = {}): ReconcileDeps {
       return { root, sha, generatedPatterns: [], symlinkStubs: [] };
     },
     findGuidanceFiles: async () => ["AGENTS.md"],
-    composePrompt: (i) => ({ system: "sys", user: `pr ${i.facts.number} ${i.guidanceFiles.join()}`, omissions: [], bytes: 10 }),
+    composePrompt: (i) => ({ system: `sys:${i.policy.personality}`, user: `pr ${i.facts.number} ${i.guidanceFiles.join()}`, omissions: [], bytes: 10 }),
     planReview: (form, facts) => ({
       payload: { commitId: facts.headSha, event: form.verdict, body: form.summary, comments: [] },
       threadActions: [
@@ -99,10 +99,98 @@ beforeEach(async () => {
 
 const engineState = () => gh.engineRuns.get(`o/r@${HEAD}`)?.state;
 
+describe("research arms", () => {
+  const google = { provider: "google", id: "m", thinking: "medium" as const };
+  const anthropic = { provider: "anthropic", id: "c", thinking: "medium" as const };
+  const grid = () =>
+    [google, anthropic].flatMap((model) =>
+      (["none", "angry"] as const).map((personality) => ({ name: `${personality}@${model.provider}/${model.id}:medium`, model, personality })),
+    );
+
+  beforeEach(() => {
+    config.research = { ...config.research, consent: true, arms: grid() };
+    config.models = [google];
+    executorRun.mockImplementation(async (i) => ({ ...ok(), model: i.models[0]! }));
+  });
+
+  it("fills the posted arm from the posted review and runs the other three unposted", async () => {
+    const out = await reconcilePull(deps(), REPO, 7);
+    expect(out).toMatchObject({ action: "posted", research: { recorded: 4, failed: 0 } });
+    expect(gh.ops().filter((o) => o === "review")).toHaveLength(1);
+    expect(executorRun).toHaveBeenCalledTimes(4);
+    // Arms run on one model each, with the arm's personality in the system prompt only.
+    const shadows = executorRun.mock.calls.slice(1).map(([i]) => ({ models: i.models, system: i.prompt.system, user: i.prompt.user }));
+    expect(shadows).toEqual([
+      { models: [google], system: "sys:angry", user: "pr 7 AGENTS.md" },
+      { models: [anthropic], system: "sys:none", user: "pr 7 AGENTS.md" },
+      { models: [anthropic], system: "sys:angry", user: "pr 7 AGENTS.md" },
+    ]);
+    expect(research.map((r) => [r.arm.name, r.posted])).toEqual([
+      ["none@google/m:medium", true],
+      ["angry@google/m:medium", false],
+      ["none@anthropic/c:medium", false],
+      ["angry@anthropic/c:medium", false],
+    ]);
+    expect(new Set(research.map((r) => r.itemId)).size).toBe(1);
+  });
+
+  it("records a failed arm as a row and leaves the posted review alone", async () => {
+    executorRun.mockImplementation(async (i) => {
+      if (i.models[0]!.provider === "anthropic" && i.prompt.system === "sys:angry") throw new ExecutorError("quota", "429", [{ t: "x", type: "model_failed" }]);
+      return { ...ok(), model: i.models[0]! };
+    });
+    const out = await reconcilePull(deps(), REPO, 7);
+    expect(out).toMatchObject({ action: "posted", research: { recorded: 4, failed: 1 } });
+    expect(research.at(-1)).toMatchObject({
+      arm: { name: "angry@anthropic/c:medium" },
+      outcome: { status: "failed", kind: "quota", transcript: [{ type: "model_failed" }] },
+    });
+  });
+
+  it("records a posted review outside the grid as its own arm", async () => {
+    executorRun.mockImplementation(async (i) => ({ ...ok(), model: i.models.length > 1 ? { provider: "openai", id: "x", thinking: "low" } : i.models[0]! }));
+    config.models = [google, anthropic];
+    await reconcilePull(deps(), REPO, 7);
+    expect(research.map((r) => r.arm.name)).toEqual([
+      "none@openai/x:low",
+      "none@google/m:medium",
+      "angry@google/m:medium",
+      "none@anthropic/c:medium",
+      "angry@anthropic/c:medium",
+    ]);
+  });
+
+  it("dry runs record too, marked not live", async () => {
+    config.dryRun = true;
+    const out = await reconcilePull(deps(), REPO, 7);
+    expect(out).toMatchObject({ action: "dry-run", research: { recorded: 4 } });
+    expect(gh.writes).toEqual([]);
+    expect(research.every((r) => !r.live && r.reviewUrl === undefined)).toBe(true);
+  });
+
+  it("runs no arms without consent, on private repos, or when the review fails", async () => {
+    config.research.consent = false;
+    await reconcilePull(deps(), REPO, 7);
+    expect(executorRun).toHaveBeenCalledOnce();
+
+    config.research.consent = true;
+    gh.addPull(makeFacts({ repoPrivate: true, headSha: "b".repeat(40) }));
+    executorRun.mockClear();
+    await reconcilePull(deps(), REPO, 7);
+    expect(executorRun).toHaveBeenCalledOnce();
+
+    gh.addPull(makeFacts({ headSha: "c".repeat(40) }));
+    executorRun.mockReset().mockRejectedValue(new ExecutorError("provider", "boom"));
+    await reconcilePull(deps(), REPO, 7);
+    expect(executorRun).toHaveBeenCalledOnce();
+    expect(research).toEqual([]);
+  });
+});
+
 describe("reconcilePull", () => {
   it("happy path: reacts, signals, reviews, posts, handles threads, concludes, records research", async () => {
     config.autoResolveBotThreads = true;
-    config.research = { consent: true, allowPrivate: false };
+    config.research = { ...config.research, consent: true };
     const out = await reconcilePull(deps(), REPO, 7);
     expect(out).toMatchObject({ action: "posted", event: "APPROVE", headSha: HEAD, decision: { kind: "review" } });
     expect(gh.ops()).toEqual([
@@ -119,12 +207,23 @@ describe("reconcilePull", () => {
     expect(gh.writes.filter((w) => w.op === "resolve")).toEqual([{ op: "resolve", threadId: "T1" }]);
     expect(engineState()).toMatchObject({ firstSeenAt: NOW.toISOString(), attempts: 0 });
     expect(research).toHaveLength(1);
-    expect(research[0]).toMatchObject({ schemaVersion: 2, repo: "o/r", pr: 7, postedArm: "none" });
+    expect(research[0]).toMatchObject({
+      schemaVersion: 2,
+      itemId: `o/r#7@${HEAD}`,
+      repo: "o/r",
+      pr: 7,
+      live: true,
+      posted: true,
+      reviewUrl: expect.any(String),
+      arm: { name: "none@google/m:medium", personality: "none" },
+      outcome: { status: "ok", event: "APPROVE" },
+    });
+    expect(out.research).toEqual({ recorded: 1, failed: 0 });
     expect(await readdir(workDir)).toEqual([]);
   });
 
   it("does not resolve threads unless autoResolveBotThreads, and skips research on private repos", async () => {
-    config.research = { consent: true, allowPrivate: false };
+    config.research = { ...config.research, consent: true };
     gh.addPull(makeFacts({ repoPrivate: true }));
     await reconcilePull(deps(), REPO, 7);
     expect(gh.ops()).not.toContain("resolve");

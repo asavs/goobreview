@@ -13,6 +13,7 @@ import { createGitHubPort } from "./github/index.js";
 import { createLogger } from "./log.js";
 import { composePrompt } from "./prompt.js";
 import { reconcilePull, renderPrompt, sweep, type ReconcileDeps, type ReconcileOutcome } from "./reconcile.js";
+import { createFileResearchSink } from "./research.js";
 import { ciFailureReview, planReview } from "./review.js";
 import { findGuidanceFiles, prepareSnapshot } from "./snapshot.js";
 import type { RepoRef } from "./types.js";
@@ -146,6 +147,9 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env,
       planReview,
       ciFailureReview,
       engineVersion: engineVersion(),
+      ...(config.research.consent
+        ? { research: createFileResearchSink({ dir: config.research.dir, installationId: await installationId(credentialsPath(env)) }) }
+        : {}),
     };
     const outcomes: ReconcileOutcome[] =
       command === "reconcile"

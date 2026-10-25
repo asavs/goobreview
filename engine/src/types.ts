@@ -69,7 +69,7 @@ export interface EngineConfig {
   autoResolveBotThreads: boolean;
   postTrace: boolean;
   dryRun: boolean;
-  research: { consent: boolean; allowPrivate: boolean };
+  research: ResearchConfig;
   /** Directory for snapshots and transcripts; ephemeral is fine. */
   workDir: string;
 }
@@ -372,16 +372,57 @@ export interface GitHubPort {
 }
 
 // ---------------------------------------------------------------------------
-// Research capture (phase 4). Reconcile calls the sink; the default is a no-op.
+// Research capture. With consent, every reviewed head yields one record per
+// arm: the posted review fills the arm it matches, and every other arm runs
+// unposted on the same snapshot. Failures are records too, never gaps.
+
+/** One cell of the research grid: a single model (no fallback) and a personality. */
+export interface ResearchArm {
+  /** "<personality>@<provider>/<id>:<thinking>", stable across runs. */
+  name: string;
+  model: ModelRef;
+  personality: Personality;
+}
+
+export interface ResearchConfig {
+  consent: boolean;
+  allowPrivate: boolean;
+  /** Where the file sink writes records. */
+  dir: string;
+  /** The grid run on every consenting head; [] records only the posted review. */
+  arms: ResearchArm[];
+}
+
+export type ResearchOutcome =
+  | {
+      status: "ok";
+      result: ExecutorResult;
+      /** After the engine's own planning (downgrade rule, inline placement). */
+      event: ReviewEvent;
+      body: string;
+      comments: InlineComment[];
+      notes: string[];
+    }
+  | { status: "failed"; kind: ExecutorErrorKind | "error"; message: string; transcript: TranscriptEntry[] };
 
 export interface ResearchRecord {
   schemaVersion: 2;
+  /** Groups the arms run on one PR head: "owner/repo#N@sha". */
+  itemId: string;
   repo: string;
   pr: number;
   headSha: string;
-  postedArm: Personality;
+  baseSha: string;
+  engineVersion: string;
+  /** False for dry runs, which post nothing. */
+  live: boolean;
+  arm: ResearchArm;
+  /** This arm's review is the one posted (or, in dry run, the one that would be). */
+  posted: boolean;
+  reviewUrl?: string;
+  /** The system prompt carries the personality; consumers that blind must strip it. */
   prompt: ComposedPrompt;
-  result: ExecutorResult;
+  outcome: ResearchOutcome;
 }
 
 export interface ResearchSink {

@@ -6,7 +6,7 @@
 import { chmod, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { evaluateCi } from "./ci.js";
-import { isAllowlisted, policyFor } from "./config.js";
+import { armName, isAllowlisted, modelName, policyFor } from "./config.js";
 import { decide, isSelf, nextState, type StateEvent } from "./decide.js";
 import {
   ExecutorError,
@@ -25,6 +25,9 @@ import {
   type PromptInput,
   type PullRequestFacts,
   type RepoRef,
+  type ResearchArm,
+  type ResearchOutcome,
+  type ResearchRecord,
   type ResearchSink,
   type ReviewEvent,
   type ReviewForm,
@@ -77,6 +80,8 @@ export interface ReconcileOutcome {
   /** Posted (or, in dry run, planned) review event. */
   event?: ReviewEvent;
   reviewUrl?: string;
+  /** Research arms recorded for this head, and how many of them failed. */
+  research?: { recorded: number; failed: number };
 }
 
 const CONCLUSION: Record<ReviewEvent, "success" | "failure" | "neutral"> = {
@@ -292,10 +297,12 @@ async function review(
   let snapshot: Snapshot | undefined;
   try {
     let prompt: ComposedPrompt;
+    let promptInput: PromptInput;
     try {
       snapshot = await deps.prepareSnapshot(gh, repo, facts.headSha, config.workDir, run.log);
       const guidanceFiles = deps.findGuidanceFiles ? await deps.findGuidanceFiles(snapshot) : [];
-      prompt = deps.composePrompt({ facts, snapshot, policy, budgets: config.budgets, ci, guidanceFiles });
+      promptInput = { facts, snapshot, policy, budgets: config.budgets, ci, guidanceFiles };
+      prompt = deps.composePrompt(promptInput);
     } catch (err) {
       return run.fail(decision, "review-failure", `failed to prepare review: ${errMsg(err)}`);
     }
@@ -352,7 +359,8 @@ async function review(
         omissions: prompt.omissions,
         body: payload.body,
       });
-      return run.outcome(decision, "dry-run", undefined, { event: payload.event });
+      const research = await captureResearch(run, promptInput, { prompt, result, planned });
+      return run.outcome(decision, "dry-run", undefined, { event: payload.event, ...(research ? { research } : {}) });
     }
 
     const guard = await run.superseded(decision);
@@ -382,28 +390,101 @@ async function review(
       }
     }
 
-    if (deps.research && config.research.consent && (!facts.repoPrivate || config.research.allowPrivate)) {
-      try {
-        await deps.research.record({
-          schemaVersion: 2,
-          repo: repoName(repo),
-          pr: facts.number,
-          headSha: facts.headSha,
-          postedArm: policy.personality,
-          prompt,
-          result,
-        });
-      } catch (err) {
-        run.log.warn(`${run.name}: research capture failed (continuing)`, { error: err });
-      }
-    }
-
     run.log.info(`${run.name}: posted ${payload.event}`, { ...execution, url: posted.htmlUrl, notes: planned.notes });
-    return run.outcome(decision, "posted", undefined, { event: payload.event, reviewUrl: posted.htmlUrl });
+    const research = await captureResearch(run, promptInput, { prompt, result, planned, reviewUrl: posted.htmlUrl });
+    return run.outcome(decision, "posted", undefined, {
+      event: payload.event,
+      reviewUrl: posted.htmlUrl,
+      ...(research ? { research } : {}),
+    });
   } finally {
     // Only the current run's tree is kept (#166); prepareSnapshot evicts crash leftovers.
     if (snapshot) await removeTree(snapshot.root).catch((err) => run.log.warn(`${run.name}: snapshot cleanup failed`, { error: err }));
   }
+}
+
+const sameModel = (a: ModelRef, b: ModelRef): boolean => modelName(a) === modelName(b);
+
+/**
+ * Records the posted review as the arm it matches (or as an ad-hoc arm when
+ * the policy is outside the grid, e.g. after a fallback), then runs every
+ * other arm unposted on the same snapshot. Arms use a single model with no
+ * fallback, so a quota or availability failure is a failed record, not a
+ * substitution. Capture never affects the posted review.
+ */
+async function captureResearch(
+  run: PrRun,
+  promptInput: PromptInput,
+  posted: { prompt: ComposedPrompt; result: ExecutorResult; planned: PlannedReview; reviewUrl?: string },
+): Promise<{ recorded: number; failed: number } | undefined> {
+  const { deps, facts, repo } = run;
+  const { config } = deps;
+  const sink = deps.research;
+  if (!sink || !config.research.consent || (facts.repoPrivate && !config.research.allowPrivate)) return undefined;
+
+  const engineVersion = deps.engineVersion ?? "dev";
+  const personality = promptInput.policy.personality;
+  const postedArm: ResearchArm = config.research.arms.find(
+    (a) => a.personality === personality && sameModel(a.model, posted.result.model),
+  ) ?? { name: armName(personality, posted.result.model), model: posted.result.model, personality };
+
+  const planned = (p: PlannedReview, result: ExecutorResult): ResearchOutcome => ({
+    status: "ok",
+    result,
+    event: p.payload.event,
+    body: p.payload.body,
+    comments: p.payload.comments,
+    notes: p.notes,
+  });
+  const counts = { recorded: 0, failed: 0 };
+  const save = async (arm: ResearchArm, prompt: ComposedPrompt, outcome: ResearchOutcome, isPosted: boolean): Promise<void> => {
+    const rec: ResearchRecord = {
+      schemaVersion: 2,
+      itemId: `${repoName(repo)}#${facts.number}@${facts.headSha}`,
+      repo: repoName(repo),
+      pr: facts.number,
+      headSha: facts.headSha,
+      baseSha: facts.baseSha,
+      engineVersion,
+      live: !run.dry,
+      arm,
+      posted: isPosted,
+      ...(isPosted && posted.reviewUrl ? { reviewUrl: posted.reviewUrl } : {}),
+      prompt,
+      outcome,
+    };
+    try {
+      await sink.record(rec);
+      counts.recorded++;
+      if (outcome.status === "failed") counts.failed++;
+    } catch (err) {
+      run.log.warn(`${run.name}: research capture failed for ${arm.name} (continuing)`, { error: err });
+    }
+  };
+
+  await save(postedArm, posted.prompt, planned(posted.planned, posted.result), true);
+
+  for (const arm of config.research.arms) {
+    if (arm.name === postedArm.name) continue;
+    const prompt = deps.composePrompt({ ...promptInput, policy: { ...promptInput.policy, personality: arm.personality } });
+    let outcome: ResearchOutcome;
+    try {
+      const result = await deps.executor.run({ prompt, snapshot: promptInput.snapshot, models: [arm.model], limits: config.limits });
+      const p = deps.planReview(result.form, facts, { config, model: result.model, elapsedMs: result.elapsedMs, engineVersion });
+      outcome = planned(p, result);
+      run.log.info(`${run.name}: research arm ${arm.name} -> ${p.payload.event}`, { usage: result.usage, elapsedMs: result.elapsedMs });
+    } catch (err) {
+      outcome = {
+        status: "failed",
+        kind: err instanceof ExecutorError ? err.kind : "error",
+        message: errMsg(err),
+        transcript: err instanceof ExecutorError ? err.transcript : [],
+      };
+      run.log.warn(`${run.name}: research arm ${arm.name} failed`, { kind: outcome.kind, error: outcome.message });
+    }
+    await save(arm, prompt, outcome, false);
+  }
+  return counts;
 }
 
 /** Renders the prompt for one PR without calling a model or writing to GitHub. */

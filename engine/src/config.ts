@@ -3,7 +3,7 @@
 // never silently falls back to a default.
 
 import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   Budgets,
@@ -11,6 +11,7 @@ import type {
   ExecutorLimits,
   ModelRef,
   Personality,
+  ResearchArm,
   RepoPolicy,
   RepoRef,
   ThinkingLevel,
@@ -68,7 +69,7 @@ export function defaultConfig(): EngineConfig {
     autoResolveBotThreads: false,
     postTrace: false,
     dryRun: false,
-    research: { consent: false, allowPrivate: false },
+    research: { consent: false, allowPrivate: false, dir: join(homedir(), ".local", "share", "goobreview", "research"), arms: [] },
     workDir: join(tmpdir(), "goobreview"),
   };
 }
@@ -92,6 +93,9 @@ export function parseModelSpec(spec: string): ModelRef | string {
   }
   return { provider, id, thinking: thinking as ThinkingLevel };
 }
+
+export const modelName = (m: ModelRef): string => `${m.provider}/${m.id}:${m.thinking}`;
+export const armName = (personality: Personality, model: ModelRef): string => `${personality}@${modelName(model)}`;
 
 class Checker {
   readonly problems: string[] = [];
@@ -219,6 +223,31 @@ class Checker {
     return out;
   }
 
+  /** {models, personalities} expands to their cross product, models outermost. */
+  arms(where: string, v: unknown): ResearchArm[] {
+    if (v === undefined) return [];
+    if (!isObject(v)) {
+      this.problems.push(`${where}: expected {models: [...], personalities: [...]}`);
+      return [];
+    }
+    this.keys(where, v, ["models", "personalities"]);
+    const models = this.models(`${where}.models`, v.models, []);
+    if (v.models === undefined) this.problems.push(`${where}.models: required`);
+    const ps = v.personalities;
+    if (!Array.isArray(ps) || ps.length === 0 || !ps.every((p) => PERSONALITIES.includes(p as Personality))) {
+      this.problems.push(`${where}.personalities: expected a non-empty array of ${PERSONALITIES.join(", ")}`);
+      return [];
+    }
+    const out: ResearchArm[] = [];
+    for (const model of models)
+      for (const personality of new Set(ps as Personality[])) {
+        const name = armName(personality, model);
+        if (out.some((a) => a.name === name)) this.problems.push(`${where}: duplicate arm ${name}`);
+        else out.push({ name, model, personality });
+      }
+    return out;
+  }
+
   numbers<T extends object>(where: string, v: unknown, base: T, min: number): T {
     if (v === undefined) return { ...base };
     if (!isObject(v)) {
@@ -281,10 +310,18 @@ export function resolveConfig(raw: unknown): EngineConfig {
   if (raw.research !== undefined) {
     if (!isObject(raw.research)) c.problems.push("research: expected an object");
     else {
-      c.keys("research", raw.research, ["consent", "allowPrivate"]);
+      const r = raw.research;
+      c.keys("research", r, ["consent", "allowPrivate", "dir", "arms"]);
+      let dir = d.research.dir;
+      if (r.dir !== undefined) {
+        if (typeof r.dir !== "string" || r.dir.trim() === "") c.problems.push("research.dir: expected a path");
+        else dir = r.dir;
+      }
       research = {
-        consent: c.bool("research.consent", raw.research.consent, false),
-        allowPrivate: c.bool("research.allowPrivate", raw.research.allowPrivate, false),
+        consent: c.bool("research.consent", r.consent, false),
+        allowPrivate: c.bool("research.allowPrivate", r.allowPrivate, false),
+        dir,
+        arms: c.arms("research.arms", r.arms),
       };
     }
   }
