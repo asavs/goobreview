@@ -1,0 +1,18 @@
+#!/bin/sh
+# Launcher for a single-machine goobreview deployment (see README.md).
+# Settings come from an env file of plain KEY=value lines; nothing secret
+# lives in it, only the path to the App private key.
+set -eu
+
+env_file="${GOOBREVIEW_ENV_FILE:-$HOME/.config/goobreview/env}"
+if [ -r "$env_file" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$env_file"
+  set +a
+fi
+
+home="${GOOBREVIEW_HOME:-/opt/goobreview-v2}"
+export PATH="${GOOBREVIEW_NODE_BIN:-/opt/node/bin}:$PATH"
+export GOOBREVIEW_CONFIG="${GOOBREVIEW_CONFIG:-$HOME/.config/goobreview/config.json}"
+exec node "$home/dist/cli.js" "$@"
