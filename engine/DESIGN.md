@@ -25,6 +25,7 @@ call validated against `ReviewForm`; nothing is parsed out of free text.
 | `src/snapshot.ts` | Download and extract the head tarball; harden it; read `.gitattributes`. |
 | `src/tools.ts` | `read_file`, `grep`, `list_dir` as pi `AgentTool`s confined to the snapshot. |
 | `src/persona.ts` | Load persona pieces (`personas/`) and resolve a spec such as `angry:v1-sigh` to the pieces it switches on. |
+| `src/steering.ts` | Index a persona's steer schedule once; report which messages fall due as tool calls complete. |
 | `src/prompt.ts` | Compose the trusted system prompt and the untrusted PR payload under byte budgets; wrap the payload in the persona. |
 | `src/executor.ts` | Run the pi agent with model fallback, limits, transcript capture; return a validated `ReviewForm`. |
 | `src/review.ts` | Turn a `ReviewForm` into a `PlannedReview`: inline placement against the diff, suggestion demotion, downgrade rule, thread actions, body rendering. |

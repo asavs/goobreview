@@ -10,6 +10,7 @@ import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "@eare
 import { Type, type AssistantMessage, type Model, type Models, type Api } from "@earendil-works/pi-ai";
 import { createModelsCollection, describeCredential } from "./credentials.js";
 import { userMessage } from "./prompt.js";
+import { createSteering } from "./steering.js";
 import { createReadOnlyTools } from "./tools.js";
 import {
   ExecutorError,
@@ -192,23 +193,17 @@ async function runOne(
     },
   });
 
-  agent.subscribe((event) => record(event, transcript, usage));
-
-  // Persona steering: once the Nth snapshot tool call completes, queue the
-  // message; pi delivers it as a user message before the next model request.
-  const due = input.prompt.persona.steer.flatMap((s) => s.afterToolCalls.map((n) => ({ n, text: s.text })));
-  let completedTools = 0;
-  if (due.length > 0) {
-    agent.subscribe((event) => {
-      if (event.type !== "tool_execution_end" || event.toolName === SUBMIT_TOOL || phase !== "main" || form) return;
-      completedTools += 1;
-      for (const d of due) {
-        if (d.n !== completedTools) continue;
-        agent.steer({ role: "user", content: d.text, timestamp: Date.now() });
-        transcript.push(entry("steer", { afterToolCalls: d.n, text: clip(d.text, TRANSCRIPT_TEXT_MAX) }));
-      }
-    });
-  }
+  const steering = createSteering(input.prompt.persona.steer);
+  agent.subscribe((event) => {
+    record(event, transcript, usage);
+    // Persona steering counts snapshot tool calls in the main review only;
+    // pi delivers each queued message before the next model request.
+    if (event.type !== "tool_execution_end" || event.toolName === SUBMIT_TOOL || phase !== "main" || form) return;
+    for (const text of steering.toolCompleted()) {
+      agent.steer({ role: "user", content: text, timestamp: Date.now() });
+      transcript.push(entry("steer", { afterToolCalls: steering.completed, text: clip(text, TRANSCRIPT_TEXT_MAX) }));
+    }
+  });
 
   // Abort the agent on the deadline or the caller's signal, and stop waiting
   // for it too: a provider that ignores its abort signal must not hang the run.
