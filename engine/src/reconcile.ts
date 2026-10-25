@@ -338,10 +338,16 @@ async function review(
       return run.fail(decision, "invalid-review", `failed to plan review: ${errMsg(err)}`);
     }
     const { payload } = planned;
+    const execution = {
+      model: `${result.model.provider}/${result.model.id}`,
+      ...(result.credential ? { credential: result.credential } : {}),
+      usage: result.usage,
+      elapsedMs: result.elapsedMs,
+    };
 
     if (run.dry) {
       run.log.info(`${run.name}: dry run, would post ${payload.event}`, {
-        model: `${result.model.provider}/${result.model.id}`,
+        ...execution,
         comments: payload.comments.length,
         threadActions: planned.threadActions.map((a) => ({ handle: a.thread.handle, kind: a.kind })),
         notes: planned.notes,
@@ -394,7 +400,7 @@ async function review(
       }
     }
 
-    run.log.info(`${run.name}: posted ${payload.event}`, { url: posted.htmlUrl, notes: planned.notes });
+    run.log.info(`${run.name}: posted ${payload.event}`, { ...execution, url: posted.htmlUrl, notes: planned.notes });
     return run.outcome(decision, "posted", undefined, { event: payload.event, reviewUrl: posted.htmlUrl });
   } finally {
     // Only the current run's tree is kept (#166); prepareSnapshot evicts crash leftovers.
