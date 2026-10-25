@@ -204,6 +204,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env,
       const pieces = composed.persona.pieces.map((p) => `${p.id} (${p.slot})`).join(", ") || "(no pieces)";
       const history = composed.persona.history.map((t) => `=== ${t.role} (persona) ===\n${t.text}\n\n`).join("");
       process.stdout.write(`=== persona ===\n${composed.persona.spec}: ${pieces}\n\n=== system ===\n${composed.system}\n\n${history}=== user ===\n${userMessage(composed)}\n`);
+      for (const s of composed.persona.steer) process.stdout.write(`\n=== user (persona, after tool calls ${s.afterToolCalls.join(", ")}) ===\n${s.text}\n`);
       if (composed.omissions.length > 0) process.stdout.write(`\n=== omissions ===\n${composed.omissions.join("\n")}\n`);
       log.info("rendered prompt", { bytes: composed.bytes, omissions: composed.omissions.length });
       return 0;

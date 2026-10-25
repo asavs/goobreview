@@ -25,6 +25,7 @@ call validated against `ReviewForm`; nothing is parsed out of free text.
 | `src/snapshot.ts` | Download and extract the head tarball; harden it; read `.gitattributes`. |
 | `src/tools.ts` | `read_file`, `grep`, `list_dir` as pi `AgentTool`s confined to the snapshot. |
 | `src/persona.ts` | Load persona pieces (`personas/`) and resolve a spec such as `angry:v1-sigh` to the pieces it switches on. |
+| `src/steering.ts` | Index a persona's steer schedule once; report which messages fall due as tool calls complete. |
 | `src/prompt.ts` | Compose the trusted system prompt and the untrusted PR payload under byte budgets; wrap the payload in the persona. |
 | `src/executor.ts` | Run the pi agent with model fallback, limits, transcript capture; return a validated `ReviewForm`. |
 | `src/review.ts` | Turn a `ReviewForm` into a `PlannedReview`: inline placement against the diff, suggestion demotion, downgrade rule, thread actions, body rendering. |
@@ -79,10 +80,14 @@ These were each learned from an incident; the v1 issue number is noted.
 - **Personas are pieces** (`personas/README.md`): small text files, each in
   one slot (`role` heads the system prompt; `history.user` and
   `history.assistant` are earlier turns before the PR message; `before` and
-  `after` wrap the PR data in the user message), switched on by a recipe and
-  toggled per spec. Seeded assistant turns are text only, carry a synthetic
-  provider so pi replays them as plain prior turns on any model, and are never
-  counted as model requests or transcript output.
+  `after` wrap the PR data in the user message; `steer` messages arrive
+  mid-review on a tool-call schedule), switched on by a recipe and toggled
+  per spec. Seeded assistant turns are text only, carry a synthetic provider
+  so pi replays them as plain prior turns on any model, and are never counted
+  as model requests or transcript output. Steer messages go through pi's
+  steering queue after the Nth completed snapshot tool call (never during the
+  nudge), each delivery is a `steer` transcript entry, and every scheduled
+  delivery counts against the prompt budget.
   `angry:v1` is v1's scene byte for byte: the interruption and `User:` above
   the data, the tail ending mid-sentence as the last bytes. Persona text ships
   with the engine and is trusted; the contract, tools, output rules and trust

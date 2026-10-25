@@ -210,3 +210,21 @@ describe("executor: persona turns", () => {
     expect(res.transcript.filter((e) => e.type === "assistant")).toHaveLength(1);
   });
 });
+
+describe("executor: persona steering", () => {
+  it("delivers a steer message after the scheduled tool call, before the next request", async () => {
+    const { fauxes, executor, input } = setup("faux-a");
+    const userTexts: string[][] = [];
+    const read = (path: string) => (ctx: { messages: unknown[] }) => {
+      userTexts.push((ctx.messages as { role: string; content: unknown }[]).filter((m) => m.role === "user").map((m) => String(m.content)));
+      return fauxAssistantMessage(fauxToolCall("read_file", { path }), { stopReason: "toolUse" });
+    };
+    fauxes[0]!.setResponses([read("a"), read("b"), read("c"), (ctx) => (read("x")(ctx), submit(GOOD))]);
+    const persona = { ...noPersona("angry:x"), steer: [{ text: "*ding*", afterToolCalls: [2] }] };
+    const res = await executor.run(input({ prompt: { system: "sys", user: "review this", persona, omissions: [], bytes: 0 } }));
+    expect(res.form.verdict).toBe("APPROVE");
+    // Requests 1-2 see only the PR message; the ding lands after the second tool result, once.
+    expect(userTexts.map((u) => u.filter((t) => t === "*ding*").length)).toEqual([0, 0, 1, 1]);
+    expect(res.transcript.filter((e) => e.type === "steer")).toEqual([expect.objectContaining({ afterToolCalls: 2, text: "*ding*" })]);
+  });
+});
