@@ -3,6 +3,11 @@
     "role": "role",
     "ding": "history.user",
     "my_outburst": "history.assistant",
+    "scene_open": "history.user",
+    "scene_count": "history.assistant",
+    "scene_ding": "history.user",
+    "scene_outburst": "history.assistant",
+    "vow": "history.assistant",
     "outburst": "before",
     "speaker": "before",
     "sigh": "after",
@@ -13,7 +18,8 @@
     "v1": ["role", "outburst", "speaker", "sigh"],
     "turns": ["role", "ding", "my_outburst"],
     "turns_dings": ["role", "ding", "my_outburst", "dings"],
-    "thought": ["role", "outburst", "speaker", "thought"]
+    "thought": ["role", "outburst", "speaker", "thought"],
+    "scene": ["role", "scene_open", "scene_count", "scene_ding", "scene_outburst"]
   },
   "default": "v1"
 }

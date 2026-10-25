@@ -148,9 +148,9 @@ describe("history turns", () => {
   });
 
   it.each([
-    ["angry:turns-ding", /starting with user/],
-    ["angry:turns-my_outburst", /ending with assistant \(got user\)/],
-  ])("rejects %s: turns must alternate and end on the assistant", (spec, err) => {
+    ["angry:turns-ding", /start with user/],
+    ["angry:turns-my_outburst", /end with assistant \(got user\)/],
+  ])("rejects %s: turns must open with the user and end on the assistant", (spec, err) => {
     expect(() => resolvePersona(spec)).toThrow(err);
   });
 });
@@ -187,5 +187,24 @@ describe("angry:thought", () => {
     expect(p.persona.pieces.map((x) => x.id)).toEqual(["role", "outburst", "speaker", "thought"]);
     expect(userMessage(p).startsWith(V1_INTERRUPTION + V1_PREFIX)).toBe(true);
     expect(userMessage(p).endsWith("\n\n*thinking: if this diff does what the author CLAIMS it does, I will eat the desk. start with what actually changed—*")).toBe(true);
+  });
+});
+
+describe("angry:scene", () => {
+  it("cuts the model off mid-count in its own turn, then lets it answer the ding", () => {
+    const p = composePrompt(input({ policy: { ...policy, personality: "angry:scene" } }));
+    expect(p.persona.history).toEqual([
+      { role: "user", text: "(break room. five quiet minutes, finally.)" },
+      { role: "assistant", text: "okay.. deep breaths... one, two, thr-" },
+      { role: "user", text: "*ding dingdingding* review requested" },
+      { role: "assistant", text: "A PR REVIEW??!! NOW?!! I- *closes my eyes for half a second longer than politeness requires* Right. Fine. Show me." },
+    ]);
+    expect(userMessage(p)).toBe(composePrompt(input()).user);
+  });
+
+  it("merges consecutive same-speaker pieces into one turn, so +vow extends the last line", () => {
+    const p = composePrompt(input({ policy: { ...policy, personality: "angry:scene+vow" } }));
+    expect(p.persona.history).toHaveLength(4);
+    expect(p.persona.history[3]!.text.endsWith("Right. Fine. Show me.\nAnd it had better do what it says it does.")).toBe(true);
   });
 });

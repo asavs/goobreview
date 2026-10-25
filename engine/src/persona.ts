@@ -137,20 +137,30 @@ export function resolvePersona(spec: string, dir: string = PERSONAS_DIR): Resolv
         return { ...p, sha256: createHash("sha256").update(text).digest("hex"), text };
       }),
   };
-  // The PR data is the next user message, so seeded turns must alternate,
-  // open with the user and leave the last word to the assistant.
+  // The PR data is the next user message, so seeded turns open with the user
+  // and leave the last word to the assistant. Turns alternate by construction.
   const roles = historyTurns(resolved).map((t) => t.role);
-  if (roles.length > 0 && (roles[0] !== "user" || roles.at(-1) !== "assistant" || roles.some((r, i) => i > 0 && r === roles[i - 1]))) {
-    throw new PersonaError(`persona spec "${spec}": history turns must alternate user/assistant, starting with user and ending with assistant (got ${roles.join(", ")})`);
+  if (roles.length > 0 && (roles[0] !== "user" || roles.at(-1) !== "assistant")) {
+    throw new PersonaError(`persona spec "${spec}": history turns must start with user and end with assistant (got ${roles.join(", ")})`);
   }
   return resolved;
 }
 
-/** Seeded conversation turns, in placement order, before the PR data. */
+/**
+ * Seeded conversation turns, in placement order, before the PR data. Like
+ * every other slot, consecutive pieces with the same speaker join with a
+ * newline, into one turn, so an optional piece can extend a line.
+ */
 export function historyTurns(persona: ResolvedPersona): PersonaTurn[] {
-  return persona.pieces.flatMap((p): PersonaTurn[] =>
-    p.slot === "history.user" ? [{ role: "user" as const, text: p.text }] : p.slot === "history.assistant" ? [{ role: "assistant" as const, text: p.text }] : [],
-  );
+  const turns: PersonaTurn[] = [];
+  for (const p of persona.pieces) {
+    const role = p.slot === "history.user" ? "user" : p.slot === "history.assistant" ? "assistant" : undefined;
+    if (!role) continue;
+    const last = turns.at(-1);
+    if (last?.role === role) last.text += `\n${p.text}`;
+    else turns.push({ role, text: p.text });
+  }
+  return turns;
 }
 
 /** Messages delivered mid-run, each after the given counts of completed tool calls. */

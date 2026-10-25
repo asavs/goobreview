@@ -26,8 +26,9 @@ produces.
 
 Pieces in one slot are joined by newlines, in the order `persona.json` lists
 them; a recipe is a set, so its order does not matter. History pieces are one
-turn each, in that same order, and must alternate, opening with the user and
-ending on the assistant, since the pull request message comes next. A steer
+turn each, in that same order; consecutive pieces with the same speaker join
+into one turn, so an optional piece can extend a line. Turns must open with
+the user and end on the assistant, since the pull request message comes next. A steer
 piece is declared with its schedule, `{"slot": "steer", "afterToolCalls": [5, 15]}`;
 a run that stops reading earlier never receives the later deliveries, and the
 transcript records each one that landed. The reviewer contract,
