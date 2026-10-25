@@ -55,6 +55,7 @@ export interface IndexedRun {
   status: string;
   kind?: string;
   fingerprint?: PromptFingerprint | null;
+  corpus?: { claims?: string | null };
 }
 
 /** Index rows written so far; a torn last line (crash mid-append) is ignored. */
