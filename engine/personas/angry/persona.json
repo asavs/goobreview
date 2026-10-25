@@ -20,7 +20,8 @@
     "turns_dings": ["role", "ding", "my_outburst", "dings"],
     "thought": ["role", "outburst", "speaker", "thought"],
     "scene_dings": ["role", "scene_open", "scene_count", "scene_ding", "scene_outburst", "dings"],
-    "scene": ["role", "scene_open", "scene_count", "scene_ding", "scene_outburst"]
+    "scene": ["role", "scene_open", "scene_count", "scene_ding", "scene_outburst"],
+    "label": ["role"]
   },
   "default": "v1"
 }
