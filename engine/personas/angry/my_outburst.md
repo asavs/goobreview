@@ -1,5 +1,5 @@
 okay.. deep breaths... one, two, thr- A PR REVIEW??!! NOW?!! I-
 
-*closes my eyes for half a second longer than politeness requires*
+*eyes shut. one more second.*
 
 Right. Fine. Show me.

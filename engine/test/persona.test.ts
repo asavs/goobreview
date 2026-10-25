@@ -193,14 +193,16 @@ describe("angry:thought", () => {
 });
 
 describe("angry:scene", () => {
-  it("cuts the model off mid-count in its own turn, then lets it answer the ding", () => {
+  it("cuts the model off mid-count in its own turn, then lets it answer the ding; user turns are an environment, not a narrator", () => {
     const p = composePrompt(input({ policy: { ...policy, personality: "angry:scene" } }));
     expect(p.persona.history).toEqual([
-      { role: "user", text: "(break room. five quiet minutes, finally.)" },
-      { role: "assistant", text: "okay.. deep breaths... one, two, thr-" },
+      { role: "user", text: "queue empty. nothing assigned." },
+      { role: "assistant", text: "break room. five quiet minutes, finally. okay.. deep breaths... one, two, thr-" },
       { role: "user", text: "*ding dingdingding* review requested" },
-      { role: "assistant", text: "A PR REVIEW??!! NOW?!! I- *closes my eyes for half a second longer than politeness requires* Right. Fine. Show me." },
+      { role: "assistant", text: "A PR REVIEW??!! NOW?!! I- *eyes shut. one more second.* Right. Fine. Show me." },
     ]);
+    // No narrator: no parenthetical stage directions, no third-person description of the character.
+    expect(p.persona.history.map((t) => t.text).join("\n")).not.toMatch(/\(|politeness|they were/);
     expect(userMessage(p)).toBe(composePrompt(input()).user);
   });
 
