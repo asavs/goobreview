@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findSecrets, redact, truncateUtf8 } from "../src/redact.js";
+import { findSecrets, redact, redactPatch, truncateUtf8 } from "../src/redact.js";
 
 const gh = "ghp_" + "A1b2C3d4E5".repeat(4);
 
@@ -47,6 +47,19 @@ describe("redact", () => {
   it("is stable across repeated calls (no shared regex state)", () => {
     expect(findSecrets(gh)).toEqual(["github-token"]);
     expect(findSecrets(gh)).toEqual(["github-token"]);
+  });
+});
+
+describe("redactPatch", () => {
+  it("keeps line count and prefixes, and replaces a whole key block", () => {
+    const patch = ["@@ -1 +1,4 @@", "+-----BEGIN RSA PRIVATE KEY-----", "+bodybodybody", "+-----END RSA PRIVATE KEY-----", " after"].join(String.fromCharCode(10));
+    const out = redactPatch(patch).split(String.fromCharCode(10));
+    expect(out).toEqual(["@@ -1 +1,4 @@", "+[REDACTED:private-key]", "+[REDACTED:private-key]", "+[REDACTED:private-key]", " after"]);
+  });
+
+  it("ends an unterminated key block at the next hunk", () => {
+    const patch = ["@@ -1 +1 @@", "+-----BEGIN PRIVATE KEY-----", "+abc", "@@ -9 +9 @@", " fine"].join(String.fromCharCode(10));
+    expect(redactPatch(patch).split(String.fromCharCode(10)).slice(3)).toEqual(["@@ -9 +9 @@", " fine"]);
   });
 });
 

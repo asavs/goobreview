@@ -422,8 +422,8 @@ export interface ResearchRecord {
   reviewUrl?: string;
   /** Set for offline eval runs; scoring joins this to the corpus label. */
   corpus?: { name: string; item: string; variant: string };
-  /** The system prompt carries the personality; consumers that blind must strip it. */
-  prompt: ComposedPrompt;
+  /** The system prompt carries the personality; consumers that blind must strip it. Null when composing it failed. */
+  prompt: ComposedPrompt | null;
   outcome: ResearchOutcome;
 }
 

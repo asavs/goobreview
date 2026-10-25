@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { evaluateCi } from "./ci.js";
 import { armName, isAllowlisted, modelName, policyFor } from "./config.js";
 import { decide, isSelf, nextState, type StateEvent } from "./decide.js";
+import { classifyProviderError } from "./executor.js";
 import {
   ExecutorError,
   repoName,
@@ -17,6 +18,7 @@ import {
   type EngineConfig,
   type EngineState,
   type Executor,
+  type ExecutorInput,
   type ExecutorResult,
   type GitHubPort,
   type Logger,
@@ -139,9 +141,11 @@ class PrRun {
 
   async checkRun(update: Omit<CheckRunUpdate, "state">): Promise<boolean> {
     if (!this.deps.config.checkRunSignal) return true;
-    return this.write(`check run ${update.status}`, () =>
-      this.deps.gh.upsertEngineCheckRun(this.repo, this.facts.headSha, { ...update, state: this.state }),
-    );
+    return this.write(`check run ${update.status}`, async () => {
+      // The adapter returns -1 instead of throwing when the App lacks checks:write.
+      const id = await this.deps.gh.upsertEngineCheckRun(this.repo, this.facts.headSha, { ...update, state: this.state });
+      if (id < 0) throw new Error("check run not persisted (the App needs checks:write)");
+    });
   }
 
   bump(event: StateEvent): void {
@@ -406,6 +410,20 @@ async function review(
 const sameModel = (a: ModelRef, b: ModelRef): boolean => modelName(a) === modelName(b);
 
 /**
+ * One research arm run. Arms have a single model and no fallback, so a
+ * transient availability error (503, overloaded) gets one retry rather than
+ * costing the cell. The record keeps only the retry's transcript and usage.
+ */
+export async function runArm(executor: Executor, input: ExecutorInput): Promise<ExecutorResult> {
+  try {
+    return await executor.run(input);
+  } catch (err) {
+    if (!(err instanceof ExecutorError) || err.kind !== "provider" || !classifyProviderError(err.message).fallback) throw err;
+    return executor.run(input);
+  }
+}
+
+/**
  * Records the posted review as the arm it matches (or as an ad-hoc arm when
  * the policy is outside the grid, e.g. after a fallback), then runs every
  * other arm unposted on the same snapshot. Arms use a single model with no
@@ -437,7 +455,7 @@ async function captureResearch(
     notes: p.notes,
   });
   const counts = { recorded: 0, failed: 0 };
-  const save = async (arm: ResearchArm, prompt: ComposedPrompt, outcome: ResearchOutcome, isPosted: boolean): Promise<void> => {
+  const save = async (arm: ResearchArm, prompt: ComposedPrompt | null, outcome: ResearchOutcome, isPosted: boolean): Promise<void> => {
     const rec: ResearchRecord = {
       schemaVersion: 2,
       itemId: `${repoName(repo)}#${facts.number}@${facts.headSha}`,
@@ -466,10 +484,14 @@ async function captureResearch(
 
   for (const arm of config.research.arms) {
     if (arm.name === postedArm.name) continue;
-    const prompt = deps.composePrompt({ ...promptInput, policy: { ...promptInput.policy, personality: arm.personality } });
+    // Everything per arm is failure-isolated, prompt composition included: the
+    // angry system prompt is longer, so an arm can exceed maxPromptBytes when
+    // the posted review fit.
+    let prompt: ComposedPrompt | null = null;
     let outcome: ResearchOutcome;
     try {
-      const result = await deps.executor.run({ prompt, snapshot: promptInput.snapshot, models: [arm.model], limits: config.limits });
+      prompt = deps.composePrompt({ ...promptInput, policy: { ...promptInput.policy, personality: arm.personality } });
+      const result = await runArm(deps.executor, { prompt, snapshot: promptInput.snapshot, models: [arm.model], limits: config.limits });
       const p = deps.planReview(result.form, facts, { config, model: result.model, elapsedMs: result.elapsedMs, engineVersion });
       outcome = planned(p, result);
       run.log.info(`${run.name}: research arm ${arm.name} -> ${p.payload.event}`, { usage: result.usage, elapsedMs: result.elapsedMs });
