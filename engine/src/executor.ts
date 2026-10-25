@@ -7,7 +7,7 @@
 // one, so the only network peer is the configured model provider.
 
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
-import { Type, type AssistantMessage, type Model, type Models, type Api } from "@earendil-works/pi-ai";
+import { Type, clampThinkingLevel, type AssistantMessage, type Model, type Models, type Api } from "@earendil-works/pi-ai";
 import { createModelsCollection, describeCredential } from "./credentials.js";
 import { userMessage } from "./prompt.js";
 import { createSteering } from "./steering.js";
@@ -24,6 +24,7 @@ import {
   type ModelCredential,
   type ModelRef,
   type ReviewForm,
+  type ThinkingUsed,
   type TranscriptEntry,
 } from "./types.js";
 
@@ -85,8 +86,8 @@ async function runWithFallback(models: Models, log: Logger, input: ExecutorInput
   for (const ref of input.models) {
     try {
       const credential = await describeCredential(models, ref.provider);
-      const form = await runOne(models, ref, credential, input, deadline, transcript, usage);
-      return { form, model: ref, ...(credential ? { credential } : {}), transcript, usage, elapsedMs: Date.now() - started };
+      const { form, thinking } = await runOne(models, ref, credential, input, deadline, transcript, usage);
+      return { form, model: ref, thinking, ...(credential ? { credential } : {}), transcript, usage, elapsedMs: Date.now() - started };
     } catch (err) {
       const e = err instanceof ExecutorError ? err : new ExecutorError("provider", errorText(err), transcript);
       const fallback = (e as FallbackError).fallback === true;
@@ -123,7 +124,7 @@ async function runOne(
   deadline: number,
   transcript: TranscriptEntry[],
   usage: ExecutorResult["usage"],
-): Promise<ReviewForm> {
+): Promise<{ form: ReviewForm; thinking: ThinkingUsed }> {
   const model = models.getModel(ref.provider, ref.id) as Model<Api> | undefined;
   transcript.push(entry("model", { provider: ref.provider, model: ref.id, thinking: ref.thinking, ...(credential ? { credential } : {}) }));
   if (!model) throw new FallbackError("provider", `unknown model ${ref.provider}/${ref.id}`, transcript, true);
@@ -258,7 +259,15 @@ async function runOne(
     input.signal?.removeEventListener("abort", onAbort);
   }
 
-  if (form) return form;
+  if (form) {
+    const reported = lastAssistant(agent)?.providerThinkingLevel;
+    const thinking: ThinkingUsed = {
+      requested: ref.thinking,
+      sent: model.reasoning ? clampThinkingLevel(model, ref.thinking) : "off",
+      ...(reported ? { provider: reported } : {}),
+    };
+    return { form, thinking };
+  }
   if (rejected) throw new ExecutorError("invalid-review", `submitted review failed validation: ${rejected}`, transcript);
   throw new ExecutorError("no-review", "model stopped without calling submit_review", transcript);
 }

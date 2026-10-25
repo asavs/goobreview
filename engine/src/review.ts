@@ -13,6 +13,7 @@ import type {
   ReviewForm,
   ReviewPayload,
   ReviewThread,
+  ThinkingUsed,
   ThreadAction,
 } from "./types.js";
 
@@ -24,6 +25,8 @@ const TRUNCATED_NOTE = "[goobreview: truncated to fit GitHub's size limit.]";
 export interface PlanContext {
   config: EngineConfig;
   model: ModelRef;
+  /** What thinking actually ran; the footer says so when it differs from the request. */
+  thinking?: ThinkingUsed;
   elapsedMs: number;
   engineVersion: string;
 }
@@ -189,7 +192,14 @@ function footerNote(ctx: PlanContext): string {
   const engine = /^\d+\.\d+\.\d+$/.test(v)
     ? `[goobreview ${v}](https://github.com/asavs/goobreview/releases/tag/v${v})`
     : `goobreview ${v || "unknown"}`;
-  return `*${ctx.model.provider}/${ctx.model.id} took ${formatDuration(ctx.elapsedMs)} via ${engine}.*`;
+  return `*${ctx.model.provider}/${ctx.model.id}${thinkingNote(ctx.thinking)} took ${formatDuration(ctx.elapsedMs)} via ${engine}.*`;
+}
+
+/** " (thinking high)", or " (thinking high; asked medium)" when the model ran another level than requested. */
+export function thinkingNote(t: ThinkingUsed | undefined): string {
+  if (!t) return "";
+  const ran = t.provider ?? t.sent;
+  return ran === t.requested ? ` (thinking ${ran})` : ` (thinking ${ran}; asked ${t.requested})`;
 }
 
 function locationOf(f: Finding): string | undefined {

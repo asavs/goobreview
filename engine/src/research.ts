@@ -39,6 +39,7 @@ export function indexRow(rec: StoredResearchRecord, file: string): Record<string
           findings: o.result.form.findings.length,
           blocking: o.result.form.findings.filter((f) => f.blocking).length,
           model: `${o.result.model.provider}/${o.result.model.id}`,
+          ...(o.result.thinking ? { thinking: o.result.thinking } : {}),
           credential: o.result.credential,
           usage: o.result.usage,
           elapsedMs: o.result.elapsedMs,

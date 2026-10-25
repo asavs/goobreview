@@ -342,6 +342,7 @@ async function review(
       planned = deps.planReview(result.form, facts, {
         config,
         model: result.model,
+        ...(result.thinking ? { thinking: result.thinking } : {}),
         elapsedMs: result.elapsedMs,
         engineVersion: deps.engineVersion ?? "dev",
       });
@@ -495,7 +496,7 @@ async function captureResearch(
     try {
       prompt = deps.composePrompt({ ...promptInput, policy: { ...promptInput.policy, personality: arm.personality } });
       const result = await runArm(deps.executor, { prompt, snapshot: promptInput.snapshot, models: [arm.model], limits: config.limits });
-      const p = deps.planReview(result.form, facts, { config, model: result.model, elapsedMs: result.elapsedMs, engineVersion });
+      const p = deps.planReview(result.form, facts, { config, model: result.model, ...(result.thinking ? { thinking: result.thinking } : {}), elapsedMs: result.elapsedMs, engineVersion });
       outcome = planned(p, result);
       run.log.info(`${run.name}: research arm ${arm.name} -> ${p.payload.event}`, { usage: result.usage, elapsedMs: result.elapsedMs });
     } catch (err) {

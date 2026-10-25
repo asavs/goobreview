@@ -343,9 +343,19 @@ export interface ModelCredential {
   rewritesRequests: boolean;
 }
 
+/** The thinking level asked for and what actually ran, which can differ by model. */
+export interface ThinkingUsed {
+  requested: ThinkingLevel;
+  /** The level pi sent after fitting the request to the model (it rounds to the nearest supported level). */
+  sent: string;
+  /** The provider-native level the provider reported using, when it reports one. */
+  provider?: string;
+}
+
 export interface ExecutorResult {
   form: ReviewForm;
   model: ModelRef;
+  thinking?: ThinkingUsed;
   credential?: ModelCredential;
   transcript: TranscriptEntry[];
   usage: { requests: number; inputTokens: number; outputTokens: number; toolCalls: number };
