@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { noPersona } from "./fixtures/prompt-input.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,7 +46,7 @@ let run: ReturnType<typeof vi.fn<(i: ExecutorInput) => Promise<ExecutorResult>>>
 
 const model = (provider: string) => ({ provider, id: "m", thinking: "medium" as const });
 const arms = ["a", "b"].flatMap((p) =>
-  (["none", "angry"] as const).map((personality) => ({ name: `${personality}@${p}/m:medium`, model: model(p), personality })),
+  (["none:plain", "angry:v1"] as const).map((personality) => ({ name: `${personality}@${p}/m:medium`, model: model(p), personality })),
 );
 
 beforeEach(() => {
@@ -84,7 +85,7 @@ const deps = (): EvalDeps => ({
   config,
   executor: { run },
   log: { info: () => {}, warn: () => {}, error: () => {} },
-  composePrompt: (i) => ({ system: `sys:${i.policy.personality}`, user: `${i.facts.title}\n${i.facts.files[0]?.patch}`, omissions: [], bytes: 1 }),
+  composePrompt: (i) => ({ system: `sys:${i.policy.personality}`, user: `${i.facts.title}\n${i.facts.files[0]?.patch}`, persona: noPersona(), omissions: [], bytes: 1 }),
   planReview: (form, facts) => ({ payload: { commitId: facts.headSha, event: form.verdict, body: form.summary, comments: [] }, threadActions: [], notes: [] }),
   research: { record: async (r) => void records.push(r) },
   engineVersion: "test",
@@ -108,7 +109,7 @@ describe("runEval", () => {
     // Arms share one payload; only the system prompt differs. The title names the file only.
     expect(new Set(boundary.map((r) => r.prompt?.user)).size).toBe(1);
     expect(boundary[0]!.prompt?.user.startsWith("Update pkg/calc.py\n@@")).toBe(true);
-    expect(new Set(boundary.map((r) => r.prompt?.system))).toEqual(new Set(["sys:none", "sys:angry"]));
+    expect(new Set(boundary.map((r) => r.prompt?.system))).toEqual(new Set(["sys:none:plain", "sys:angry:v1"]));
     // Single model per arm; snapshots and staging copies are cleaned up.
     expect(run.mock.calls.every(([i]) => i.models.length === 1)).toBe(true);
     expect(readdirSync(config.workDir)).toEqual(["snapshots"]);
@@ -174,7 +175,7 @@ describe("runEval", () => {
       {
         ...base,
         composePrompt: (i) => {
-          if (i.policy.personality === "angry") throw new Error("over maxPromptBytes");
+          if (i.policy.personality === "angry:v1") throw new Error("over maxPromptBytes");
           return base.composePrompt(i);
         },
       },

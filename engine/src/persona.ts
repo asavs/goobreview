@@ -1,0 +1,133 @@
+// Personas as data: pieces of text, each placed in one slot of the
+// conversation, switched on by a recipe and toggled per spec. The format is
+// documented in personas/README.md. Persona text is trusted (it ships with
+// the engine); it never contains PR-authored text.
+
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { PersonaPiece, PieceSlot } from "./types.js";
+
+/** Built-in personas, beside src/ and dist/. */
+export const PERSONAS_DIR = fileURLToPath(new URL("../personas/", import.meta.url));
+
+export const SLOTS: readonly PieceSlot[] = ["role", "before", "after"];
+
+const NAME = /^[a-z][a-z0-9_]*$/;
+const SPEC = /^([a-z][a-z0-9_]*)(?::([a-z0-9_]+))?((?:[+-][a-z][a-z0-9_]*)*)$/;
+
+export class PersonaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PersonaError";
+  }
+}
+
+interface PersonaFile {
+  /** Piece id -> slot, in placement order. */
+  pieces: [string, PieceSlot][];
+  recipes: Map<string, Set<string>>;
+  default: string;
+}
+
+export interface ResolvedPersona {
+  /** Canonical spec: "<name>:<recipe>" then sorted "-off" and "+on" toggles. */
+  spec: string;
+  pieces: (PersonaPiece & { text: string })[];
+}
+
+const cache = new Map<string, PersonaFile & { texts: Map<string, string> }>();
+
+function loadFile(dir: string, name: string): PersonaFile & { texts: Map<string, string> } {
+  const key = path.join(dir, name);
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const where = `persona "${name}"`;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path.join(dir, name, "persona.json"), "utf8"));
+  } catch (err) {
+    throw new PersonaError(`${where}: cannot read persona.json (${(err as Error).message})`);
+  }
+  const obj = raw as Record<string, unknown>;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new PersonaError(`${where}: persona.json must be an object`);
+  for (const k of Object.keys(obj)) {
+    if (!["pieces", "recipes", "default"].includes(k)) throw new PersonaError(`${where}: unknown key "${k}"`);
+  }
+  const piecesRaw = obj.pieces as Record<string, unknown> | undefined;
+  if (typeof piecesRaw !== "object" || piecesRaw === null || Array.isArray(piecesRaw)) throw new PersonaError(`${where}: "pieces" must map piece ids to slots`);
+  const pieces: [string, PieceSlot][] = [];
+  const texts = new Map<string, string>();
+  for (const [id, slot] of Object.entries(piecesRaw)) {
+    if (!NAME.test(id)) throw new PersonaError(`${where}: piece id "${id}" must match ${NAME}`);
+    if (!SLOTS.includes(slot as PieceSlot)) throw new PersonaError(`${where}: piece "${id}" has unknown slot "${String(slot)}" (expected one of ${SLOTS.join(", ")})`);
+    let text: string;
+    try {
+      text = readFileSync(path.join(dir, name, `${id}.md`), "utf8");
+    } catch (err) {
+      throw new PersonaError(`${where}: cannot read piece "${id}" (${(err as Error).message})`);
+    }
+    // One trailing newline is the file's, not the piece's; trailing spaces are kept.
+    texts.set(id, text.replace(/\r\n?/g, "\n").replace(/\n$/, ""));
+    pieces.push([id, slot as PieceSlot]);
+  }
+  const recipesRaw = obj.recipes as Record<string, unknown> | undefined;
+  if (typeof recipesRaw !== "object" || recipesRaw === null || Array.isArray(recipesRaw)) throw new PersonaError(`${where}: "recipes" must map recipe names to piece lists`);
+  const recipes = new Map<string, Set<string>>();
+  for (const [recipe, list] of Object.entries(recipesRaw)) {
+    if (!/^[a-z0-9_]+$/.test(recipe)) throw new PersonaError(`${where}: recipe name "${recipe}" must be lowercase letters, digits and _`);
+    if (!Array.isArray(list) || !list.every((p) => typeof p === "string")) throw new PersonaError(`${where}: recipe "${recipe}" must be a list of piece ids`);
+    for (const p of list) if (!texts.has(p)) throw new PersonaError(`${where}: recipe "${recipe}" names unknown piece "${p}"`);
+    recipes.set(recipe, new Set(list));
+  }
+  if (typeof obj.default !== "string" || !recipes.has(obj.default)) throw new PersonaError(`${where}: "default" must name one of its recipes`);
+  const file = { pieces, recipes, default: obj.default, texts };
+  cache.set(key, file);
+  return file;
+}
+
+/** Parse, load and canonicalise a persona spec. Unknown names, recipes and pieces are errors, never skipped. */
+export function resolvePersona(spec: string, dir: string = PERSONAS_DIR): ResolvedPersona {
+  const m = SPEC.exec(spec);
+  if (!m) throw new PersonaError(`persona spec "${spec}" must look like name[:recipe][+piece|-piece]...`);
+  const [, name, recipeName, toggles] = m as unknown as [string, string, string | undefined, string];
+  const file = loadFile(dir, name);
+  const recipe = recipeName ?? file.default;
+  const base = file.recipes.get(recipe);
+  if (!base) throw new PersonaError(`persona "${name}" has no recipe "${recipe}" (has ${[...file.recipes.keys()].join(", ")})`);
+  const on = new Set(base);
+  const removed: string[] = [];
+  const added: string[] = [];
+  for (const t of toggles.match(/[+-][a-z0-9_]+/g) ?? []) {
+    const id = t.slice(1);
+    if (!file.texts.has(id)) throw new PersonaError(`persona "${name}" has no piece "${id}"`);
+    if (t[0] === "-") {
+      if (!on.has(id)) throw new PersonaError(`persona spec "${spec}": "${id}" is already off`);
+      on.delete(id);
+      removed.push(id);
+    } else {
+      if (on.has(id)) throw new PersonaError(`persona spec "${spec}": "${id}" is already on`);
+      on.add(id);
+      added.push(id);
+    }
+  }
+  const canonical = `${name}:${recipe}${removed.sort().map((id) => `-${id}`).join("")}${added.sort().map((id) => `+${id}`).join("")}`;
+  return {
+    spec: canonical,
+    pieces: file.pieces
+      .filter(([id]) => on.has(id))
+      .map(([id, slot]) => {
+        const text = file.texts.get(id)!;
+        return { id, slot, sha256: createHash("sha256").update(text).digest("hex"), text };
+      }),
+  };
+}
+
+/** Text of one slot: its pieces joined by newlines, or "" when none are on. */
+export function slotText(persona: ResolvedPersona, slot: PieceSlot): string {
+  return persona.pieces
+    .filter((p) => p.slot === slot)
+    .map((p) => p.text)
+    .join("\n");
+}

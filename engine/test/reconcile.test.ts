@@ -1,4 +1,5 @@
 import { chmod, mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { noPersona } from "./fixtures/prompt-input.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,7 +61,7 @@ function deps(over: Partial<ReconcileDeps> = {}): ReconcileDeps {
       return { root, sha, generatedPatterns: [], symlinkStubs: [] };
     },
     findGuidanceFiles: async () => ["AGENTS.md"],
-    composePrompt: (i) => ({ system: `sys:${i.policy.personality}`, user: `pr ${i.facts.number} ${i.guidanceFiles.join()}`, omissions: [], bytes: 10 }),
+    composePrompt: (i) => ({ system: `sys:${i.policy.personality}`, user: `pr ${i.facts.number} ${i.guidanceFiles.join()}`, persona: noPersona(), omissions: [], bytes: 10 }),
     planReview: (form, facts) => ({
       payload: { commitId: facts.headSha, event: form.verdict, body: form.summary, comments: [] },
       threadActions: [
@@ -104,7 +105,7 @@ describe("research arms", () => {
   const anthropic = { provider: "anthropic", id: "c", thinking: "medium" as const };
   const grid = () =>
     [google, anthropic].flatMap((model) =>
-      (["none", "angry"] as const).map((personality) => ({ name: `${personality}@${model.provider}/${model.id}:medium`, model, personality })),
+      (["none:plain", "angry:v1"] as const).map((personality) => ({ name: `${personality}@${model.provider}/${model.id}:medium`, model, personality })),
     );
 
   beforeEach(() => {
@@ -121,28 +122,28 @@ describe("research arms", () => {
     // Arms run on one model each, with the arm's personality in the system prompt only.
     const shadows = executorRun.mock.calls.slice(1).map(([i]) => ({ models: i.models, system: i.prompt.system, user: i.prompt.user }));
     expect(shadows).toEqual([
-      { models: [google], system: "sys:angry", user: "pr 7 AGENTS.md" },
-      { models: [anthropic], system: "sys:none", user: "pr 7 AGENTS.md" },
-      { models: [anthropic], system: "sys:angry", user: "pr 7 AGENTS.md" },
+      { models: [google], system: "sys:angry:v1", user: "pr 7 AGENTS.md" },
+      { models: [anthropic], system: "sys:none:plain", user: "pr 7 AGENTS.md" },
+      { models: [anthropic], system: "sys:angry:v1", user: "pr 7 AGENTS.md" },
     ]);
     expect(research.map((r) => [r.arm.name, r.posted])).toEqual([
-      ["none@google/m:medium", true],
-      ["angry@google/m:medium", false],
-      ["none@anthropic/c:medium", false],
-      ["angry@anthropic/c:medium", false],
+      ["none:plain@google/m:medium", true],
+      ["angry:v1@google/m:medium", false],
+      ["none:plain@anthropic/c:medium", false],
+      ["angry:v1@anthropic/c:medium", false],
     ]);
     expect(new Set(research.map((r) => r.itemId)).size).toBe(1);
   });
 
   it("records a failed arm as a row and leaves the posted review alone", async () => {
     executorRun.mockImplementation(async (i) => {
-      if (i.models[0]!.provider === "anthropic" && i.prompt.system === "sys:angry") throw new ExecutorError("quota", "429", [{ t: "x", type: "model_failed" }]);
+      if (i.models[0]!.provider === "anthropic" && i.prompt.system === "sys:angry:v1") throw new ExecutorError("quota", "429", [{ t: "x", type: "model_failed" }]);
       return { ...ok(), model: i.models[0]! };
     });
     const out = await reconcilePull(deps(), REPO, 7);
     expect(out).toMatchObject({ action: "posted", research: { recorded: 4, failed: 1 } });
     expect(research.at(-1)).toMatchObject({
-      arm: { name: "angry@anthropic/c:medium" },
+      arm: { name: "angry:v1@anthropic/c:medium" },
       outcome: { status: "failed", kind: "quota", transcript: [{ type: "model_failed" }] },
     });
   });
@@ -150,15 +151,15 @@ describe("research arms", () => {
   it("records an arm whose prompt cannot be composed as failed and keeps going", async () => {
     const base = deps();
     const composePrompt: ReconcileDeps["composePrompt"] = (i) => {
-      if (i.policy.personality === "angry") throw new Error("prompt is 999 bytes, over maxPromptBytes=10");
+      if (i.policy.personality === "angry:v1") throw new Error("prompt is 999 bytes, over maxPromptBytes=10");
       return base.composePrompt(i);
     };
     const out = await reconcilePull(deps({ composePrompt }), REPO, 7);
     expect(out).toMatchObject({ action: "posted", research: { recorded: 4, failed: 2 } });
     const failed = research.filter((r) => r.outcome.status === "failed");
     expect(failed.map((r) => [r.arm.name, r.prompt])).toEqual([
-      ["angry@google/m:medium", null],
-      ["angry@anthropic/c:medium", null],
+      ["angry:v1@google/m:medium", null],
+      ["angry:v1@anthropic/c:medium", null],
     ]);
     expect(failed[0]!.outcome).toMatchObject({ kind: "error", message: expect.stringContaining("maxPromptBytes") });
   });
@@ -166,16 +167,16 @@ describe("research arms", () => {
   it("retries an arm once on a transient provider error, not on other errors", async () => {
     let calls = 0;
     executorRun.mockImplementation(async (i) => {
-      if (i.models[0]!.provider === "anthropic" && i.prompt.system === "sys:none" && calls++ === 0) {
+      if (i.models[0]!.provider === "anthropic" && i.prompt.system === "sys:none:plain" && calls++ === 0) {
         throw new ExecutorError("provider", "OpenAI API error (503): upstream connect error");
       }
-      if (i.models[0]!.provider === "anthropic" && i.prompt.system === "sys:angry") throw new ExecutorError("provider", "400 invalid tool schema");
+      if (i.models[0]!.provider === "anthropic" && i.prompt.system === "sys:angry:v1") throw new ExecutorError("provider", "400 invalid tool schema");
       return { ...ok(), model: i.models[0]! };
     });
     const out = await reconcilePull(deps(), REPO, 7);
     expect(out).toMatchObject({ research: { recorded: 4, failed: 1 } });
     expect(executorRun).toHaveBeenCalledTimes(5);
-    expect(research.find((r) => r.arm.name === "none@anthropic/c:medium")?.outcome.status).toBe("ok");
+    expect(research.find((r) => r.arm.name === "none:plain@anthropic/c:medium")?.outcome.status).toBe("ok");
   });
 
   it("records a posted review outside the grid as its own arm", async () => {
@@ -183,11 +184,11 @@ describe("research arms", () => {
     config.models = [google, anthropic];
     await reconcilePull(deps(), REPO, 7);
     expect(research.map((r) => r.arm.name)).toEqual([
-      "none@openai/x:low",
-      "none@google/m:medium",
-      "angry@google/m:medium",
-      "none@anthropic/c:medium",
-      "angry@anthropic/c:medium",
+      "none:plain@openai/x:low",
+      "none:plain@google/m:medium",
+      "angry:v1@google/m:medium",
+      "none:plain@anthropic/c:medium",
+      "angry:v1@anthropic/c:medium",
     ]);
   });
 
@@ -246,7 +247,7 @@ describe("reconcilePull", () => {
       live: true,
       posted: true,
       reviewUrl: expect.any(String),
-      arm: { name: "none@google/m:medium", personality: "none" },
+      arm: { name: "none:plain@google/m:medium", personality: "none:plain" },
       outcome: { status: "ok", event: "APPROVE" },
     });
     expect(out.research).toEqual({ recorded: 1, failed: 0 });

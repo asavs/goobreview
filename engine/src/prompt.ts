@@ -4,7 +4,7 @@
 
 import { matchesGitPattern } from "./snapshot.js";
 import { redact, redactPatch, truncateUtf8 } from "./redact.js";
-import { PERSONALITY_TEXT } from "./prompts/personalities.js";
+import { resolvePersona, slotText } from "./persona.js";
 import {
   guidanceSection,
   omissionMarker,
@@ -13,7 +13,7 @@ import {
   toolsSection,
   trustBoundarySection,
 } from "./prompts/system.js";
-import type { BotReview, ChangedFile, CiState, ComposedPrompt, PromptInput, PullRequestFacts, ReviewThread } from "./types.js";
+import type { BotReview, ChangedFile, CiState, ComposedPersona, ComposedPrompt, PromptInput, PullRequestFacts, ReviewThread } from "./types.js";
 
 export class PromptBudgetError extends Error {
   constructor(
@@ -45,14 +45,32 @@ export const GENERATED_FLOOR = [
 const CHECK_RUNS_SHOWN = 50;
 
 export function composePrompt(input: PromptInput): ComposedPrompt {
-  const system = composeSystem(input);
+  const resolved = resolvePersona(input.policy.personality);
+  const persona: ComposedPersona = {
+    spec: resolved.spec,
+    pieces: resolved.pieces.map(({ id, slot, sha256 }) => ({ id, slot, sha256 })),
+    role: slotText(resolved, "role"),
+    before: slotText(resolved, "before"),
+    after: slotText(resolved, "after"),
+  };
+  const system = composeSystem(input, persona.role);
   const omissions: string[] = [];
   // Redact before rendering and capping, so a cap cannot split a secret into
   // an unrecognisable prefix, and the budget measures what is actually sent.
   const user = composeUser({ ...input, facts: redactFacts(input.facts) }, omissions);
-  const bytes = Buffer.byteLength(system, "utf8") + Buffer.byteLength(user, "utf8");
+  const bytes = Buffer.byteLength(system, "utf8") + Buffer.byteLength(userMessage({ user, persona }), "utf8");
   if (bytes > input.budgets.maxPromptBytes) throw new PromptBudgetError(bytes, input.budgets.maxPromptBytes);
-  return { system, user, omissions, bytes };
+  return { system, user, persona, omissions, bytes };
+}
+
+/**
+ * The user message the model receives: the persona's `before` text on the
+ * lines above the PR data and its `after` text below a blank line, ending
+ * exactly where the piece ends (v1's tail stops mid-sentence on purpose).
+ */
+export function userMessage(p: Pick<ComposedPrompt, "user" | "persona">): string {
+  const { before, after } = p.persona;
+  return (before ? `${before}\n` : "") + p.user + (after ? `\n${after}` : "");
 }
 
 /** PR-authored and GitHub-supplied text with recognisable secrets replaced; tools redact the snapshot side. */
@@ -72,9 +90,9 @@ export function redactFacts(f: PullRequestFacts): PullRequestFacts {
   };
 }
 
-function composeSystem(input: PromptInput): string {
+function composeSystem(input: PromptInput, role: string): string {
   return [
-    PERSONALITY_TEXT[input.policy.personality],
+    ...(role ? [role] : []),
     reviewerContract(),
     toolsSection(),
     outputSection(input.budgets.suggestionMaxLines),

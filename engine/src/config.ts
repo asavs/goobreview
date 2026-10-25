@@ -17,6 +17,7 @@ import type {
   ThinkingLevel,
 } from "./types.js";
 import { repoName } from "./types.js";
+import { resolvePersona } from "./persona.js";
 
 export class ConfigError extends Error {
   constructor(readonly problems: string[]) {
@@ -26,7 +27,6 @@ export class ConfigError extends Error {
 }
 
 const THINKING: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
-const PERSONALITIES: readonly Personality[] = ["none", "angry"];
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PROVIDER_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 
@@ -57,7 +57,7 @@ export function defaultConfig(): EngineConfig {
     repos: [],
     defaults: {
       requiredChecks: [],
-      personality: "none",
+      personality: "none:plain",
       include: { author: false, description: false, commitSubjects: true },
     },
     overrides: {},
@@ -201,11 +201,8 @@ class Checker {
       }
     }
     if (v.personality !== undefined) {
-      if (!PERSONALITIES.includes(v.personality as Personality)) {
-        this.problems.push(`${where}.personality: expected one of ${PERSONALITIES.join(", ")}`);
-      } else {
-        out.personality = v.personality as Personality;
-      }
+      const p = this.persona(`${where}.personality`, v.personality);
+      if (p !== undefined) out.personality = p;
     }
     if (v.include !== undefined) {
       if (!isObject(v.include)) {
@@ -223,6 +220,20 @@ class Checker {
     return out;
   }
 
+  /** A persona spec, loaded and returned in canonical form, so "angry" and "angry:v1" name one arm. */
+  persona(where: string, v: unknown): Personality | undefined {
+    if (typeof v !== "string") {
+      this.problems.push(`${where}: expected a persona spec string`);
+      return undefined;
+    }
+    try {
+      return resolvePersona(v).spec;
+    } catch (err) {
+      this.problems.push(`${where}: ${(err as Error).message}`);
+      return undefined;
+    }
+  }
+
   /** {models, personalities} expands to their cross product, models outermost. */
   arms(where: string, v: unknown): ResearchArm[] {
     if (v === undefined) return [];
@@ -234,13 +245,15 @@ class Checker {
     const models = this.models(`${where}.models`, v.models, []);
     if (v.models === undefined) this.problems.push(`${where}.models: required`);
     const ps = v.personalities;
-    if (!Array.isArray(ps) || ps.length === 0 || !ps.every((p) => PERSONALITIES.includes(p as Personality))) {
-      this.problems.push(`${where}.personalities: expected a non-empty array of ${PERSONALITIES.join(", ")}`);
+    if (!Array.isArray(ps) || ps.length === 0) {
+      this.problems.push(`${where}.personalities: expected a non-empty array of persona specs`);
       return [];
     }
+    const specs = ps.map((p, i) => this.persona(`${where}.personalities[${i}]`, p));
+    if (specs.some((s) => s === undefined)) return [];
     const out: ResearchArm[] = [];
     for (const model of models)
-      for (const personality of new Set(ps as Personality[])) {
+      for (const personality of specs as Personality[]) {
         const name = armName(personality, model);
         if (out.some((a) => a.name === name)) this.problems.push(`${where}: duplicate arm ${name}`);
         else out.push({ name, model, personality });

@@ -1,4 +1,5 @@
 import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall, Type } from "@earendil-works/pi-ai";
+import { noPersona } from "./fixtures/prompt-input.js";
 import { describe, expect, it, vi } from "vitest";
 import { classifyProviderError, createExecutor, validateReviewForm } from "../src/executor.js";
 import { ExecutorError, type ExecutorInput, type ExecutorLimits, type ModelRef } from "../src/types.js";
@@ -30,7 +31,7 @@ function setup(...providers: string[]) {
   const executor = createExecutor({ log, models });
   const refs: ModelRef[] = providers.map((provider) => ({ provider, id: "m", thinking: "off" }));
   const input = (over: Partial<ExecutorInput> = {}): ExecutorInput => ({
-    prompt: { system: "sys", user: "review this", omissions: [], bytes: 0 },
+    prompt: { system: "sys", user: "review this", persona: noPersona(), omissions: [], bytes: 0 },
     snapshot: { root: "/nonexistent", sha: "abc", generatedPatterns: [], symlinkStubs: [] },
     models: refs,
     limits: LIMITS,

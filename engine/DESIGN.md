@@ -24,7 +24,8 @@ call validated against `ReviewForm`; nothing is parsed out of free text.
 | `src/ci.ts` | Pure CI-gate evaluation: check runs + required names → `CiState`. |
 | `src/snapshot.ts` | Download and extract the head tarball; harden it; read `.gitattributes`. |
 | `src/tools.ts` | `read_file`, `grep`, `list_dir` as pi `AgentTool`s confined to the snapshot. |
-| `src/prompt.ts` | Compose the trusted system prompt and the untrusted PR payload under byte budgets. |
+| `src/persona.ts` | Load persona pieces (`personas/`) and resolve a spec such as `angry:v1-sigh` to the pieces it switches on. |
+| `src/prompt.ts` | Compose the trusted system prompt and the untrusted PR payload under byte budgets; wrap the payload in the persona. |
 | `src/executor.ts` | Run the pi agent with model fallback, limits, transcript capture; return a validated `ReviewForm`. |
 | `src/review.ts` | Turn a `ReviewForm` into a `PlannedReview`: inline placement against the diff, suggestion demotion, downgrade rule, thread actions, body rendering. |
 | `src/eval.ts` | Offline eval: the research arms over a known-answer corpus, no GitHub. |
@@ -75,8 +76,16 @@ These were each learned from an incident; the v1 issue number is noted.
 
 ### Prompt
 
+- **Personas are pieces** (`personas/README.md`): small text files, each in
+  one slot (`role` heads the system prompt; `before` and `after` wrap the PR
+  data in the user message), switched on by a recipe and toggled per spec.
+  `angry:v1` is v1's scene byte for byte: the interruption and `User:` above
+  the data, the tail ending mid-sentence as the last bytes. Persona text ships
+  with the engine and is trusted; the contract, tools, output rules and trust
+  boundary are not pieces and are always on. Config specs are loaded and
+  canonicalised at startup, so a missing piece fails the config, not a run.
 - **Trusted/untrusted split:** the system prompt carries the role, the
-  reviewer contract, output rules and personality. PR-authored text (title,
+  reviewer contract and output rules. PR-authored text (title,
   description, commit subjects, prior review text, thread bodies, file
   contents) appears only in the user message, inside clearly delimited blocks,
   and the system prompt says to treat it as data (#18, #101).
@@ -142,7 +151,9 @@ reviewed head yields one `ResearchRecord` (schema v2) per arm:
 - The posted review fills the arm it matches (personality + actual model).
   When it matches none, for example after a fallback, it is recorded as its
   own arm. Every other arm runs unposted on the same snapshot and the same
-  untrusted payload; only the system prompt differs.
+  PR data; only the persona differs. Arm names use the canonical spec
+  (`angry:v1@openai/...`), and each record's prompt stores the persona's
+  pieces with a SHA-256 of each, so an edited line starts a new series.
 - Arms run after the posted review is out, so capture never delays or
   changes it. A head whose posted review fails or is superseded runs no arms;
   its retry does.
@@ -176,5 +187,6 @@ label.json}`) with no GitHub:
 - Records go to the same `research.dir`, marked `live: false`, item ids
   `eval:<corpus>/<item>/<variant>`.
 
-The system prompt in a record carries the personality: anything that blinds
-(judges, uploads) must strip it (#117), and the judge must receive the diff.
+A record's `prompt.persona` holds the persona text by slot (`system` starts
+with `role`; `before` and `after` wrap `user`): anything that blinds (judges,
+uploads) must strip it (#117), and the judge must receive the diff.
