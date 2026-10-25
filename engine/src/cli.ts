@@ -261,7 +261,7 @@ async function runAuth(args: string[], values: Record<string, string | boolean |
     switch (sub) {
       case "status": {
         const config = loadConfig({ ...(values.config ? { file: values.config as string } : {}), env });
-        await authStatus(models, config.models, credentialsFile, io);
+        await authStatus(models, config.models, credentialsFile, io, config.research.arms.map((a) => a.model));
         return 0;
       }
       case "login": {

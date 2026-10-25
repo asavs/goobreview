@@ -4,7 +4,7 @@
 
 import { createInterface } from "node:readline";
 import type { AuthEvent, AuthPrompt, AuthType, LoginOptions, Models } from "@earendil-works/pi-ai";
-import { describeCredential } from "./credentials.js";
+import { createFileCredentialStore, describeCredential } from "./credentials.js";
 import type { ModelRef } from "./types.js";
 
 export interface AuthIO {
@@ -14,11 +14,43 @@ export interface AuthIO {
 
 export class AuthCommandError extends Error {}
 
-export async function authStatus(models: Models, chain: readonly ModelRef[], credentialsFile: string, io: AuthIO): Promise<void> {
+/**
+ * Readiness of every model config names (the review chain, then research
+ * arm models not in it), then every credential stored, by provider, with the
+ * configured models that use it, so a key stored before any model uses it
+ * still shows. Never prints a value.
+ */
+export async function authStatus(
+  models: Models,
+  chain: readonly ModelRef[],
+  credentialsFile: string,
+  io: AuthIO,
+  armModels: readonly ModelRef[] = [],
+): Promise<void> {
   io.out(`credentials file: ${credentialsFile}`);
   io.out("");
   io.out("model chain (tried in order):");
-  for (const [i, ref] of chain.entries()) {
+  await modelLines(models, chain, io);
+  const key = (r: ModelRef) => `${r.provider}/${r.id}`;
+  const extra = [...new Map(armModels.filter((a) => !chain.some((c) => key(c) === key(a))).map((a) => [key(a), a])).values()];
+  if (extra.length > 0) {
+    io.out("");
+    io.out("research arm models (not in the chain):");
+    await modelLines(models, extra, io);
+  }
+  io.out("");
+  io.out("stored credentials:");
+  const stored = await createFileCredentialStore(credentialsFile).list();
+  if (stored.length === 0) io.out("  (none)");
+  for (const c of [...stored].sort((a, b) => a.providerId.localeCompare(b.providerId))) {
+    const users = [...new Set([...chain, ...armModels].filter((r) => r.provider === c.providerId).map(key))];
+    const kind = c.type === "oauth" ? "OAuth" : "API key";
+    io.out(`  ${c.providerId}  ${kind}; ${users.length > 0 ? `used by ${users.join(", ")}` : "used by no configured model"}`);
+  }
+}
+
+async function modelLines(models: Models, refs: readonly ModelRef[], io: AuthIO): Promise<void> {
+  for (const [i, ref] of refs.entries()) {
     const name = `${i + 1}. ${ref.provider}/${ref.id}`;
     if (!models.getModel(ref.provider, ref.id)) {
       io.out(`  ${name}  unknown model`);
