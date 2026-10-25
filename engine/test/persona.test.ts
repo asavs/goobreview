@@ -157,11 +157,13 @@ describe("history turns", () => {
 
 describe("steer pieces", () => {
   it("carry their schedule into the composed persona and the budget", () => {
-    const p = composePrompt(input({ policy: { ...policy, personality: "angry:turns_dings" } }));
-    expect(p.persona.steer).toEqual([{ text: "*ding*", afterToolCalls: [5, 15] }]);
-    expect(p.persona.pieces.find((x) => x.id === "dings")).toMatchObject({ slot: "steer", afterToolCalls: [5, 15] });
-    const without = composePrompt(input({ policy: { ...policy, personality: "angry:turns" } }));
-    expect(p.bytes - without.bytes).toBe(2 * Buffer.byteLength("*ding*"));
+    const p = composePrompt(input({ policy: { ...policy, personality: "angry:scene_dings" } }));
+    // Irrelevant by construction, so it irritates without asking for speed; one early delivery keeps the dose even.
+    const ding = "*ding dingdingding* (a different thread. nothing to do with this PR.)";
+    expect(p.persona.steer).toEqual([{ text: ding, afterToolCalls: [3] }]);
+    expect(p.persona.pieces.find((x) => x.id === "dings")).toMatchObject({ slot: "steer", afterToolCalls: [3] });
+    const without = composePrompt(input({ policy: { ...policy, personality: "angry:scene" } }));
+    expect(p.bytes - without.bytes).toBe(Buffer.byteLength(ding));
     expect(userMessage(p)).toBe(p.user);
   });
 
